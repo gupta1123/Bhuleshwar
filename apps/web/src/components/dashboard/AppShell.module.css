@@ -1,0 +1,30 @@
+.shell {
+  display: flex;
+  height: 100vh;
+  overflow: hidden;
+  background-color: #f7f7f5;
+}
+
+.main {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  background-color: #f7f7f5;
+}
+
+@media (max-width: 768px) {
+  .shell {
+    display: block;
+    overflow: visible;
+    min-height: 100dvh;
+    height: auto;
+    background-color: #f7f7f5;
+  }
+
+  .main {
+    min-height: 100dvh;
+    overflow-y: visible;
+    padding-bottom: calc(5.25rem + env(safe-area-inset-bottom));
+    background-color: #f7f7f5;
+  }
+}

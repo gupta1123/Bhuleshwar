@@ -1,0 +1,24 @@
+{
+  "name": "@autodealer/web",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "24.x",
+    "npm": "11.x"
+  },
+  "scripts": {
+    "dev": "node --use-system-ca ../../node_modules/next/dist/bin/next dev --turbopack --port 3000",
+    "build": "next build --turbopack",
+    "start": "node --use-system-ca ../../node_modules/next/dist/bin/next start",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.6",
+    "typescript": "5.8.2"
+  },
+  "dependencies": {
+    "@fontsource/jetbrains-mono": "^5.3.0",
+    "@fontsource/poppins": "^5.3.0"
+  }
+}

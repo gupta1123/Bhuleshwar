@@ -1,0 +1,40 @@
+;; Kalika Local Agent compact report capability handshake.
+;; Heavy workflow collections are supplied as narrowly scoped request TDL by
+;; the agent so company GUID, financial year, AlterID, date and ledger filters
+;; are bound to every request. This installed report provides version and
+;; compatibility discovery without a broad scan.
+
+[Report : KalikaAgentCapabilities]
+Form : KalikaAgentCapabilities
+
+[Form : KalikaAgentCapabilities]
+Part : KalikaAgentCapabilities
+XML Tag : KALIKAAGENT
+
+[Part : KalikaAgentCapabilities]
+Line : KalikaAgentCapabilityVersion, KalikaAgentCapabilityCompany, KalikaAgentCapabilityFinancialYear, KalikaAgentCapabilityReports
+
+[Line : KalikaAgentCapabilityVersion]
+Field : KalikaAgentCapabilityVersion
+[Field : KalikaAgentCapabilityVersion]
+Set As : 1
+XML Tag : VERSION
+
+[Line : KalikaAgentCapabilityCompany]
+Field : KalikaAgentCapabilityCompany
+[Field : KalikaAgentCapabilityCompany]
+Set As : $GUID:Company:##SVCurrentCompany
+XML Tag : COMPANYGUID
+
+[Line : KalikaAgentCapabilityFinancialYear]
+Field : KalikaAgentCapabilityFinancialYear
+[Field : KalikaAgentCapabilityFinancialYear]
+Set As : $$String:##SVFromDate + "-" + $$String:##SVToDate
+XML Tag : FINANCIALYEAR
+
+[Line : KalikaAgentCapabilityReports]
+Field : KalikaAgentCapabilityReports
+[Field : KalikaAgentCapabilityReports]
+Set As : "KalikaChangedMasters,KalikaOpenBills,KalikaWorkflowVouchers,KalikaVoucherIdentity"
+XML Tag : REPORTS
+

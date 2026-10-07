@@ -1,0 +1,12 @@
+{
+  "companyName": "Kalika Test",
+  "voucherType": "Receipt",
+  "voucherDate": "2026-06-04",
+  "bankLedgerName": "Local Test Bank",
+  "counterpartyLedgerName": "Suspense",
+  "counterpartyIsPartyLedger": true,
+  "bankLedgerEntryIsDebit": true,
+  "amount": 250,
+  "narration": "INTEREST CREDIT",
+  "referenceNumber": "INT-HDFC-4703"
+}

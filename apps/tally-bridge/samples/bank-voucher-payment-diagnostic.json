@@ -1,0 +1,12 @@
+{
+  "companyName": "Kalika Test",
+  "voucherType": "Payment",
+  "voucherDate": "2026-06-03",
+  "bankLedgerName": "Local Test Bank",
+  "counterpartyLedgerName": "Suspense",
+  "counterpartyIsPartyLedger": true,
+  "bankLedgerEntryIsDebit": false,
+  "amount": 118,
+  "narration": "BANK CHARGES GST",
+  "referenceNumber": "CHG-HDFC-4503"
+}

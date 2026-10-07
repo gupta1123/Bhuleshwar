@@ -1,0 +1,44 @@
+;; Kalika native Debit Note exporter for TallyPrime.
+;;
+;; This add-on is invoked by the Kalika connector, never by a user navigating
+;; Tally screens. The connector supplies the voucher MasterID and a PDF path.
+;; The print report is bound to that MasterID, so the currently visible Tally
+;; screen cannot change which document is exported.
+
+[Variable : KalikaVoucherMasterID]
+Type : String
+
+[Variable : KalikaDebitNotePdfPath]
+Type : String
+
+[Report : Kalika Native Debit Note Print]
+Form   : VCH Display
+Object : Voucher : "ID:" + ##KalikaVoucherMasterID
+
+[Report : Kalika Native Debit Note Export Trigger]
+Form     : Kalika Native Debit Note Export Trigger
+Variable : KalikaVoucherMasterID, KalikaDebitNotePdfPath
+;; Report events require an explicit condition between the event and action.
+;; `Yes` makes this non-interactive trigger run as soon as Tally loads it.
+On : Load : Yes : Call : Kalika Export Native Debit Note PDF
+
+;; Tally's HTTP report runner still instantiates a form, even though the
+;; report only performs a background export.  Keep that form deliberately
+;; empty: it is never shown because the export action suppresses UI.
+[Form : Kalika Native Debit Note Export Trigger]
+Part : Kalika Native Debit Note Export Trigger
+
+[Part : Kalika Native Debit Note Export Trigger]
+Line : Kalika Native Debit Note Export Trigger
+
+[Line : Kalika Native Debit Note Export Trigger]
+Field : Kalika Native Debit Note Export Trigger
+
+[Field : Kalika Native Debit Note Export Trigger]
+Set As : ""
+
+[Function : Kalika Export Native Debit Note PDF]
+00 : SET : SVPrintFileName : ##KalikaDebitNotePdfPath
+10 : SET : SVExportFormat : $$SysName:PDF
+20 : SET : SVOutputType : "Export Button"
+30 : EXPORT REPORT : Kalika Native Debit Note Print : Yes

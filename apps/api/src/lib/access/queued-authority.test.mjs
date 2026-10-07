@@ -1,0 +1,8 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import {assertQueuedResource,QueuedAccessDenied} from './queued-authority.mjs';
+const input={actorId:'initiating-user',resourceType:'case',resourceId:'case-id',permission:'purchases.prepare'};
+function fake(result={data:{organization_id:'org',company_id:'company'}},error=null){let reads=0;return{get reads(){return reads;},from(){reads++;return {select(){return this;},eq(){return this;},async maybeSingle(){return result;}};},async rpc(name,args){assert.equal(name,'access_assert_permission');assert.equal(args.p_actor,'initiating-user');return {error};}};}
+test('legacy work does not query access tables',async()=>{const db=fake();assert.equal(await assertQueuedResource(db,input,false),null);assert.equal(db.reads,0);});
+test('queued work rechecks live authority each execution',async()=>{const db=fake();await assertQueuedResource(db,input,true);await assertQueuedResource(db,input,true);assert.equal(db.reads,2);});
+test('suspended, unmapped and unclassified work is denied',async()=>{await assert.rejects(assertQueuedResource(fake(undefined,{code:'42501'}),input,true),QueuedAccessDenied);await assert.rejects(assertQueuedResource(fake({data:null}),input,true),QueuedAccessDenied);await assert.rejects(assertQueuedResource(fake({data:{organization_id:'org',company_id:null}}),input,true),QueuedAccessDenied);});
+test('infrastructure failure is not treated as legacy access or a permanent revocation',async()=>{await assert.rejects(assertQueuedResource(fake({error:{code:'42P01'}}),input,true),e=>!(e instanceof QueuedAccessDenied)&&/unavailable/.test(e.message));});

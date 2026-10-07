@@ -1,0 +1,27 @@
+;; Kalika Purchase voucher source-document integration for TallyPrime.
+;;
+;; The source PDF remains in Kalika-managed document storage. These UDFs
+;; persist the exact document path, display name, checksum, and document ID
+;; with the Purchase voucher so the source can be opened from Tally.
+
+[System : UDF]
+KalikaSourceDocumentPath   : String : 30001
+KalikaSourceDocumentName   : String : 30002
+KalikaSourceDocumentSha256 : String : 30003
+KalikaSourceDocumentId     : String : 30004
+KalikaVehicleNumber        : String : 30005
+
+[#Form : VCH Display]
+Add : Button : KalikaOpenPurchasePdf
+
+[#Form : Voucher]
+Add : Button : KalikaOpenPurchasePdf
+
+;; Keep this identifier short and unique. Button definitions are represented
+;; internally as Key definitions by Tally; long names ending in a numeric UDF
+;; index are parsed as an invalid Button/Key reference on some Tally releases.
+[Button : KalikaOpenPurchasePdf]
+Title    : "Open Source PDF"
+Key      : Ctrl + Alt + D
+Action   : Browse URL : $KalikaSourceDocumentPath
+Inactive : $$IsEmpty:$KalikaSourceDocumentPath

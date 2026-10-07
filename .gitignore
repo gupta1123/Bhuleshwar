@@ -1,0 +1,19 @@
+# Local secrets and environment files
+.env
+.env.*
+!.env.example
+
+# Dependencies and generated output
+node_modules/
+.next/
+.next-build/
+dist/
+build/
+
+# Supabase CLI local state
+supabase/.temp/
+supabase/.branches/
+
+# Local logs and OS files
+*.log
+.DS_Store

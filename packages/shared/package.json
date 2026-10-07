@@ -1,0 +1,20 @@
+{
+  "name": "@autodealer/shared",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    "./lib/followup-pipeline": "./src/lib/followup-pipeline.ts",
+    "./lib/reminder-preset": "./src/lib/reminder-preset.ts",
+    "./lib/access": "./src/lib/access.ts",
+    "./lib/access-routes": "./src/lib/access-routes.ts",
+    "./lib/collections-query": "./src/lib/collections-query.ts",
+    "./lib/case-summary": "./src/lib/case-summary.ts",
+    "./lib/purchase-voucher": "./src/lib/purchase-voucher.ts",
+    "./lib/comparison": "./src/lib/comparison.ts",
+    "./lib/document-schema": "./src/lib/document-schema.ts",
+    "./lib/recycle-bin": "./src/lib/recycle-bin.ts",
+    "./lib/upload-groups": "./src/lib/upload-groups.ts",
+    "./types/pipeline": "./src/types/pipeline.ts"
+  }
+}

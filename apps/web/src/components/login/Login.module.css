@@ -1,0 +1,549 @@
+/* =========================================
+   Fonts (loaded via Next.js layout already,
+   but we reference them here for reference)
+   ========================================= */
+
+/* =========================================
+   Base Layout
+   ========================================= */
+.page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+  background-color: #f9f9f9;
+}
+
+@media (min-width: 1024px) {
+  .page {
+    flex-direction: row;
+    height: 100vh;
+  }
+}
+
+/* =========================================
+   LEFT PANEL — Dark Engine
+   ========================================= */
+.leftPanel {
+  display: none;
+  position: relative;
+  flex-direction: column;
+  justify-content: space-between;
+  padding: 3.5rem 4rem;
+  background-color: #0a0a0a;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.025) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.025) 1px, transparent 1px);
+  background-size: 60px 60px;
+  overflow: hidden;
+}
+
+@media (min-width: 1024px) {
+  .leftPanel {
+    display: flex;
+    flex: 1.1;
+    align-items: flex-start;
+  }
+}
+
+/* Brand */
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  z-index: 2;
+}
+
+.brandMark {
+  width: 24px;
+  height: 24px;
+  background: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.brandDot {
+  width: 8px;
+  height: 8px;
+  background: #0a0a0a;
+  border-radius: 50%;
+  animation: pulse 2s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.6; transform: scale(0.85); }
+}
+
+.brandName {
+  font-size: 1.75rem;
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.04em;
+  line-height: 1;
+}
+
+/* ── Document Stack ── */
+.docStackWrapper {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  /* centering only — JS float is applied to the inner .docStackInner */
+  transform: translate(-50%, -50%);
+  width: 320px;
+  height: 430px;
+  z-index: 1;
+}
+
+.docStackInner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+.docLayer {
+  position: absolute;
+  inset: 0;
+  background: #151515;
+  border: 1px solid #333333;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+}
+
+.docLayerBack1 {
+  opacity: 0.3;
+  transform: rotate(-6deg) translate(-12px, -6px);
+  z-index: 0;
+}
+
+.docLayerBack2 {
+  opacity: 0.6;
+  transform: rotate(3deg) translate(6px, 3px);
+  z-index: 1;
+}
+
+.docLayerFront {
+  z-index: 2;
+  background: #111111;
+  border-color: #4a4a4a;
+  padding: 1.75rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  position: relative;
+}
+
+/* Scan line */
+.scanLine {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 2px;
+  background: #eb4b2b;
+  box-shadow: 0 0 20px #eb4b2b, 0 0 40px rgba(235, 75, 43, 0.3);
+  z-index: 10;
+  opacity: 0;
+}
+
+/* Doc header row */
+.docHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-bottom: 1px solid #2a2a2a;
+  padding-bottom: 0.875rem;
+  margin-bottom: 1.25rem;
+}
+
+.docId {
+  font-family: var(--font-app-mono);
+  font-size: 0.625rem;
+  color: #666666;
+  letter-spacing: 0.04em;
+}
+
+.docBadge {
+  font-family: var(--font-app-mono);
+  font-size: 0.55rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  color: #3d5a80;
+  background: rgba(61, 90, 128, 0.12);
+  border: 1px solid rgba(61, 90, 128, 0.3);
+  padding: 2px 6px;
+  border-radius: 2px;
+}
+
+/* Fake content */
+.docLines {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  flex: 1;
+  opacity: 0.5;
+}
+
+.docLine {
+  height: 6px;
+  background: #3a3a3a;
+  border-radius: 2px;
+}
+
+.docBoxRow {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+
+.docBox {
+  height: 56px;
+  border: 1px solid #2a2a2a;
+  border-radius: 2px;
+}
+
+/* Extraction bar */
+.extraction {
+  margin-top: auto;
+  padding-top: 1.25rem;
+}
+
+.extractionLabel {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-family: var(--font-app-mono);
+  font-size: 0.6rem;
+  color: #666666;
+  letter-spacing: 0.04em;
+  margin-bottom: 0.5rem;
+}
+
+.extractionPing {
+  width: 8px;
+  height: 8px;
+  background: #eb4b2b;
+  border-radius: 50%;
+  animation: pingPulse 1.2s ease-in-out infinite;
+}
+
+@keyframes pingPulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.4; transform: scale(0.7); }
+}
+
+.progressTrack {
+  width: 100%;
+  height: 4px;
+  background: #222222;
+  border-radius: 99px;
+  overflow: hidden;
+}
+
+.progressBar {
+  height: 100%;
+  width: 0%;
+  background: #eb4b2b;
+  border-radius: 99px;
+}
+
+/* Left footer copy */
+.leftFooter {
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.leftHeading {
+  font-size: clamp(1.4rem, 2.4vw, 2rem);
+  font-weight: 700;
+  color: #ffffff;
+  letter-spacing: -0.04em;
+  line-height: 1.2;
+}
+
+.leftAccent {
+  color: #3d5a80;
+}
+
+.leftMeta {
+  display: flex;
+  gap: 1.25rem;
+  font-family: var(--font-app-mono);
+  font-size: 0.6rem;
+  color: #555555;
+  letter-spacing: 0.06em;
+}
+
+/* =========================================
+   RIGHT PANEL — Light Form
+   ========================================= */
+.rightPanel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  background-color: #f9f9f9;
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+  padding: 2rem 1.5rem;
+  position: relative;
+}
+
+/* Status strip */
+.statusStrip {
+  position: absolute;
+  top: 1.5rem;
+  right: 1.5rem;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.statusDot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #22c55e;
+}
+
+.statusText {
+  font-size: 0.625rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #999999;
+}
+
+/* ── Brutalist Card ── */
+.card {
+  position: relative;
+  width: 100%;
+  max-width: 400px;
+  background: #ffffff;
+  border: 1px solid #000000;
+  box-shadow: 8px 8px 0 #000000;
+  padding: 2.5rem;
+  animation: cardIn 0.5s cubic-bezier(0.16, 1, 0.3, 1) 0.1s both;
+}
+
+@keyframes cardIn {
+  from { opacity: 0; transform: translateY(16px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Corner marks */
+.corner {
+  position: absolute;
+  width: 9px;
+  height: 9px;
+  border: 1.5px solid #000000;
+}
+
+.cornerTL { top: -1px; left: -1px; border-right: none; border-bottom: none; }
+.cornerTR { top: -1px; right: -1px; border-left: none; border-bottom: none; }
+.cornerBL { bottom: -1px; left: -1px; border-right: none; border-top: none; }
+.cornerBR { bottom: -1px; right: -1px; border-left: none; border-top: none; }
+
+/* Card header */
+.cardHeader {
+  margin-bottom: 2rem;
+}
+
+.cardTitle {
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: #111111;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  margin-bottom: 0.5rem;
+}
+
+.cardSub {
+  font-size: 0.875rem;
+  color: #666666;
+  line-height: 1.5;
+}
+
+/* ── Form ── */
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 0.375rem;
+}
+
+.fieldLabel {
+  font-family: var(--font-app-mono);
+  font-size: 0.625rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: #666666;
+}
+
+.input {
+  width: 100%;
+  background: #fafafa;
+  border: 1px solid #dddddd;
+  border-radius: 0;
+  padding: 0.75rem 1rem;
+  font-size: 0.875rem;
+  font-family: inherit;
+  color: #111111;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, border-left 0.1s ease;
+  outline: none;
+  appearance: none;
+}
+
+.input::placeholder {
+  color: #aaaaaa;
+}
+
+.input:focus {
+  border-color: #111111;
+  background: #ffffff;
+  border-left: 4px solid #eb4b2b;
+  box-shadow: 4px 4px 0 rgba(235, 75, 43, 0.12);
+}
+
+/* Password input has right padding for eye btn */
+.inputWrap {
+  position: relative;
+}
+
+.inputPassword {
+  padding-right: 2.75rem;
+}
+
+.eyeBtn {
+  position: absolute;
+  right: 0.75rem;
+  top: 50%;
+  transform: translateY(-50%);
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: #999999;
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  transition: color 0.15s ease;
+}
+
+.eyeBtn:hover {
+  color: #111111;
+}
+
+/* Submit button */
+.submitBtn {
+  width: 100%;
+  background: #111111;
+  color: #ffffff;
+  border: 1px solid #111111;
+  padding: 0.875rem 1rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  transition: transform 0.1s ease, box-shadow 0.1s ease, background 0.1s ease;
+  box-shadow: 2px 2px 0 rgba(0, 0, 0, 0.2);
+  border-radius: 0;
+  margin-top: 0.25rem;
+}
+
+.submitBtn:hover:not(:disabled) {
+  transform: translate(-2px, -2px);
+  box-shadow: 6px 6px 0 #eb4b2b;
+  background: #000000;
+}
+
+.submitBtn:active:not(:disabled) {
+  transform: translate(0, 0);
+  box-shadow: 0 0 0;
+}
+
+.submitBtn:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+}
+
+.spinIcon {
+  animation: spin 0.8s linear infinite;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
+/* ── Feedback banners ── */
+.feedback {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  margin-top: 1rem;
+  padding: 0.75rem 0.875rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  border-radius: 0;
+  animation: cardIn 0.2s ease both;
+}
+
+.feedbackIcon {
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.feedbackSuccess {
+  border: 1px solid #bbf7d0;
+  background: #f0fdf4;
+  color: #047857;
+}
+
+.feedbackError {
+  border: 1px solid #fecaca;
+  background: #fef2f2;
+  color: #b91c1c;
+}
+
+/* ── Footer ── */
+.pageFooter {
+  margin-top: 2rem;
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.footerLink {
+  font-size: 0.75rem;
+  color: #999999;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.15s ease;
+}
+
+.footerLink:hover {
+  color: #111111;
+}
+
+.footerDot {
+  color: #cccccc;
+  font-size: 0.75rem;
+}

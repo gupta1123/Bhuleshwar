@@ -1,0 +1,29 @@
+{
+  "name": "@autodealer/api",
+  "version": "1.0.0",
+  "private": true,
+  "dependencies": {
+    "@firecrawl/anydoc": "^0.1.9",
+    "pg": "^8.23.0"
+  },
+  "optionalDependencies": {
+    "@firecrawl/anydoc-linux-x64-gnu": "0.1.9"
+  },
+  "engines": {
+    "node": "24.x",
+    "npm": "11.x"
+  },
+  "scripts": {
+    "dev": "node --use-system-ca ../../node_modules/next/dist/bin/next dev --turbopack --port 3001",
+    "build": "next build --turbopack",
+    "start": "node --use-system-ca server.mjs",
+    "lint": "eslint .",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "worker": "node --use-system-ca ./worker/process-packet-jobs.mjs",
+    "worker:local": "node --use-system-ca --env-file=.env ./worker/process-packet-jobs.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "20.17.6",
+    "typescript": "5.8.2"
+  }
+}

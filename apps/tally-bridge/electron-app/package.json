@@ -1,0 +1,110 @@
+{
+  "name": "kalika-local-agent",
+  "productName": "Kalika Local Agent",
+  "version": "1.2.28",
+  "description": "Secure local workflow agent connecting Kalika to Tally Prime.",
+  "author": "Kalika",
+  "private": true,
+  "type": "module",
+  "main": "main.mjs",
+  "scripts": {
+    "dist": "electron-builder --win nsis --x64",
+    "pack": "electron-builder --dir --win --x64"
+  },
+  "dependencies": {
+    "@autodealer/tally-bridge": "file:../../../apps/tally-bridge",
+    "@firecrawl/anydoc": "0.2.4",
+    "@zvec/zvec": "0.7.1",
+    "better-sqlite3-multiple-ciphers": "12.11.1",
+    "electron-updater": "6.8.9",
+    "ws": "8.21.1"
+  },
+  "optionalDependencies": {
+    "@zvec/bindings-win32-x64": "0.7.1"
+  },
+  "devDependencies": {
+    "electron": "42.11.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.kalika.local-agent",
+    "productName": "Kalika Local Agent",
+    "artifactName": "KalikaLocalAgent-${version}-${arch}.${ext}",
+    "directories": {
+      "output": "../output"
+    },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "update-state.mjs",
+      "backup-retention.mjs",
+      "package.json",
+      "node_modules/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "../../../apps/tally-bridge/tdl",
+        "to": "tdl",
+        "filter": [
+          "*.tdl"
+        ]
+      },
+      {
+        "from": "../../../apps/tally-bridge/powershell",
+        "to": "powershell",
+        "filter": [
+          "*.ps1"
+        ]
+      },
+      {
+        "from": "../../../apps/api/worker",
+        "to": "bank-statement-worker",
+        "filter": [
+          "bank-statement-deterministic.mjs",
+          "bank-statement-account.mjs",
+          "bank-statement-markdown-amounts.mjs",
+          "bank-statement-running-balance.mjs",
+          "bank-statement-resilience.mjs",
+          "bank-statement-pdf-columns.mjs"
+        ]
+      }
+    ],
+    "npmRebuild": false,
+    "asar": true,
+    "asarUnpack": [
+      "node_modules/better-sqlite3-multiple-ciphers/**/*",
+      "node_modules/@firecrawl/anydoc/**/*",
+      "node_modules/@zvec/zvec/**/*",
+      "node_modules/@zvec/bindings-win32-x64/**/*"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "signAndEditExecutable": true
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": true,
+      "allowToChangeInstallationDirectory": true,
+      "deleteAppDataOnUninstall": false,
+      "include": "../nsis/local-agent.nsh",
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Kalika Local Agent"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "gupta1123",
+        "repo": "autodealer-workflow",
+        "releaseType": "release"
+      }
+    ]
+  }
+}

@@ -1731,7 +1731,7 @@ export function preparePurchasePosting(params: {
     warnings.push(issue(
       "INVOICE_LINES_RECOVERED_FROM_LINKED_DOCUMENT",
       "Item details came from another matching document",
-      `The invoice did not contain readable item rows, so Kalika used the matching ${linkedLineSource.document_type}. Check the item details against the invoice before approval.`,
+      `The invoice did not contain readable item rows, so Bhuleshwar used the matching ${linkedLineSource.document_type}. Check the item details against the invoice before approval.`,
       "line"
     ));
   }
@@ -1790,7 +1790,7 @@ export function preparePurchasePosting(params: {
     blockers.push(issue(
       "TALLY_MASTERS_STALE",
       "Tally data is being refreshed",
-      "Kalika is loading the latest ledgers and stock items from the selected company. Try again if the refresh does not finish.",
+      "Bhuleshwar is loading the latest ledgers and stock items from the selected company. Try again if the refresh does not finish.",
       "company"
     ));
   }
@@ -2082,7 +2082,7 @@ export function preparePurchasePosting(params: {
     blockers.push(issue(
       "SCRAP_GST_TDS_DISABLED",
       "Enable GST TDS for this metal-scrap purchase",
-      "This registered-party MS Scrap purchase exceeds ₹2.5 lakh. Enable GST TDS in Purchase accounting settings so Kalika can withhold 1% CGST + 1% SGST, or 2% IGST.",
+      "This registered-party MS Scrap purchase exceeds ₹2.5 lakh. Enable GST TDS in Purchase accounting settings so Bhuleshwar can withhold 1% CGST + 1% SGST, or 2% IGST.",
       "tax"
     ));
   } else if (
@@ -2156,7 +2156,7 @@ export function preparePurchasePosting(params: {
       warnings.push(issue(
         "TDS_194Q_USER_CONFIRMED",
         "Section 194Q enabled for this voucher",
-        `Kalika calculated ₹${calculation.tds194qAmount} at ${review.tds194qRate}% on ₹${calculation.tds194qBasisAmount}. Eligibility was confirmed by the reviewer, not inferred from this invoice.`,
+        `Bhuleshwar calculated ₹${calculation.tds194qAmount} at ${review.tds194qRate}% on ₹${calculation.tds194qBasisAmount}. Eligibility was confirmed by the reviewer, not inferred from this invoice.`,
         "tax"
       ));
     }

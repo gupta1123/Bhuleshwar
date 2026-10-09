@@ -131,7 +131,7 @@ export async function POST(request: Request) {
         request,
         {
             error:
-              "Connector update required. Install and reconnect using the latest Kalika Tally Connector.",
+              "Connector update required. Install and reconnect using the latest Bhuleshwar Tally Connector.",
         },
         { status: 426 }
       );

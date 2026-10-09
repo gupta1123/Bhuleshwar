@@ -730,7 +730,7 @@ export async function POST(
         // an older non-numeric value is repaired after the reference check below.
         const existingVoucherId = proposal.tally_voucher_id?.trim();
         if (existingVoucherId && /^\d+$/.test(existingVoucherId) && existingVoucherId !== voucherId.trim()) {
-          throw new Error("The exported Tally PDF belongs to a different Debit Note than the one created by Kalika.");
+          throw new Error("The exported Tally PDF belongs to a different Debit Note than the one created by Bhuleshwar.");
         }
         if (requestedReference && (!reference || requestedReference.trim().toLowerCase() !== reference.trim().toLowerCase())) {
           throw new Error("The exported Tally PDF reference does not match the selected Debit Note.");
@@ -749,7 +749,7 @@ export async function POST(
         );
         const connectorHash = toNullableText(result.nativePdfSha256, 128);
         if (connectorHash && connectorHash.toLowerCase() !== uploaded.sha256.toLowerCase()) {
-          throw new Error("The native Tally PDF changed before it reached Kalika. Export was rejected.");
+          throw new Error("The native Tally PDF changed before it reached Bhuleshwar. Export was rejected.");
         }
         const nowForPdf = new Date().toISOString();
         const snapshot = proposal.customer_snapshot && typeof proposal.customer_snapshot === "object"

@@ -91,7 +91,7 @@ export async function POST(
         request,
         {
           error:
-            "This connector is outdated and cannot be paired safely. Install the latest Kalika Tally Connector and try again.",
+            "This connector is outdated and cannot be paired safely. Install the latest Bhuleshwar Tally Connector and try again.",
         },
         { status: 426 }
       );

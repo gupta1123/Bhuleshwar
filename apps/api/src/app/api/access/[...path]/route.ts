@@ -70,7 +70,7 @@ export async function POST(request:NextRequest,ctx:{params:Promise<{path:string[
    const changed=await db.auth.admin.updateUserById(access.member.user_id,{password:body.newPassword,app_metadata:{...u.data.user.app_metadata,kalika_password_change_required:false}});
    if(changed.error)throw new AccessError('Password could not be updated.',400);
    const completed=await db.rpc('access_password_changed',{p_user:access.member.user_id});
-   if(completed.error)throw new AccessError('Password changed, but access setup could not finish. Contact the Kalika team; do not keep using the temporary password.',503);
+  if(completed.error)throw new AccessError('Password changed, but access setup could not finish. Contact the Bhuleshwar team; do not keep using the temporary password.',503);
    return reply(request,{success:true});
   }
   if(access.member.must_change_password)throw new AccessError('Change your temporary password before continuing.');

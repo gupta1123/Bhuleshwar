@@ -124,7 +124,7 @@ export async function POST(request: Request) {
     }
 
     if(process.env.TEAM_ACCESS_ENFORCEMENT==='true') {
-      if(!body.commandId||!body.identity)return jsonWithCors(request,{error:'A scoped master-sync command is required. Update the connector and start a sync from Kalika.'},{status:409});
+      if(!body.commandId||!body.identity)return jsonWithCors(request,{error:'A scoped master-sync command is required. Update the connector and start a sync from Bhuleshwar.'},{status:409});
       if(rows.length>20000||Buffer.byteLength(JSON.stringify(rows))>32*1024*1024)
         return jsonWithCors(request,{error:'Master snapshot exceeds the supported limit.'},{status:413});
       const {data:saved,error:saveError}=await supabase.rpc('access_save_master_snapshot',{

@@ -542,7 +542,7 @@ function getSellerChainRoleSelection(
     strategy: "seller_chain",
     primaryDocumentIds: primaryInvoices.map((invoice) => invoice.id),
     contextDocumentIds: [...contextDocumentIds],
-    note: "Seller-chain role selection applied: Kalika-facing invoice was reconciled; upstream seller invoices were kept as context.",
+    note: "Seller-chain role selection applied: Bhuleshwar-facing invoice was reconciled; upstream seller invoices were kept as context.",
   };
 }
 

@@ -211,7 +211,7 @@ export async function unlockPdfIfNeeded(bytes: Uint8Array, password: string) {
       if (!fs.existsSync(outputPath)) {
         throw new PdfSecurityError(
           "BANK_STATEMENT_PDF_INVALID",
-          "Kalika unlocked the statement but could not create a readable PDF. Export the statement again and retry."
+          "Bhuleshwar unlocked the statement but could not create a readable PDF. Export the statement again and retry."
         );
       }
       const unlockedBytes = new Uint8Array(fs.readFileSync(outputPath));
@@ -240,7 +240,7 @@ export async function unlockPdfIfNeeded(bytes: Uint8Array, password: string) {
     if (result.code === "encryption_unsupported") {
       throw new PdfSecurityError(
         "BANK_STATEMENT_PASSWORD_UNSUPPORTED",
-        "Kalika cannot open this PDF's encryption type. Remove its security in your PDF viewer, export a new PDF, and upload it again."
+          "Bhuleshwar cannot open this PDF's encryption type. Remove its security in your PDF viewer, export a new PDF, and upload it again."
       );
     }
     if (result.code === "invalid_pdf") {

@@ -70,8 +70,8 @@ export async function POST(request: Request) {
       headers: {
         Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
-        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://kalika.local",
-        "X-Title": "Kalika Tally Connector",
+        "HTTP-Referer": process.env.NEXT_PUBLIC_APP_URL || "https://bhuleshwar.local",
+        "X-Title": "Bhuleshwar Tally Connector",
       },
       body: JSON.stringify({ model: MODEL, input: inputs, dimensions: DIMENSIONS }),
       signal: AbortSignal.timeout(60_000),

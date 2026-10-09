@@ -1261,7 +1261,7 @@ async function POSTHandler(request: Request, contextParam: { params: Promise<{ i
         return jsonWithCors(request, { error: "Reconnect the same Tally company before verifying this voucher." }, { status: 409 });
       }
       if (!context.connectionStatus?.agentCapabilities?.includes("purchase-strict-readback-v1")) {
-        return jsonWithCors(request, { error: "Update and reconnect the Kalika Local Agent before verification." }, { status: 409 });
+        return jsonWithCors(request, { error: "Update and reconnect the Bhuleshwar Local Agent before verification." }, { status: 409 });
       }
       const requestedAt = new Date().toISOString();
       const team = process.env.TEAM_ACCESS_ENFORCEMENT === "true"
@@ -1530,7 +1530,7 @@ async function POSTHandler(request: Request, contextParam: { params: Promise<{ i
       !context.connectionStatus?.agentCapabilities?.includes("purchase-canonical-v2")
     ) {
       return jsonWithCors(request, {
-        error: "Update and reconnect the Kalika Local Agent before posting this Purchase voucher.",
+        error: "Update and reconnect the Bhuleshwar Local Agent before posting this Purchase voucher.",
       }, { status: 409 });
     }
 

@@ -1,4 +1,4 @@
-const DEFAULT_LATEST_AGENT_VERSION = "1.1.1";
+const DEFAULT_LATEST_AGENT_VERSION = "1.2.30";
 const DEFAULT_MINIMUM_AGENT_VERSION = "1.0.0";
 const DEFAULT_RELEASE_REPOSITORY = "https://github.com/gupta1123/autodealer-workflow";
 
@@ -24,7 +24,7 @@ export function localAgentUpdateInfo(installedVersion: string | null | undefined
   const minimumVersion = process.env.KALIKA_LOCAL_AGENT_MIN_VERSION || DEFAULT_MINIMUM_AGENT_VERSION;
   const repository = (process.env.KALIKA_LOCAL_AGENT_RELEASE_REPOSITORY || DEFAULT_RELEASE_REPOSITORY).replace(/\/$/, "");
   const downloadUrl = process.env.KALIKA_LOCAL_AGENT_DOWNLOAD_URL ||
-    `${repository}/releases/download/v${latestVersion}/KalikaLocalAgent-${latestVersion}-x64.exe`;
+    `${repository}/releases/download/v${latestVersion}/BhuleshwarLocalAgent-${latestVersion}-x64.exe`;
   return {
     installedVersion: installedVersion || null,
     latestVersion,

@@ -57,7 +57,7 @@ function tallyConnectionErrorPayload(error: unknown) {
   if (/tally_connections|tally_connection_events|relation .*does not exist|schema cache/i.test(message)) {
     return {
       error: "Tally Connector setup is not ready.",
-      userAction: "Run the latest Kalika Tally connector database migration, then try again.",
+      userAction: "Run the latest Bhuleshwar Tally connector database migration, then try again.",
     };
   }
   return {
@@ -304,8 +304,8 @@ async function POSTHandler(request: Request) {
           user.id,
           "connection_resume_requested",
           existing.revoked_at
-            ? "Disconnected Kalika Tally connection resumed."
-            : "Temporary Kalika Tally connection resume requested.",
+            ? "Disconnected Bhuleshwar Tally connection resumed."
+            : "Temporary Bhuleshwar Tally connection resume requested.",
           { reused: true, resumedAfterDisconnect: Boolean(existing.revoked_at) },
         );
         return jsonWithCors(request, {

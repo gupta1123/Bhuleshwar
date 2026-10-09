@@ -393,8 +393,8 @@ export function resolvePacketIntelligence({
     label = "Seller chain";
     tone = "warning";
     confidence = "medium";
-    summary = `${kalikaFacingGroups.length} Kalika-facing invoice${kalikaFacingGroups.length === 1 ? "" : "s"} and ${nonKalikaFacingGroups.length} upstream invoice${nonKalikaFacingGroups.length === 1 ? "" : "s"} found.`;
-    recommendedAction = "Reconcile only the Kalika-facing invoice; keep upstream invoices as context.";
+    summary = `${kalikaFacingGroups.length} Bhuleshwar-facing invoice${kalikaFacingGroups.length === 1 ? "" : "s"} and ${nonKalikaFacingGroups.length} upstream invoice${nonKalikaFacingGroups.length === 1 ? "" : "s"} found.`;
+    recommendedAction = "Reconcile only the Bhuleshwar-facing invoice; keep upstream invoices as context.";
   } else if (multiCompany) {
     kind = "multi_shipment_different_companies";
     label = "Multiple companies";
@@ -473,7 +473,7 @@ export function resolvePacketIntelligence({
       label: "Seller role",
       status: sellerChain ? "attention" : "clear",
       detail: sellerChain
-        ? "Seller-chain documents detected; choose Kalika-facing invoice as primary."
+        ? "Seller-chain documents detected; choose Bhuleshwar-facing invoice as primary."
         : "No seller-chain pattern detected.",
       documentIds: shipmentGroups
         .filter((group) => group.role === "context")
@@ -498,7 +498,7 @@ export function resolvePacketIntelligence({
     { label: "Documents", value: String(documents.length) },
     { label: "Invoice groups", value: String(uniqueInvoiceGroups.length || 0), tone: multipleInvoices ? "warning" : "neutral" },
     { label: "Copy groups", value: String(collapsedCopyGroups.length), tone: collapsedCopyGroups.length ? "warning" : "success" },
-    { label: "Kalika-facing invoices", value: String(kalikaFacingGroups.length), tone: sellerChain ? "warning" : "neutral" },
+    { label: "Bhuleshwar-facing invoices", value: String(kalikaFacingGroups.length), tone: sellerChain ? "warning" : "neutral" },
   ];
 
   if (duplicateCases.length > 0) {

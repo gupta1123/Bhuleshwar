@@ -62,7 +62,7 @@ export function PurchaseDocumentFolderSettings({ connectionId, companyName, comp
     <p className="mt-1 text-xs text-[#8a7f72]">Save PDFs to a shared LAN folder before posting. All Tally users should be able to open this location.</p>
     <label className="mt-4 block text-xs font-medium text-[#5b4b3d]">Shared folder path
       <input className="mt-1 h-10 w-full rounded-lg border border-[#ddd7cc] px-3" value={folderPath}
-        placeholder={'\\\\AccountsServer\\Invoices\\Kalika'} disabled={Boolean(busy) || !loaded}
+        placeholder={'\\\\AccountsServer\\Invoices\\Bhuleshwar'} disabled={Boolean(busy) || !loaded}
         onChange={event => { setFolderPath(event.target.value); setNotice(null); }} />
     </label>
     <p className="mt-2 text-xs text-[#8a7f72]">Leave empty to keep connector-local storage. A configured shared folder must be accessible before posting.</p>

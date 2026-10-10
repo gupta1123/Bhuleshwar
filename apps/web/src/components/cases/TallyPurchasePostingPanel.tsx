@@ -1800,7 +1800,7 @@ export function TallyPurchasePostingPanel({
       const hydrated = withLiveMasterOptions(next);
       setPayload(hydrated);
       setReview(hydrated.review);
-      setNotice("Read-only verification queued. Kalika will not create another voucher.");
+      setNotice("Read-only verification queued. Bhuleshwar will not create another voucher.");
     } catch (verificationError) {
       setError(verificationError instanceof Error ? verificationError.message : "Could not verify the existing voucher.");
     } finally {
@@ -1990,7 +1990,7 @@ export function TallyPurchasePostingPanel({
     const candidates = payload.eligibility.invoiceCandidates;
     return (
       <div className="mx-auto mt-8 max-w-4xl rounded-2xl border border-amber-200 bg-white p-6 shadow-sm">
-        <h2 className="text-lg font-semibold text-slate-950">Choose the invoice Kalika should post</h2>
+        <h2 className="text-lg font-semibold text-slate-950">Choose the invoice Bhuleshwar should post</h2>
         <p className="mt-2 text-sm text-slate-600">
           Duplicate copies have already been combined. Select the invoice billed to the active Tally company; an upstream mother bill should normally be left unselected.
         </p>
@@ -2261,7 +2261,7 @@ export function TallyPurchasePostingPanel({
             <div className="min-w-0 flex-1">
               <strong className="block text-sm">Voucher created; verification needs attention</strong>
               <span className="mt-0.5 block text-xs leading-5 text-amber-800">
-                {payload.posting.lastError || "Refresh after checking the voucher in Tally. Kalika will not create a duplicate voucher."}
+                {payload.posting.lastError || "Refresh after checking the voucher in Tally. Bhuleshwar will not create a duplicate voucher."}
               </span>
             </div>
             <Button className="shrink-0 border-amber-300 bg-white text-amber-900 hover:bg-amber-100" disabled={queueing} onClick={() => void handleVerifyExisting()} size="sm" variant="outline">
@@ -3276,7 +3276,7 @@ export function TallyPurchasePostingPanel({
           <DialogHeader>
             <DialogTitle>Send this Purchase voucher to Tally?</DialogTitle>
             <DialogDescription>
-              Kalika will create the voucher in the selected Tally company. The packet decision will not change.
+              Bhuleshwar will create the voucher in the selected Tally company. The packet decision will not change.
             </DialogDescription>
           </DialogHeader>
           <div className="mt-5 overflow-hidden rounded-2xl border border-slate-200">

@@ -91,7 +91,7 @@ export function DashboardSidebar({ user, defaultCollapsed = false }: DashboardSi
 
   const displayUser: UserInfo = user ?? (snapshot ? {name:snapshot.member.display_name,email:snapshot.member.email} : {
     name: "Admin",
-    email: "admin@kalika.local",
+    email: "admin@bhuleshwar.local",
   });
 
   const initials = displayUser.name
@@ -106,8 +106,8 @@ export function DashboardSidebar({ user, defaultCollapsed = false }: DashboardSi
       {/* ── BRAND ── */}
       <div className={`${styles.brandRow} ${collapsed ? styles.collapsed : ""}`}>
         <div className={styles.brandLeft}>
-          <div className={styles.brandLogoMark}>K</div>
-          <span className={styles.brandTitle}>Kalika</span>
+          <div className={styles.brandLogoMark}>B</div>
+          <span className={styles.brandTitle}>Bhuleshwar</span>
         </div>
         <button
           onClick={() => setCollapsed(!collapsed)}

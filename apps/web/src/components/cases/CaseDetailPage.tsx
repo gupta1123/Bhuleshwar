@@ -241,7 +241,7 @@ function readSellerChainRoleSelectionMeta(processingMeta: unknown): SellerChainR
       contextDocumentIds,
       note:
         String(record.note ?? "").trim() ||
-        "Seller-chain role selection applied: Kalika-facing invoice was reconciled; upstream seller invoices were kept as context.",
+        "Seller-chain role selection applied: Bhuleshwar-facing invoice was reconciled; upstream seller invoices were kept as context.",
     };
   }
 

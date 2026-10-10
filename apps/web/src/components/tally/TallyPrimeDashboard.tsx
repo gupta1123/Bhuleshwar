@@ -847,7 +847,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
             {companyLoaded ? `Connected to ${selectedConnection?.lastCompanyName || "Tally Prime"}` : "Bring Tally Prime online"}
           </h2>
           <p className="mt-2 max-w-md text-xs font-semibold leading-5 text-[#6f6255]">
-            {companyLoaded ? "Your connector, Tally Prime, and company are ready for Kalika workflows." : "Connect this workstation to sync companies, masters, and accounting entries."}
+            {companyLoaded ? "Your connector, Tally Prime, and company are ready for Bhuleshwar workflows." : "Connect this workstation to sync companies, masters, and accounting entries."}
           </p>
         </div>
       </section>
@@ -1026,7 +1026,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
             <StatusCard
               detail={`Last seen ${formatTime(selectedConnection.lastHeartbeatAt)}${
                 selectedConnection.agentUpdate?.updateAvailable
-                  ? " · Update available: open Kalika Local Agent → ⋮ → Connector updates"
+                  ? " · Update available: open Bhuleshwar Local Agent → ⋮ → Connector updates"
                   : ""
               }`}
               ok={connectorActive}
@@ -1068,7 +1068,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
               No Tally connection found
             </h3>
             <p className="mt-1.5 text-xs font-normal text-[#8a7f72] max-w-sm">
-              Install and open Kalika Local Agent on this computer, then connect
+            Install and open Bhuleshwar Local Agent on this computer, then connect
               it to Tally Prime to sync ledgers.
             </p>
             <Button
@@ -1092,7 +1092,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
         description={
           confirmAction === "disconnect_others"
             ? `${otherActiveConnectionCount} other active connector session${otherActiveConnectionCount === 1 ? "" : "s"} will stop and must reconnect from their own computer.`
-            : "Kalika workflows that use Tally will stop. You will need to click Reconnect and approve the Local Agent again."
+            : "Bhuleshwar workflows that use Tally will stop. You will need to click Reconnect and approve the Local Agent again."
         }
         footnote={null}
         loading={disconnecting || disconnectingOthers}

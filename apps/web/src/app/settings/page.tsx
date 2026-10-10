@@ -105,7 +105,7 @@ const PURCHASE_VALIDATION_GROUPS = [
   {
     title: "Workflow",
     rules: [
-      ["sourceDocumentMissing", "Source invoice missing", "Controls the Kalika audit attachment, not voucher balancing."],
+      ["sourceDocumentMissing", "Source invoice missing", "Controls the Bhuleshwar audit attachment, not voucher balancing."],
       ["caseNotAccepted", "Packet approval pending", "Keeps packet approval separate from accounting approval."],
       ["staleTallyMasters", "Tally snapshot is old", "Allows a reviewer to acknowledge an older master snapshot."],
       ["possibleDuplicate", "Possible duplicate invoice", "Protects against sending the same invoice twice."],
@@ -1355,7 +1355,7 @@ export default function SettingsPage() {
                         Purchase voucher deductions
                       </p>
                       <h2 className="mt-1 text-base font-bold tracking-tight text-[#111827]">
-                        Choose which deductions Kalika should handle
+                        Choose which deductions Bhuleshwar should handle
                       </h2>
                       <p className="mt-1 text-xs text-[#5b4b3d]">
                         Leave a rule off when your business does not use it.

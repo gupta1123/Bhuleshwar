@@ -269,7 +269,7 @@ export default function TallyConnectPage() {
               Local Tally bridge
             </div>
             <h1 className="max-w-2xl text-3xl font-extrabold tracking-tight text-[#17211c] sm:text-4xl">
-              Connect Kalika to Tally from this Mac
+              Connect Bhuleshwar to Tally from this Mac
             </h1>
             <p className="mt-4 max-w-3xl text-sm font-medium leading-7 text-[#52645b]">
               Generate a real connection code, pairing code and control token, then run the PowerShell commands below inside the UTM Windows machine while Tally Prime is open and the target company is loaded.

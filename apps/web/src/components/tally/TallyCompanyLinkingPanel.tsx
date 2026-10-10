@@ -71,7 +71,7 @@ export function TallyCompanyLinkingPanel({ connectionId, onLinked }: { connectio
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-amber-700"><ShieldCheck className="h-5 w-5" /></div>
         <div>
           <h3 className="text-sm font-semibold text-[#24140c]">Link this Tally company once</h3>
-          <p className="mt-1 text-xs leading-5 text-amber-900/75">Confirm which Kalika company owns each exact Tally GUID and financial year. The connector installation will remember this mapping across reconnects and updates.</p>
+          <p className="mt-1 text-xs leading-5 text-amber-900/75">Confirm which Bhuleshwar company owns each exact Tally GUID and financial year. The connector installation will remember this mapping across reconnects and updates.</p>
         </div>
       </div>
       <div className="mt-4 space-y-3">

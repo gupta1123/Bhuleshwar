@@ -176,7 +176,7 @@ export function Login() {
           <div className={styles.brandMark}>
             <div className={styles.brandDot} />
           </div>
-          <span className={styles.brandName}>Kalika.</span>
+          <span className={styles.brandName}>Bhuleshwar.</span>
         </div>
 
         {/* Scanning document visual */}

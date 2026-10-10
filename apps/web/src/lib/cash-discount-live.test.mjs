@@ -24,12 +24,17 @@ function harness() {
     close() { this.closes += 1; this.readyState = 3; this.emit("close"); }
   }
   const exports = {};
+  const imports = {
+    "@/lib/api-client": { getApiAccessToken: async () => "token" },
+    "@/lib/access-cache": { accessCacheEpoch: () => 0, registerAccessCache() {} },
+  };
   const source = fs.readFileSync(new URL("./cash-discount-live.ts", import.meta.url), "utf8");
   const js = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
   vm.runInNewContext(js, {
-    exports, require: () => ({ getApiAccessToken: async () => "token" }),
+    exports, require: (name) => imports[name] ?? {},
     WebSocket: Socket, Date: { now: () => now }, crypto: { randomUUID }, URL,
     process: { env: { NEXT_PUBLIC_CASH_DISCOUNT_GATEWAY_URL: "ws://localhost/test" } },
+    sessionStorage: { getItem: () => "" },
     window: { setTimeout: (fn) => { timers.set(++nextTimer, fn); return nextTimer; }, clearTimeout: (id) => timers.delete(id) },
   });
   return { request: exports.runCashDiscountLiveRequest, sockets, timers, advance: (ms) => { now += ms; } };

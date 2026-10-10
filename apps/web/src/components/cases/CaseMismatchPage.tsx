@@ -1173,7 +1173,7 @@ export function CaseMismatchPage({ caseId }: { caseId: string }) {
               subtitle={
                 tallyVoucherVerified
                   ? `Supplier invoice ${tallyHeaderState?.invoiceNumber || "—"} · verified`
-                  : `Kalika: ${kalikaCompanyName} - Tally: ${activeTallyCompanyName}`
+                  : `Bhuleshwar: ${kalikaCompanyName} - Tally: ${activeTallyCompanyName}`
               }
               status={
                 tallyHeaderChecking

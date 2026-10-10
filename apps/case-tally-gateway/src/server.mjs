@@ -10,6 +10,18 @@ const SUPPORTED_OPERATIONS = new Set([
   "ledger_masters",
   "ledger_suggestions",
   "test_purchase_document_folder",
+  "verify_bank_transaction",
+  "fetch_customer_open_bills",
+  "cash_discount_scan",
+  "cash_discount_revalidate",
+  "cash_discount_execute_debit_note",
+  "collections_query",
+  "collections_rows",
+]);
+const OPERATION_ALIASES = new Map([
+  ["scan", "cash_discount_scan"],
+  ["followups_scan", "cash_discount_scan"],
+  ["create_debit_note", "cash_discount_execute_debit_note"],
 ]);
 
 const metadata = new WeakMap();
@@ -131,7 +143,8 @@ function closeWithError(socket, message, code = 1008) {
 async function handleBrowserRequest(socket, message) {
   const browserMeta = metadata.get(socket);
   const requestId = String(message.requestId || randomUUID());
-  const operation = String(message.operation || "");
+  const requestedOperation = String(message.operation || "");
+  const operation = OPERATION_ALIASES.get(requestedOperation) || requestedOperation;
   if (!SUPPORTED_OPERATIONS.has(operation)) {
     send(socket, { type: "result", requestId, success: false, error: "Unsupported case Tally operation." });
     return;
@@ -156,7 +169,7 @@ async function handleBrowserRequest(socket, message) {
 
   let authority;
   try {
-    authority = await authorizeLiveOperation(browserMeta, message, connectorMeta);
+    authority = await authorizeLiveOperation(browserMeta, { ...message, operation }, connectorMeta);
   } catch (error) {
     send(socket, { type: "result", requestId, success: false, error: error.message });
     return;

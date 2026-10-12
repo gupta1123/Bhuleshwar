@@ -5,6 +5,7 @@ import {
   getFieldKeysForDocType,
   omitIgnoredFields,
 } from "@/lib/document-schema";
+import { applyInvoiceCoreFieldFallback } from "@/lib/invoice-core-fields";
 import { applyInvoiceCommercialFieldFallback } from "@/lib/invoice-commercial-fields";
 
 let aiUnavailableReason: string | null = null;
@@ -402,7 +403,7 @@ function getPoNumberExtractionInstruction(docType: DocType) {
 
   if (docType === "Tax Invoice" || docType === "Invoice") {
     return (
-      "For invoice documents, extract the supplier invoice date as documentDate. It may be labelled Invoice Date, Date of Invoice, Date, or Dated beside the Invoice No.; return it as YYYY-MM-DD. Do not substitute Ack Date, dispatch date, LR date, e-Way Bill generated date, digitally signed timestamp, or a footer/print date. " +
+      "For invoice documents, map Document number, Tax Invoice number, Invoice number, or Bill number to invoiceNumber, and map Document date, Invoice Date, Date of Invoice, Date, or Dated beside the Invoice No. to documentDate as YYYY-MM-DD. Grand total, Total Invoice Value, or Net Payable is totalAmount; Taxable Value is totalTaxableAmount/subtotal. Extract explicitly labelled Supplier GSTIN and Buyer GSTIN into supplierGstin and buyerGstin. Do not substitute Ack Date, dispatch date, LR date, e-Way Bill generated date, digitally signed timestamp, or a footer/print date. " +
       "For invoice documents, referencePoNumber must be a value explicitly labelled PO No, P.O. No, Purchase Order No, Buyer PO, or Order No. " +
       "If the same order block contains an internal PO number shaped like IF/25-26/PF25Y-04165 or RM/25-26/PR25Y-00001 and another buyer/document reference, use the internal PO-shaped value as referencePoNumber. " +
       "For invoice documents, eWayBillNumber must be the 12-digit E-Way Bill number only. Do not use transporter document numbers, online order tracking numbers, LR numbers, acknowledgement numbers, or receipt numbers as eWayBillNumber. Do not put a 12-digit E-Way Bill number into irnNumber; IRN is the long invoice reference hash. " +
@@ -664,7 +665,10 @@ function mapFields(
     : ALL_ALLOWED_FIELD_KEYS;
 
   allowedFieldKeys.forEach((fieldKey) => {
-    const aliases = FIELD_MAPPINGS[fieldKey] ?? [];
+    const aliases =
+      fieldKey === "referenceInvoiceNumber" && (docType === "Invoice" || docType === "Tax Invoice")
+        ? ["referenceInvoiceNumber", "invoiceReference"]
+        : FIELD_MAPPINGS[fieldKey] ?? [];
     for (const alias of aliases) {
       const value = fields[alias];
       const normalizedValue = normalizeFieldValue(value);
@@ -674,6 +678,15 @@ function mapFields(
       }
     }
   });
+  if ((docType === "Invoice" || docType === "Tax Invoice") && !result.invoiceNumber) {
+    for (const alias of ["documentNumber", "docNumber", "docNo"]) {
+      const value = normalizeFieldValue(fields[alias]);
+      if (value) {
+        result.invoiceNumber = value;
+        break;
+      }
+    }
+  }
   if (!result.subtotal && result.totalTaxableAmount) {
     result.subtotal = result.totalTaxableAmount;
   }
@@ -1545,8 +1558,12 @@ export async function extractDataFromImages(params: {
           applyFastagDetailsFallback(
             applyEWayBillAddressFallback(
               applyPurchaseOrderDateFallback(
-                applyInvoiceCommercialFieldFallback(
-                  mappedFields,
+                applyInvoiceCoreFieldFallback(
+                  applyInvoiceCommercialFieldFallback(
+                    mappedFields,
+                    documentType,
+                    visibleText
+                  ),
                   documentType,
                   visibleText
                 ),

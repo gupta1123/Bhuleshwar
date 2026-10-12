@@ -1240,7 +1240,11 @@ function buildDefaultReview(
     freightLedgerName:
       mappedName(masters, mappings, "freight_ledger", "purchase", ["ledger"]) ||
       exactMasterName(masters, "Transportation Inward @ 18.00%", ["ledger"]) ||
-      namedRoleLedger(masters, [/freight|transportation\s+inward/i], [/direct\s+expenses?|purchase/i]),
+      namedRoleLedger(
+        masters,
+        [/freight|transport(?:ation)?\s+(?:inward|charges?|handling)|handling\s+charges?/i],
+        [/direct\s+expenses?|purchase/i]
+      ),
     tds194qLedgerName:
       mappedRoleName(masters, mappings, "tds_ledger", ["194q", "purchase_goods"], ["ledger", "tax_ledger"]) ||
       exactMasterName(masters, "TDS Payable @ 0.10% (194Q)", ["ledger", "tax_ledger"]) ||

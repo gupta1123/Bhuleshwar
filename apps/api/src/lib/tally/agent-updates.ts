@@ -1,6 +1,6 @@
-const DEFAULT_LATEST_AGENT_VERSION = "1.2.30";
+const DEFAULT_LATEST_AGENT_VERSION = "1.2.33";
 const DEFAULT_MINIMUM_AGENT_VERSION = "1.0.0";
-const DEFAULT_RELEASE_REPOSITORY = "https://github.com/gupta1123/autodealer-workflow";
+const DEFAULT_RELEASE_REPOSITORY = "https://github.com/gupta1123/Bhuleshwar";
 
 function semverParts(value: string | null | undefined) {
   const match = String(value || "").trim().match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);

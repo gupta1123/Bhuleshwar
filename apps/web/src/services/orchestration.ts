@@ -6,7 +6,7 @@ import type {
   PipelineStageId,
   QueuedUpload,
 } from "@/types/pipeline";
-import { fileToImagePages } from "@/services/pdf";
+import { fileToImagePages, fileToTextPages } from "@/services/pdf";
 import { getQueuedUploadFiles } from "@/lib/upload-groups";
 import {
   classifyDocumentFromImage,
@@ -52,10 +52,12 @@ export async function orchestrateUploads(
     await delay(200);
 
     let pageImages: string[] = [];
+    let textPages: string[] = [];
     if (sourceFiles.length) {
       for (const file of sourceFiles) {
         try {
           pageImages = [...pageImages, ...(await fileToImagePages(file))];
+          textPages = [...textPages, ...(await fileToTextPages(file))];
         } catch (error) {
           console.error("Failed to convert upload to images", error);
         }
@@ -70,6 +72,7 @@ export async function orchestrateUploads(
     const { doc, extractedDocuments } = await extractDataFromImages({
       fileName: upload.name,
       pageImages,
+      textPages,
       documentType,
     });
 

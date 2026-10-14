@@ -2583,6 +2583,7 @@ export async function classifyDocumentFromImage(image: string, fileName = ""): P
 export async function extractDataFromImages(params: {
   fileName: string;
   pageImages: string[];
+  textPages?: string[];
   documentType: DocType;
 }): Promise<{ doc: CaseDoc; extractedDocuments: Array<{ documentType: DocType; fields: Record<string, unknown> }> }> {
   const { fileName, pageImages, documentType } = params;
@@ -2678,7 +2679,9 @@ export async function extractDataFromImages(params: {
       (acc, current) => ({ ...acc, ...current.fields }),
       {}
     );
-    const visibleTextPages = extracted.map((page) => page.visibleText).filter(Boolean);
+    const modelVisibleTextPages = extracted.map((page) => page.visibleText).filter(Boolean);
+    const embeddedTextPages = (params.textPages ?? []).filter(Boolean);
+    const visibleTextPages = [...embeddedTextPages, ...modelVisibleTextPages];
     const visibleText = visibleTextPages.join("\n");
     const mappedFields = mapFields(combinedFields, documentType);
     const lineItems = normalizeExtractedCommercialLineItems({

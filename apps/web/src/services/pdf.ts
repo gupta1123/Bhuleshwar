@@ -146,6 +146,45 @@ export async function fileToImagePages(file: File, options: PdfImagePageOptions 
   }
 }
 
+/**
+ * Read embedded PDF text before rendering the document to images. Text-based
+ * invoices should not depend on the vision model returning a second OCR copy
+ * of the page; the deterministic invoice-field fallbacks can use this text
+ * directly when the model returns line items only.
+ */
+export async function fileToTextPages(file: File): Promise<string[]> {
+  if (isImageFile(file)) {
+    return [];
+  }
+
+  try {
+    const pdfjsLib = await loadPdfJs();
+    const arrayBuffer = await file.arrayBuffer();
+    const pdf = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+    const pages: string[] = [];
+
+    for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+      const page = await pdf.getPage(pageNumber);
+      const textPage = page as unknown as {
+        getTextContent: () => Promise<{ items: Array<{ str?: string }> }>;
+      };
+      const content = await textPage.getTextContent();
+      const text = content.items
+        .map((item) => item.str ?? "")
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+      pages.push(text);
+    }
+
+    return pages;
+  } catch (error) {
+    console.warn("Failed to read embedded PDF text", error);
+    return [];
+  }
+}
+
 export const pdfToImagePages = fileToImagePages;
 
 export function base64ToInlineData(base64: string, mimeType: string) {

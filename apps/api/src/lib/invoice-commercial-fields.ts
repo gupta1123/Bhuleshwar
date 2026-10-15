@@ -1,6 +1,12 @@
 import type { DocType, FieldKey } from "@/types/pipeline";
 
 export type InvoiceCommercialFields = {
+  invoiceNumber: string;
+  referenceInvoiceNumber: string;
+  supplierGstin: string;
+  buyerGstin: string;
+  vendorName: string;
+  buyerName: string;
   documentDate: string;
   vehicleNumber: string;
   taxAmount: string;
@@ -18,7 +24,38 @@ export type InvoiceCommercialFields = {
   gstTdsRate: string;
   tcsAmount: string;
   roundOffAmount: string;
+  totalAmount: string;
 };
+
+const GSTIN_PATTERN = /\b\d{2}[A-Z0-9]{13}\b/i;
+
+function cleanLabelledText(value: string | undefined) {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/^[\s:：#-]+|[\s:：#-]+$/g, "")
+    .trim();
+}
+
+function labelledValue(source: string, labelPattern: string, stopPattern = "$") {
+  return cleanLabelledText(
+    source.match(new RegExp(`\\b(?:${labelPattern})\\b\\s*[:#-]?\\s*([^\\r\\n]*?)(?=\\s+(?:${stopPattern})|$)`, "i"))?.[1]
+  );
+}
+
+function gstinNearLabel(source: string, labelPattern: string) {
+  const line = source.match(new RegExp(`\\b(?:${labelPattern})\\b([^\\r\\n]*)`, "i"))?.[1] ?? "";
+  const nextPartyLabel = line.search(/\s+\b(?:SUPPLIER|SELLER|BUYER|CUSTOMER|BILL\s+TO)\s+GSTIN\b/i);
+  const segment = nextPartyLabel >= 0 ? line.slice(0, nextPartyLabel) : line;
+  const value = segment.match(GSTIN_PATTERN)?.[0];
+  return value?.toUpperCase() ?? "";
+}
+
+function invoiceNumberFromText(source: string) {
+  const value = source.match(
+    /\b(?:DOCUMENT|INVOICE)\s+(?:NUMBER|NO\.?|REFERENCE)\s*[:#-]?\s*([A-Z0-9][A-Z0-9./_-]{3,})/i
+  )?.[1];
+  return cleanLabelledText(value);
+}
 
 function normalizeVehicleNumber(value: string | undefined) {
   const normalized = String(value ?? "")
@@ -50,7 +87,7 @@ function amountNearLabel(
   options: { signed?: boolean } = {}
 ) {
   const matches = [
-    ...source.matchAll(new RegExp(`\\b(?:${labelPattern})\\b([^\\r\\n]{0,120})`, "gi")),
+    ...source.matchAll(new RegExp(`\\b(?:${labelPattern})\\b([^\\r\\n]{0,400})`, "gi")),
   ];
   const candidates: Array<{ value: string; score: number }> = [];
 
@@ -92,6 +129,7 @@ function amountNearLabel(
 function invoiceDateFromText(source: string) {
   const dateValue = String.raw`(\d{1,2}(?:[./-]\d{1,2}[./-]|[\s./-]+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:t(?:ember)?)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)[\s,./-]+)\d{2,4}|\d{4}-\d{2}-\d{2})`;
   const patterns = [
+    new RegExp(String.raw`\bDOCUMENT\s+DATE\s*[:\-]?\s*${dateValue}\b`, "i"),
     new RegExp(String.raw`\bINVOICE\s+DATE\s*[:\-]?\s*${dateValue}\b`, "i"),
     new RegExp(String.raw`\bDATE\s+OF\s+INVOICE\s*[:\-]?\s*${dateValue}\b`, "i"),
     new RegExp(
@@ -164,6 +202,26 @@ export function extractInvoiceCommercialFieldsFromText(
   ]);
 
   return {
+    invoiceNumber: invoiceNumberFromText(source),
+    referenceInvoiceNumber:
+      labelledValue(
+        source,
+        "INVOICE\\s+REFERENCE",
+        "E-?WAY\\s+BILL|PURCHASE\\s+ORDER|VEHICLE|PLACE\\s+OF\\s+SUPPLY"
+      ) || invoiceNumberFromText(source),
+    supplierGstin: gstinNearLabel(source, "SUPPLIER\\s+GSTIN|SELLER\\s+GSTIN"),
+    buyerGstin: gstinNearLabel(source, "BUYER\\s+GSTIN|CUSTOMER\\s+GSTIN|BILL\\s+TO\\s+GSTIN"),
+    vendorName:
+      labelledValue(
+        source,
+        "SUPPLIER\\s+LEDGER|SELLER(?:\\s+NAME)?|VENDOR(?:\\s+NAME)?",
+        "BUYER|CUSTOMER|BUYER\\s+GSTIN|SUPPLIER\\s+GSTIN|DOCUMENT|INVOICE"
+      ),
+    buyerName: labelledValue(
+      source,
+      "BUYER|CUSTOMER|BILL\\s+TO",
+      "SUPPLIER|SELLER|SUPPLIER\\s+GSTIN|BUYER\\s+GSTIN|DOCUMENT|INVOICE"
+    ),
     documentDate: invoiceDateFromText(source),
     vehicleNumber: vehicleNumberFromText(source),
     taxAmount: explicitTaxAmount || componentTaxAmount,
@@ -206,6 +264,10 @@ export function extractInvoiceCommercialFieldsFromText(
       "ROUND(?:ING)?[\\s-]*OFF(?:\\s+AMOUNT)?",
       { signed: true }
     ),
+    totalAmount: amountNearLabel(
+      source,
+      "GRAND\\s+TOTAL|TOTAL\\s+INVOICE\\s+VALUE|INVOICE\\s+TOTAL|TOTAL\\s+AMOUNT"
+    ),
   };
 }
 
@@ -219,6 +281,12 @@ export function applyInvoiceCommercialFieldFallback(
   const recovered = extractInvoiceCommercialFieldsFromText(visibleText);
   const next = { ...fields };
   const recoverableKeys = [
+    "invoiceNumber",
+    "referenceInvoiceNumber",
+    "supplierGstin",
+    "buyerGstin",
+    "vendorName",
+    "buyerName",
     "documentDate",
     "vehicleNumber",
     "taxAmount",
@@ -236,6 +304,7 @@ export function applyInvoiceCommercialFieldFallback(
     "gstTdsRate",
     "tcsAmount",
     "roundOffAmount",
+    "totalAmount",
   ] as const satisfies readonly FieldKey[];
 
   for (const key of recoverableKeys) {

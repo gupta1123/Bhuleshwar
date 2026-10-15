@@ -495,7 +495,6 @@ export function WorkspacePage() {
     queueFiles,
     queueUploadGroup,
     removeUpload,
-    startProcessing,
     updateSavedCase,
     reset: resetPipeline,
   } = useDocumentPipeline();
@@ -1039,7 +1038,7 @@ export function WorkspacePage() {
           void startSmartSplitAnalysis(nextOptions);
           return;
         }
-        void startProcessing(nextOptions);
+        void startStandardAnalysis(nextOptions);
       }}
     />
   );
@@ -1156,6 +1155,52 @@ export function WorkspacePage() {
         smartSplitError instanceof Error
           ? smartSplitError.message
           : "Failed to start multi-document analysis."
+      );
+      setDraftCaseStatus("error");
+    }
+  };
+
+  const startStandardAnalysis = async (nextOptions: ComparisonOptions) => {
+    if (!hasUploads || draftCaseStatus === "saving") return;
+
+    try {
+      setDraftCaseStatus("saving");
+      setDraftCaseError(null);
+
+      let caseRecord = persistence.savedCase;
+      if (!caseRecord) {
+        if (teamAccess.enforcementRequired && !selectedAccessCompany) {
+          throw new Error("Select the company for this case.");
+        }
+        const created = await createDraftCase({
+          uploads: queuedUploads,
+          accessCompanyId: selectedAccessCompany,
+        });
+        updateSavedCase(created.case);
+        caseRecord = created.case;
+      }
+
+      const started = await enqueueCaseAnalysis(caseRecord.id, {
+        analysisMode: "standard",
+        comparisonOptions: nextOptions,
+      });
+
+      updateSavedCase(started.case);
+      setDraftCaseStatus("saved");
+      router.replace(`/cases/${caseRecord.id}`);
+    } catch (analysisError) {
+      const duplicateCase = getDuplicateCaseFromError(analysisError);
+      if (duplicateCase) {
+        setDraftCaseError(null);
+        setDraftCaseStatus("idle");
+        setDuplicateCaseNotice(duplicateCase);
+        return;
+      }
+
+      setDraftCaseError(
+        analysisError instanceof Error
+          ? analysisError.message
+          : "Failed to start case analysis."
       );
       setDraftCaseStatus("error");
     }

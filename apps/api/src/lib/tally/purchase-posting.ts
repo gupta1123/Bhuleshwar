@@ -627,12 +627,12 @@ function packetSupplierName(
   const supplierNameFrom = (document: PurchasePostingDocumentInput) => {
     const fields = fieldsOf(document);
     const commercialFields = extractInvoiceCommercialFieldsFromText(document.markdown);
-    const direct = text(
-      fields.vendorName ||
-      fields.supplierName ||
-      fields.supplier ||
-      commercialFields.vendorName
-    );
+    const buyerName = normalizeKey(fields.buyerName || commercialFields.buyerName);
+    // OCR may take the buyer's masthead as vendorName even when the invoice
+    // explicitly identifies a different supplier in its labelled ledger row.
+    const direct = [fields.vendorName, fields.supplierName, fields.supplier, commercialFields.vendorName]
+      .map(text)
+      .find((candidate) => candidate && normalizeKey(candidate) !== buyerName) || "";
     if (direct) return direct;
     // E-Way Bills can identify the supplier in dispatchFrom when invoice OCR
     // did not expose a vendor-name field.

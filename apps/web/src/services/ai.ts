@@ -14,6 +14,7 @@ import {
 } from "@/lib/line-items";
 import { DEFAULT_COMPARISON_OPTIONS, normalizeComparableValue } from "@/lib/comparison";
 import { applyInvoiceCoreFieldFallback } from "@/lib/invoice-core-fields";
+import { eWayTaxableRows } from "@autodealer/shared/lib/e-way-taxable-rows";
 
 let aiUnavailableReason: string | null = null;
 const CLIENT_MAX_RETRIES = Number(
@@ -1212,6 +1213,7 @@ function extractEWayAmounts(value: string) {
 }
 
 function extractEWayCommercialAmounts(text: string, fields: Partial<Record<FieldKey, string>>) {
+  const printedRows = eWayTaxableRows(text);
   const summaryBlock =
     text.match(/\b(?:Tot\.?\s*Tax'?ble\s*Amt|Total\s+Taxable\s+Amt)\b[\s\S]{0,700}?(?=\b(?:Transportation\s+Details|Transporter\s+ID|Vehicle\s+Details|Part\s*-?\s*B)\b|$)/i)?.[0] ??
     text.match(/\b(?:Taxable\s+Amount|Taxable\s+Value)\b[\s\S]{0,700}?(?=\b(?:Transportation\s+Details|Transporter\s+ID|Vehicle\s+Details|Part\s*-?\s*B)\b|$)/i)?.[0];
@@ -1219,9 +1221,11 @@ function extractEWayCommercialAmounts(text: string, fields: Partial<Record<Field
   const existingSubtotal = normalizeEWayAmount(fields.subtotal);
   const existingTax = normalizeEWayAmount(fields.taxAmount);
   const existingTotal = normalizeEWayAmount(fields.totalAmount);
-  const subtotal = existingSubtotal ?? amounts[0] ?? null;
+  const subtotal = printedRows?.total ?? existingSubtotal ?? amounts[0] ?? null;
   const blockTotal = amounts.length >= 2 ? amounts[amounts.length - 1] : null;
-  const total = existingTotal ?? (blockTotal !== null && subtotal !== null && blockTotal >= subtotal ? blockTotal : null);
+  const total =
+    (existingTotal !== null && (subtotal === null || existingTotal >= subtotal) ? existingTotal : null) ??
+    (blockTotal !== null && subtotal !== null && blockTotal >= subtotal ? blockTotal : null);
   const taxAmount =
     existingTax ??
     (subtotal !== null && total !== null && total >= subtotal
@@ -1312,7 +1316,10 @@ function applyEWayBillAddressFallback(
     fields.referenceInvoiceNumber,
     extractEWayBillReferenceInvoiceNumber(visibleText)
   );
-  const amounts = extractEWayCommercialAmounts(text, fields);
+  const amounts = extractEWayCommercialAmounts(visibleText, fields);
+  const printedRows = eWayTaxableRows(visibleText);
+  const invalidPrintedTotal = Boolean(printedRows && normalizeEWayAmount(fields.totalAmount) !== null &&
+    normalizeEWayAmount(fields.totalAmount)! < printedRows.total);
   const transport = extractEWayTransportDetails(text);
   const transporterName = transport.transporterName ?? cleanEWayTransporterName(fields.transporterName);
   const vehicleNumber = formatEWayVehicleNumber(fields.vehicleNumber) ?? transport.vehicleNumber;
@@ -1327,13 +1334,14 @@ function applyEWayBillAddressFallback(
     ...(!referenceInvoiceNumber || referenceInvoiceNumber === fields.referenceInvoiceNumber ? {} : { referenceInvoiceNumber }),
     ...(fields.documentDate || !documentDate ? {} : { documentDate }),
     ...(!validityDate || validityDate === fields.validityDate ? {} : { validityDate }),
-    ...(fields.subtotal || !amounts.subtotal ? {} : { subtotal: amounts.subtotal }),
-    ...(fields.totalTaxableAmount || !(amounts.totalTaxableAmount ?? amounts.subtotal)
+    ...(!amounts.subtotal || (fields.subtotal && !printedRows) ? {} : { subtotal: amounts.subtotal }),
+    ...((fields.totalTaxableAmount && !printedRows) || !(amounts.totalTaxableAmount ?? amounts.subtotal)
       ? {}
       : { totalTaxableAmount: amounts.totalTaxableAmount ?? amounts.subtotal }),
     ...(fields.taxAmount || !amounts.taxAmount ? {} : { taxAmount: amounts.taxAmount }),
     ...(fields.taxRate || !amounts.taxRate ? {} : { taxRate: amounts.taxRate }),
-    ...(fields.totalAmount || !amounts.totalAmount ? {} : { totalAmount: amounts.totalAmount }),
+    ...(invalidPrintedTotal ? { totalAmount: amounts.totalAmount ?? "" } :
+      fields.totalAmount || !amounts.totalAmount ? {} : { totalAmount: amounts.totalAmount }),
     ...(!transporterName ? {} : { transporterName }),
     ...(fields.lorryReceiptNumber || !transport.lorryReceiptNumber ? {} : { lorryReceiptNumber: transport.lorryReceiptNumber }),
     ...(!vehicleNumber || vehicleNumber === fields.vehicleNumber ? {} : { vehicleNumber }),

@@ -252,6 +252,91 @@ test("supplier name is recovered from another packet document when invoice OCR o
   assert.equal(result.review.supplierLedgerName, "Scrap Supplier");
 });
 
+test("a buyer masthead is not treated as the supplier when the invoice labels its supplier ledger", () => {
+  const invoice = invoiceDocument();
+  invoice.extracted_fields.vendorName = "Nyx Mobility Components Private Limited";
+  invoice.extracted_fields.buyerName = "Nyx Mobility Components Private Limited";
+  invoice.markdown = [
+    "NYX MOBILITY COMPONENTS PRIVATE LIMITED",
+    "TAX INVOICE",
+    "Supplier ledger KTC-260707 Test Supplier Buyer Nyx Mobility Components Private Limited",
+    "Supplier GSTIN 27ABCDE1234F1Z0 Buyer GSTIN 27NYXCO1234A1Z7",
+  ].join("\n");
+
+  const result = prepare(invoice);
+  assert.equal(result.source.supplierName, "KTC-260707 Test Supplier");
+});
+
+test("the Nyx sample's goods plus freight reconcile GST and total without round-off", () => {
+  const invoice = invoiceDocument({
+    totalAmount: "1016098.00",
+    taxAmount: "154998.00",
+    tdsAmount: "",
+    lines: [
+      {
+        description: "M.S. Scrap & Sponge Iron",
+        hsnSac: "7204",
+        quantity: "20300",
+        unit: "KG",
+        rate: "42.00",
+        taxableAmount: "852600.00",
+        taxRate: "18",
+      },
+      {
+        description: "Freight and handling",
+        hsnSac: "9965",
+        quantity: "1",
+        unit: "lot",
+        rate: "8500.00",
+        taxableAmount: "8500.00",
+        taxRate: "18",
+      },
+    ],
+  });
+  Object.assign(invoice.extracted_fields, {
+    invoiceNumber: "KTC/26-27/0723-RT",
+    documentDate: "23/07/2026",
+    vendorName: "KTC-260707 Test Supplier",
+    supplierGstin: "27ABCDE1234F1Z0",
+    buyerName: "Nyx Mobility Components Private Limited",
+    buyerGstin: "27NYXCO1234A1Z7",
+    subtotal: "861100.00",
+    totalTaxableAmount: "861100.00",
+    freightAmount: "8500.00",
+    freightGstRate: "18",
+    tds194qAmount: "",
+    cgstTdsAmount: "",
+    sgstTdsAmount: "",
+  });
+  const result = prepare(invoice, {
+    masters: [
+      ...completeMasters,
+      master("ledger", "KTC-260707 Test Supplier", { gstin: "27ABCDE1234F1Z0" }),
+      master("stock_item", "M.S. Scrap & Sponge Iron", { hsn_code: "7204", unit_name: "KG" }),
+      master("ledger", "Freight and handling"),
+    ],
+    savedReview: {
+      sourceReferenceApproved: true,
+      applyTds194q: false,
+      applyTransportTds: false,
+      applyGstTds: false,
+    },
+    accountingSettings: {
+      purchaseGoodsTdsEnabled: false,
+      transporterTdsEnabled: false,
+      gstTdsEnabled: false,
+    },
+  });
+
+  assert.equal(result.source.lines.length, 1);
+  assert.equal(result.source.invoiceFreightAmount, "8500.00");
+  assert.equal(result.calculation.cgstAmount, "77499.00");
+  assert.equal(result.calculation.sgstAmount, "77499.00");
+  assert.equal(result.calculation.gstDifference, "0.00");
+  assert.equal(result.calculation.totalDifference, "0.00");
+  assert.equal(result.calculation.roundOffAmount, "0.00");
+});
+
 test("supplier ledger cannot also be selected as an item purchase ledger", () => {
   const document = invoiceDocument();
   const initial = prepare(document);

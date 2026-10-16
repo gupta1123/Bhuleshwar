@@ -18,6 +18,7 @@ import {
 import { getPersistedPacketFieldConfiguration } from "@/lib/field-settings-service";
 import { applyInvoiceCoreFieldFallback } from "@/lib/invoice-core-fields";
 import { applyInvoiceCommercialFieldFallback } from "@/lib/invoice-commercial-fields";
+import { eWayTaxableRows } from "@autodealer/shared/lib/e-way-taxable-rows";
 import {
   enrichDocumentsWithPacketGstTaxContext,
   isCommercialDocType,
@@ -2343,6 +2344,7 @@ function extractEWayAmounts(value: string) {
 }
 
 function extractEWayCommercialAmounts(text: string, fields: Partial<Record<FieldKey, string>>) {
+  const printedRows = eWayTaxableRows(text);
   const summaryBlock =
     text.match(/\b(?:Tot\.?\s*Tax'?ble\s*Amt|Total\s+Taxable\s+Amt)\b[\s\S]{0,700}?(?=\b(?:Transportation\s+Details|Transporter\s+ID|Vehicle\s+Details|Part\s*-?\s*B)\b|$)/i)?.[0] ??
     text.match(/\b(?:Taxable\s+Amount|Taxable\s+Value)\b[\s\S]{0,700}?(?=\b(?:Transportation\s+Details|Transporter\s+ID|Vehicle\s+Details|Part\s*-?\s*B)\b|$)/i)?.[0];
@@ -2352,11 +2354,11 @@ function extractEWayCommercialAmounts(text: string, fields: Partial<Record<Field
   const existingTotal = normalizeEWayAmount(fields.totalAmount);
   // Prefer a clearly labelled amount from the E-Way Bill text over a model
   // value. A model can otherwise copy a prominent quantity into `subtotal`.
-  const subtotal = amounts[0] ?? existingSubtotal ?? null;
+  const subtotal = printedRows?.total ?? amounts[0] ?? existingSubtotal ?? null;
   const blockTotal = amounts.length >= 2 ? amounts[amounts.length - 1] : null;
   const total =
     (blockTotal !== null && subtotal !== null && blockTotal >= subtotal ? blockTotal : null) ??
-    existingTotal;
+    (existingTotal !== null && (subtotal === null || existingTotal >= subtotal) ? existingTotal : null);
   const taxAmount =
     existingTax ??
     (subtotal !== null && total !== null && total >= subtotal
@@ -2447,7 +2449,12 @@ function applyEWayBillAddressFallback(
     fields.referenceInvoiceNumber,
     extractEWayBillReferenceInvoiceNumber(visibleText)
   );
-  const amounts = extractEWayCommercialAmounts(text, fields);
+  // Preserve table row boundaries for monetary-row extraction. The flattened
+  // text above is useful for addresses but cannot distinguish table rows.
+  const amounts = extractEWayCommercialAmounts(visibleText, fields);
+  const printedRows = eWayTaxableRows(visibleText);
+  const currentTotal = normalizeEWayAmount(fields.totalAmount);
+  const invalidPrintedTotal = Boolean(printedRows && currentTotal !== null && currentTotal < printedRows.total);
   const transport = extractEWayTransportDetails(text);
   const transporterName = transport.transporterName ?? cleanEWayTransporterName(fields.transporterName);
   const vehicleNumber = formatEWayVehicleNumber(fields.vehicleNumber) ?? transport.vehicleNumber;
@@ -2466,7 +2473,7 @@ function applyEWayBillAddressFallback(
     ...(amounts.totalTaxableAmount ? { totalTaxableAmount: amounts.totalTaxableAmount } : {}),
     ...(amounts.taxAmount ? { taxAmount: amounts.taxAmount } : {}),
     ...(amounts.taxRate ? { taxRate: amounts.taxRate } : {}),
-    ...(amounts.totalAmount ? { totalAmount: amounts.totalAmount } : {}),
+    ...(amounts.totalAmount ? { totalAmount: amounts.totalAmount } : invalidPrintedTotal ? { totalAmount: "" } : {}),
     ...(!transporterName ? {} : { transporterName }),
     ...(fields.lorryReceiptNumber || !transport.lorryReceiptNumber ? {} : { lorryReceiptNumber: transport.lorryReceiptNumber }),
     ...(!vehicleNumber || vehicleNumber === fields.vehicleNumber ? {} : { vehicleNumber }),
@@ -2611,12 +2618,16 @@ const COMMERCIAL_TOTAL_DOC_TYPES = new Set<DocType>([
 ]);
 
 function correctEWayBillTotals(doc: CaseDoc) {
-  if (doc.type !== "E-Way Bill" || !doc.lineItems?.length) return doc;
+  if (doc.type !== "E-Way Bill") return doc;
 
-  const lineSum = doc.lineItems
+  const lineValues = (doc.lineItems ?? [])
     .map((item) => parseLooseNumber(item.taxableAmount ?? item.lineTotal))
-    .filter((value): value is number => value !== null && value >= 0)
-    .reduce((total, value) => total + value, 0);
+    .filter((value): value is number => value !== null && value >= 0);
+  const extractedLineSum = lineValues.reduce((total, value) => total + value, 0);
+  const printedRows = eWayTaxableRows(doc.md ?? "");
+  const lineSum = printedRows && printedRows.rowCount >= lineValues.length
+    ? printedRows.total
+    : extractedLineSum;
   if (lineSum <= 0) return doc;
 
   const fields = { ...doc.fields };
@@ -2640,6 +2651,12 @@ function correctEWayBillTotals(doc: CaseDoc) {
 
   if (currentTax === null && currentTotal !== null && currentTotal >= lineSum) {
     fields.taxAmount = formatNumberForField(currentTotal - lineSum);
+    changed = true;
+  }
+  if (printedRows && currentTotal !== null && currentTotal < lineSum) {
+    // A prominent quantity must not survive as an E-Way Bill money total.
+    // Do not fabricate a grand total when the document prints none.
+    fields.totalAmount = currentTax === null ? "" : formatNumberForField(lineSum + currentTax);
     changed = true;
   }
   if (currentTotal === null && currentTax !== null) {

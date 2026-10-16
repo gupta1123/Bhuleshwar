@@ -805,6 +805,8 @@ export function TallyPurchasePostingPanel({
   // must not replace them; a failed automatic save waits for the next edit.
   const currentReviewRef = useRef<TallyPostingReview | null>(null);
   const autoSaveFailedReviewRef = useRef<TallyPostingReview | null>(null);
+  const dirtyRef = useRef(dirty);
+  dirtyRef.current = dirty;
 
   const withLiveMasterOptions = useCallback((next: TallyPostingResponse) =>
     liveMasterOptionsRef.current
@@ -842,11 +844,9 @@ export function TallyPurchasePostingPanel({
     }
   }, [caseId, dirty, review, withLiveMasterOptions]);
 
-  // Page-open catalogue load is cache-first. The connector returns its local
-  // incrementally synced catalogue immediately; explicit Refresh remains the
-  // place for an authoritative Tally read. Avoid starting a second full read
-  // on mount: it made the dropdowns disappear and doubled the failure surface
-  // when a live channel reconnected during the request.
+  // Show the saved catalogue immediately, then validate it against a full
+  // live Tally read in the background. A reviewer must not need to discover
+  // and click Refresh to see changed supplier GSTINs or stock-item HSNs.
   useEffect(() => {
     if(approval.enabled&&approval.loading)return;
     if (automaticLiveRefreshRef.current === caseId) return;
@@ -888,10 +888,13 @@ export function TallyPurchasePostingPanel({
         );
         if (cancelled) return false;
         const hydrated = withLiveMasterOptions(prepared);
-        setPayload(hydrated);
-        setReview(hydrated.review);
-        setSupplierLedgerMatch(hydrated.supplierLedgerMatch ?? null);
-        setLineMasterMatches(hydrated.lineMasterMatches ?? []);
+        const editingReview = dirtyRef.current ? currentReviewRef.current : null;
+        setPayload(editingReview ? { ...hydrated, review: editingReview } : hydrated);
+        if (!editingReview) {
+          setReview(hydrated.review);
+          setSupplierLedgerMatch(hydrated.supplierLedgerMatch ?? null);
+          setLineMasterMatches(hydrated.lineMasterMatches ?? []);
+        }
         setSupplierLedgerMatchError(null);
         setLineMasterMatchError(null);
         setLiveMastersReady(true);
@@ -899,8 +902,7 @@ export function TallyPurchasePostingPanel({
         return true;
       };
       // Fill dropdowns and resolve fixed masters from SQL immediately. This
-      // preview is non-authoritative; the live incremental pass below remains
-      // responsible for approval freshness and final validation.
+      // preview is non-authoritative; the full live pass below validates it.
       const applyCachedOptions = async (liveMasters: unknown) => {
         const liveCatalogue = prepareLiveTallyCatalogue(liveMasters, next.review);
         liveMasterResultRef.current = liveCatalogue.compactResult;
@@ -928,12 +930,15 @@ export function TallyPurchasePostingPanel({
             supplierLedgerName:
               next.review?.supplierLedgerName ?? hydrated.review.supplierLedgerName,
           };
-          setPayload({ ...hydrated, review: cachedReview, liveMatchingComplete: false });
-          setReview(cachedReview);
-          setLineMasterMatches(hydrated.lineMasterMatches ?? []);
+          const editingReview = dirtyRef.current ? currentReviewRef.current : null;
+          setPayload({ ...hydrated, review: editingReview ?? cachedReview, liveMatchingComplete: false });
+          if (!editingReview) {
+            setReview(cachedReview);
+            setLineMasterMatches(hydrated.lineMasterMatches ?? []);
+          }
         } catch {
           // An unusable cached preview must never prevent the authoritative
-          // incremental Tally validation that follows.
+          // full Tally validation that follows.
         }
       };
       const servedFromCache = (liveMasters: unknown) => {
@@ -943,16 +948,39 @@ export function TallyPurchasePostingPanel({
           record?.cache?.source === "encrypted_local_agent_incremental"
         );
       };
-      try {
-        setRefreshingMasters(true);
-        setNotice("Loading saved Tally catalogue…");
-        const cachedMasters = await runCashDiscountLiveRequest({
+      const readFreshCatalogue = async () => {
+        setNotice("Checking current Tally masters…");
+        const freshMasters = await runCashDiscountLiveRequest({
           connectionId,
           companyName,
           operation: "ledger_masters",
-          payload: cataloguePayload,
+          payload: { ...cataloguePayload, requireFresh: true },
           onProgress: (message) => { if (!cancelled) setNotice(message); },
         });
+        const validation = freshMasters as { validation?: { mode?: unknown } } | null;
+        if (validation?.validation?.mode !== "full_live_read") {
+          throw new Error("The connector returned a saved catalogue instead of a live Tally scan. Please update the connector and retry Refresh.");
+        }
+        if (!cancelled) await applyCatalogue(freshMasters, "Latest live Tally data loaded.");
+      };
+      try {
+        setRefreshingMasters(true);
+        setNotice("Loading saved Tally catalogue…");
+        let cachedMasters: unknown;
+        try {
+          cachedMasters = await runCashDiscountLiveRequest({
+            connectionId,
+            companyName,
+            operation: "ledger_masters",
+            payload: cataloguePayload,
+            onProgress: (message) => { if (!cancelled) setNotice(message); },
+          });
+        } catch {
+          // A missing or unreadable local catalogue must not require the
+          // reviewer to discover the manual Refresh control.
+          if (!cancelled) await readFreshCatalogue();
+          return;
+        }
         if (cancelled) return;
         if (!servedFromCache(cachedMasters)) {
           // No local catalogue: the connector already did a full live read.
@@ -962,16 +990,14 @@ export function TallyPurchasePostingPanel({
         try {
           await applyCachedOptions(cachedMasters);
         } catch {
-          setError("The saved Tally catalogue could not be opened. Refresh it from Tally.");
-          setNotice(null);
-          return;
+          // The live read below can recover an unusable saved preview.
         }
         if (cancelled) return;
-        setNotice(null);
+        await readFreshCatalogue();
       } catch (refreshError) {
         if (cancelled) return;
         if (!cancelled) {
-          setError(refreshError instanceof Error ? refreshError.message : "Saved Tally catalogue is unavailable.");
+          setError(refreshError instanceof Error ? refreshError.message : "Could not verify the latest Tally masters.");
           setNotice(null);
         }
       } finally {
@@ -983,7 +1009,7 @@ export function TallyPurchasePostingPanel({
       // This effect can be restarted before its asynchronous catalogue load
       // completes (notably by React Strict Mode and approval-state changes).
       // Release this run's guard so the replacement effect is allowed to load
-      // the cached catalogue and perform its incremental live verification.
+      // the cached catalogue and perform its full live verification.
       if (automaticLiveRefreshRef.current === caseId) {
         automaticLiveRefreshRef.current = null;
       }

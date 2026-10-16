@@ -384,6 +384,17 @@ async function POSTHandler(
       const payload = {
         companyName: companyName ?? "Unknown company",
         purpose: "purchase_posting_dropdowns",
+        // Keep the live Tally evidence for the known reproduction masters in
+        // the command result. This is intentionally limited to two names so
+        // diagnostics never copy the entire Tally catalogue into the API.
+        diagnostics: {
+          masterNames: uniqueTextValues(
+            Array.isArray(rawPayload.diagnosticMasterNames)
+              ? rawPayload.diagnosticMasterNames
+              : ["KTC-260707 Test Supplier", "M.S. Scrap & Sponge Iron"],
+            500
+          ).slice(0, 10),
+        },
       };
 
       if (isLocalDbMode()) {

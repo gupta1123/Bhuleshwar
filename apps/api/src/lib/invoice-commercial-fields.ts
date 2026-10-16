@@ -310,5 +310,20 @@ export function applyInvoiceCommercialFieldFallback(
   for (const key of recoverableKeys) {
     if (!next[key] && recovered[key]) next[key] = recovered[key];
   }
+  const partyKey = (value: string | undefined) =>
+    String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const buyerKey = partyKey(next.buyerName || recovered.buyerName);
+  const recoveredSupplierKey = partyKey(recovered.vendorName);
+  if (
+    buyerKey &&
+    partyKey(next.vendorName) === buyerKey &&
+    recoveredSupplierKey &&
+    recoveredSupplierKey !== buyerKey
+  ) {
+    // A buyer masthead is not the supplier when the invoice explicitly labels
+    // a different supplier ledger. Correct the saved extraction as well as the
+    // downstream Tally posting review.
+    next.vendorName = recovered.vendorName;
+  }
   return next;
 }

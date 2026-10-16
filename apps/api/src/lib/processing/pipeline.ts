@@ -3892,6 +3892,18 @@ function correctCommercialTotals(doc: CaseDoc) {
   let taxAmount = parseLooseNumber(fields.taxAmount);
   let changed = lineItems !== doc.lineItems;
 
+  if (
+    isInvoiceDocType(doc.type) &&
+    taxAmount === null &&
+    subtotal !== null &&
+    totalAmount !== null &&
+    totalAmount >= subtotal
+  ) {
+    taxAmount = totalAmount - subtotal;
+    fields.taxAmount = formatNumberForField(taxAmount);
+    changed = true;
+  }
+
   if (isPurchaseOrderDocType(doc.type)) {
     const purchaseOrderTaxRate = inferPurchaseOrderTaxRate(doc, lineItems);
     const lineItemsWithTaxRates = fillPurchaseOrderLineItemTaxRates(lineItems, purchaseOrderTaxRate);

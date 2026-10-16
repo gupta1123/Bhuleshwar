@@ -214,6 +214,43 @@ test("72044900 maps to the combined client stock and Maharashtra purchase rules"
   assert.deepEqual(result.blockers, []);
 });
 
+test("supplier name is recovered from another packet document when invoice OCR omits it", () => {
+  const invoice = invoiceDocument();
+  delete invoice.extracted_fields.vendorName;
+  const supportingDocument = {
+    ...invoice,
+    id: "eway-1",
+    document_type: "E-Way Bill",
+    source_file_name: "eway.pdf",
+    extracted_fields: {
+      supplierGstin,
+      buyerGstin: maharashtraBuyerGstin,
+      dispatchFrom: "Scrap Supplier, Navi Mumbai 400001",
+      referenceInvoiceNumber: "INV-100",
+    },
+  };
+  const result = preparePurchasePosting({
+    documents: [invoice, supportingDocument],
+    masters: completeMasters,
+    mappings: [],
+    savedReview: { sourceReferenceApproved: true },
+    caseStatus: "accepted",
+    connectionReady: true,
+    companyName: "Test Company",
+    companyGstin: maharashtraBuyerGstin,
+    sourceDocumentReference: "https://app.example/cases/case-1?sourceFileId=file-1",
+    duplicateExists: false,
+    accountingSettings: {
+      purchaseGoodsTdsEnabled: false,
+      transporterTdsEnabled: false,
+      gstTdsEnabled: false,
+    },
+  });
+
+  assert.equal(result.source.supplierName, "Scrap Supplier");
+  assert.equal(result.review.supplierLedgerName, "Scrap Supplier");
+});
+
 test("supplier ledger cannot also be selected as an item purchase ledger", () => {
   const document = invoiceDocument();
   const initial = prepare(document);

@@ -618,6 +618,30 @@ function packetVehicleNumber(
   ).toUpperCase().replace(/[^A-Z0-9]/g, "");
 }
 
+function packetSupplierName(
+  invoice: PurchasePostingDocumentInput,
+  documents: PurchasePostingDocumentInput[]
+) {
+  const invoiceFields = fieldsOf(invoice);
+  const invoiceSupplierGstin = normalizeGstin(invoiceFields.supplierGstin);
+  const supplierNameFrom = (document: PurchasePostingDocumentInput) => {
+    const fields = fieldsOf(document);
+    const direct = text(fields.vendorName || fields.supplierName || fields.supplier);
+    if (direct) return direct;
+    // E-Way Bills can identify the supplier in dispatchFrom when invoice OCR
+    // did not expose a vendor-name field.
+    const dispatchFrom = text(fields.dispatchFrom);
+    return dispatchFrom.split(",")[0]?.trim() || "";
+  };
+
+  const ordered = [invoice, ...documents.filter((document) => document.id !== invoice.id)];
+  const matching = ordered.filter((document) => {
+    if (!invoiceSupplierGstin) return true;
+    return normalizeGstin(fieldsOf(document).supplierGstin) === invoiceSupplierGstin;
+  });
+  return matching.map(supplierNameFrom).find(Boolean) || ordered.map(supplierNameFrom).find(Boolean) || "";
+}
+
 function sourceLine(documentId: string, item: CommercialLineItem, index: number): PurchasePostingSourceLine {
   const hsn = normalizeHsn(item.hsnSac);
   const material = materialFromHsn(hsn);
@@ -804,7 +828,7 @@ function buildSource(
     invoiceDate:
       parseDate(fields.documentDate || fields.invoiceDate) ||
       parseDate(commercialFields.documentDate),
-    supplierName: text(fields.vendorName),
+    supplierName: packetSupplierName(document, documents),
     supplierGstin: normalizeGstin(fields.supplierGstin),
     buyerName: text(fields.buyerName),
     buyerGstin: normalizeGstin(fields.buyerGstin),

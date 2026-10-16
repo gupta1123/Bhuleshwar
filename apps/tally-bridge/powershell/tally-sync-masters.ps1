@@ -168,7 +168,22 @@ function Convert-StockItem {
     name = Get-Name -Node $Node
     guid = Get-Text -Node $Node -Name "GUID"
     parent = Get-Text -Node $Node -Name "PARENT"
-    hsnCode = Get-Text -Node $Node -Name "GSTHSNCODE"
+    hsnCode = @(
+      (Get-Text -Node $Node -Name "GSTHSNCODE"),
+      (Get-Text -Node $Node -Name "GSTHSNSACCODE"),
+      (Get-Text -Node $Node -Name "HSNCODE"),
+      (Get-Text -Node $Node -Name "HSNSACCODE"),
+      (Get-Text -Node $Node -Name "GSTOVRDNHSNCODE"),
+      (Get-Text -Node $Node -Name "HSNOVRDNCLASSIFICATION"),
+      (Get-Text -Node $Node -Name "GSTHSNNAME"),
+      (Get-Text -Node $Node -Name "GSTHSNSACNAME")
+    ) | Where-Object { $_ -and $_ -notmatch '^(?i:not found|not available|n/?a|none|null|undefined|-+)$' } | Select-Object -First 1
+    taxRate = @(
+      (Get-Text -Node $Node -Name "GSTTAXRATE"),
+      (Get-Text -Node $Node -Name "RATEOFTAXCALCULATION"),
+      (Get-Text -Node $Node -Name "GSTRATE"),
+      (Get-Text -Node $Node -Name "RATEOFVAT")
+    ) | Where-Object { $_ } | Select-Object -First 1
     unitName = Get-Text -Node $Node -Name "BASEUNITS"
     raw = @{
       gstApplicable = Get-Text -Node $Node -Name "GSTAPPLICABLE"
@@ -208,7 +223,7 @@ $groupNodes = Invoke-TallyCollection `
 $stockItemNodes = Invoke-TallyCollection `
   -CollectionName "Autodealer Stock Items Sync" `
   -TallyType "StockItem" `
-  -Fetch "Name,Parent,GUID,GSTHSNCode,BaseUnits,GSTApplicable" `
+  -Fetch "Name,Parent,GUID,GSTHSNCode,GSTHSNName,GSTHSNSACCode,HSNCode,HSNSACCode,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,BaseUnits,GSTApplicable" `
   -NodeName "STOCKITEM"
 
 $unitNodes = Invoke-TallyCollection `

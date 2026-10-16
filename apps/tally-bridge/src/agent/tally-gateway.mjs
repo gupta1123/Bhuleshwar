@@ -2,6 +2,15 @@ const XML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'":
 function escapeXml(value) { return String(value ?? "").replace(/[&<>"']/g, (character) => XML_ESCAPE[character]); }
 function decodeXml(value) { return String(value || "").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&amp;/gi, "&"); }
 function tag(block, name) { return decodeXml(block.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${name}>`, "i"))?.[1]?.trim() || ""); }
+function hsnCode(block, ...names) {
+  for (const name of names) {
+    const raw = tag(block, name);
+    if (/^(?:not\s+found|not\s+available|n\/?a|none|null|undefined|-+)$/i.test(raw)) continue;
+    const value = raw.replace(/\D/g, "");
+    if (/^\d{4,8}$/.test(value)) return value;
+  }
+  return null;
+}
 function blocks(xml, name) { return [...String(xml || "").matchAll(new RegExp(`<${name}(?:\\s[^>]*)?>[\\s\\S]*?<\\/${name}>`, "gi"))].map((match) => match[0]); }
 function formulaString(value) { return `"${String(value ?? "").replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`; }
 
@@ -80,7 +89,7 @@ export class TallyAgentGateway {
         fieldProfile === "identity" ? ledgerIdentityFields : fieldProfile === "purchase" ? ledgerPurchaseFields : ledgerFullFields },
       stock_item: { collectionType: "Stock Item", block: "STOCKITEM", fields: [
         "Name", "GUID", "MasterID", "AlterID", "Parent", "BaseUnits", "OriginalBaseUnits",
-        "GSTApplicable", "IsGSTApplicable", "GSTHSNCode", "HSNCode", "GSTTaxRate", "RateOfTaxCalculation",
+        "GSTApplicable", "IsGSTApplicable", "GSTHSNCode", "GSTHSNName", "GSTHSNSACCode", "GSTHSNSACName", "HSNCode", "HSNSACCode", "HSNSACName", "GSTOVRDNHSNCODE", "HSNOVRDNCLASSIFICATION", "HSN", "HSNSAC", "HSNCLASSIFICATION", "GSTTaxRate", "RateOfTaxCalculation", "GSTRATE", "RateOfVAT",
       ] },
       group: { collectionType: "Group", block: "GROUP", fields: ["Name", "GUID", "MasterID", "AlterID", "Parent", "IsRevenue"] },
       unit: { collectionType: "Unit", block: "UNIT", fields: ["Name", "GUID", "MasterID", "AlterID", "OriginalName", "DecimalPlaces"] },
@@ -92,7 +101,7 @@ export class TallyAgentGateway {
       const rawClosingBalance = tag(block, "CLOSINGBALANCE") || null;
       const closingNumber = Number(String(rawClosingBalance || "").replace(/,/g, "").replace(/\s*(Dr|Cr)$/i, ""));
       const closingBalanceType = /\bCr$/i.test(String(rawClosingBalance || "")) ? "Cr" : /\bDr$/i.test(String(rawClosingBalance || "")) ? "Dr" : null;
-      const taxRate = tag(block, "GSTTAXRATE") || tag(block, "RATEOFTAXCALCULATION") || null;
+      const taxRate = tag(block, "GSTTAXRATE") || tag(block, "RATEOFTAXCALCULATION") || tag(block, "GSTRATE") || tag(block, "RATEOFVAT") || null;
       return {
         name: tag(block, "NAME"), guid: tag(block, "GUID"), masterId: tag(block, "MASTERID"),
         alterId: Number(tag(block, "ALTERID") || 0), parent: tag(block, "PARENT"), gstin: tag(block, "PARTYGSTIN") || null,
@@ -104,7 +113,9 @@ export class TallyAgentGateway {
         bankAccountNumber: tag(block, "BANKACCOUNTNUMBER") || tag(block, "BANKACCOUNTNO") || null,
         ifscCode: tag(block, "IFSCCODE") || null, branchName: tag(block, "BRANCHNAME") || null,
         accountHolderName: tag(block, "BANKACCHOLDERNAME") || null,
-        hsnCode: tag(block, "GSTHSNCODE") || tag(block, "HSNCODE") || null,
+        // Tally Prime commonly exports the stock-item HSN/SAC entered on the
+        // master as GSTHSNNAME. Keep the older tags for other Tally versions.
+        hsnCode: hsnCode(block, "GSTHSNCODE", "GSTHSNSACCODE", "HSNCODE", "HSNSACCODE", "GSTOVRDNHSNCODE", "HSNOVRDNCLASSIFICATION", "HSN", "HSNSAC", "HSNCLASSIFICATION", "GSTHSNNAME", "GSTHSNSACNAME", "HSNSACNAME"),
         unitName: tag(block, "BASEUNITS") || tag(block, "ORIGINALBASEUNITS") || null,
         baseUnits: tag(block, "BASEUNITS") || null, taxRate,
         closingBalance: Number.isFinite(closingNumber) ? Math.abs(closingNumber) : null,

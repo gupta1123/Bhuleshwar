@@ -151,7 +151,17 @@ function normalizeBaseUrl(value) {
 }
 
 function normalizeTallyUrl(value) {
-  return (value || DEFAULT_TALLY_URL).replace(/\/+$/, "");
+  const raw = (value || DEFAULT_TALLY_URL).replace(/\/+$/, "");
+  try {
+    const url = new URL(raw);
+    // Tally commonly binds only to IPv4 on Windows. Node/Electron may resolve
+    // localhost to ::1 first, which makes the connector report Tally offline
+    // even though http://127.0.0.1:9000 works from the same machine.
+    if (url.hostname.toLowerCase() === "localhost") url.hostname = "127.0.0.1";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return raw;
+  }
 }
 
 function formatTallyConnectivityError(tallyUrl, error) {
@@ -244,6 +254,12 @@ function readConfig() {
 
   if (config.bridgeVersion !== BRIDGE_VERSION) {
     config.bridgeVersion = BRIDGE_VERSION;
+    writeConfig(config);
+  }
+
+  const normalizedTallyUrl = normalizeTallyUrl(config.tallyUrl);
+  if (config.tallyUrl !== normalizedTallyUrl) {
+    config.tallyUrl = normalizedTallyUrl;
     writeConfig(config);
   }
 
@@ -366,6 +382,16 @@ function getUdfTagText(block, tagName) {
 function getTagTexts(block, tagName) {
   const matches = [...block.matchAll(new RegExp(`<${tagName}\\b[^>]*>([\\s\\S]*?)<\\/${tagName}>`, "gi"))];
   return matches.map((match) => cleanXmlText(match[1])).filter(Boolean);
+}
+
+function hsnCodeFromBlock(block, ...tagNames) {
+  for (const tagName of tagNames) {
+    const raw = getTagText(block, tagName) || "";
+    if (/^(?:not\s+found|not\s+available|n\/?a|none|null|undefined|-+)$/i.test(raw)) continue;
+    const value = raw.replace(/\D/g, "");
+    if (/^\d{4,8}$/.test(value)) return value;
+  }
+  return null;
 }
 
 function getAttribute(block, attributeName) {
@@ -2369,7 +2395,7 @@ async function validatePurchasePayloadMasters(tallyUrl, companyName, payload) {
   const stockXml = await exportTallyCollection(tallyUrl, {
       collectionName: "Kalika Validate Purchase Stock",
       tallyType: "StockItem",
-      fetchFields: "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,HSNCode",
+      fetchFields: "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT",
       companyName,
       formulae: [{
         name: stockFilterName,
@@ -3606,6 +3632,7 @@ function toMaster(block, tagName) {
   const taxRate =
     getTagText(block, "RATEOFTAXCALCULATION") ||
     getTagText(block, "GSTTAXRATE") ||
+    getTagText(block, "GSTRATE") ||
     getTagText(block, "RATEOFVAT");
   const closingBalance = parseLedgerClosingBalance(getTagText(block, "CLOSINGBALANCE"));
 
@@ -3628,7 +3655,21 @@ function toMaster(block, tagName) {
     phone,
     contactPerson,
     address,
-    hsnCode: optionalMasterValue(getTagText(block, "GSTHSNCODE") || getTagText(block, "HSNCODE")),
+    hsnCode: optionalMasterValue(hsnCodeFromBlock(
+      block,
+      "GSTHSNCODE",
+      "GSTHSNSACCODE",
+      "HSNCODE",
+      "HSNSACCODE",
+      "GSTOVRDNHSNCODE",
+      "HSNOVRDNCLASSIFICATION",
+      "HSN",
+      "HSNSAC",
+      "HSNCLASSIFICATION",
+      "GSTHSNNAME",
+      "GSTHSNSACNAME",
+      "HSNSACNAME"
+    )),
     unitName: optionalMasterValue(getTagText(block, "BASEUNITS") || getTagText(block, "ORIGINALBASEUNITS")),
     taxRate: optionalMasterValue(taxRate),
     closingBalance: closingBalance.amount,
@@ -3705,11 +3746,21 @@ function toVoucher(block) {
       stockItemName: getTagText(entry, "STOCKITEMNAME"),
       description: getTagText(entry, "DESCRIPTION"),
       hsn:
-        getTagText(entry, "HSNOVRDNCLASSIFICATION") ||
-        getTagText(entry, "GSTHSNNAME") ||
-        getTagText(entry, "GSTOVRDNHSNCODE") ||
-        getTagText(entry, "GSTHSNCODE") ||
-        getTagText(entry, "HSNCODE"),
+        hsnCodeFromBlock(
+          entry,
+          "HSNOVRDNCLASSIFICATION",
+          "GSTOVRDNHSNCODE",
+          "GSTHSNCODE",
+          "GSTHSNSACCODE",
+          "HSNCODE",
+          "HSNSACCODE",
+          "HSN",
+          "HSNSAC",
+          "HSNCLASSIFICATION",
+          "GSTHSNNAME",
+          "GSTHSNSACNAME",
+          "HSNSACNAME"
+        ),
       quantity: getTagText(entry, "BILLEDQTY") || getTagText(entry, "ACTUALQTY"),
       rate: getTagText(entry, "RATE"),
       signedAmount: parseTallyAmount(getTagText(entry, "AMOUNT")),
@@ -6326,7 +6377,7 @@ export async function collectTallyMasters(config, commandPayload = {}) {
     "Name,Parent,GUID,ClosingBalance,PartyGSTIN,IsBillWiseOn,BankName,Bank,BankerName,BankAccountNumber,AccountNumber,BankAccountNo,BankAcNo,AcNumber,IFSCCODE,IFSCODE,IFSC,BankIFSCCODE,BranchName,BankBranchName,Branch,BankAccHolderName,BankAccountName,BankAccountHolderName,AccountHolderName,Email,EmailId,LedgerEmail,LedgerEmailId,LedgerMobile,Mobile,MobileNo,PhoneNumber,Phone,LedgerPhone,ContactPerson,Contact,AttentionTo,Address,Address1,Address2,Address3,Address4,Pincode,TaxType,GSTDutyHead,RateOfTaxCalculation");
   fetchMaster("groupXml", "group", "Autodealer Groups Sync", "Name,Parent,GUID");
   fetchMaster("stockItemXml", "stock_item", "Autodealer Stock Items Sync",
-    "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,HSNCode,GSTTaxRate,RateOfTaxCalculation,IsGSTApplicable");
+    "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,IsGSTApplicable");
   fetchMaster("unitXml", "unit", "Autodealer Units Sync", "Name,GUID,OriginalName,DecimalPlaces,IsSimpleUnit");
   fetchMaster("voucherTypeXml", "voucher_type", "Autodealer Voucher Types Sync", "Name,Parent,GUID");
   if (shouldFetch("ledger")) {
@@ -6433,7 +6484,7 @@ async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
     collectionName: "Kalika Live Purchase Stock Items",
     tallyType: "StockItem",
     fetchFields:
-      "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,HSNCode,GSTTaxRate,RateOfTaxCalculation,IsGSTApplicable",
+      "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,IsGSTApplicable",
     companyName,
   });
   const unitXml = await exportTallyCollection(tallyUrl, {
@@ -8103,6 +8154,9 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
                   totals: { ...localCatalogue.totals, godown: godowns.length },
                 }
               : localCatalogue;
+            if (isPurchaseRead) {
+              log("info", `Purchase master catalogue source=local ledgers=${catalogue.masters?.ledgers?.length ?? 0}, stockItems=${catalogue.masters?.stockItems?.length ?? 0}, units=${catalogue.masters?.units?.length ?? 0}, godowns=${catalogue.masters?.godowns?.length ?? 0}.`);
+            }
             return bankIdentity ? { ...catalogue, bankDocumentIdentity: bankIdentity } : catalogue;
           }
           const masters = isPurchaseRead
@@ -8124,6 +8178,7 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
               });
           if (isPurchaseRead) {
             const validatedAt = new Date().toISOString();
+            log("info", `Purchase master catalogue source=full_live ledgers=${masters.masters?.ledgers?.length ?? 0}, stockItems=${masters.masters?.stockItems?.length ?? 0}, units=${masters.masters?.units?.length ?? 0}, godowns=${masters.masters?.godowns?.length ?? 0}.`);
             return {
               ...masters,
               validatedAt,

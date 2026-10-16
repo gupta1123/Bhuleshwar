@@ -503,11 +503,22 @@ function supportingInvoiceReference(document: PurchasePostingDocumentInput) {
 
 function documentTaxablePaise(document: PurchasePostingDocumentInput) {
   const fields = fieldsOf(document);
-  const declared = moneyPaise(fields.totalTaxableAmount || fields.subtotal);
-  if (declared !== null && declared > 0) return declared;
   const lines = readStoredLineItems(document.extracted_fields);
   const fromLines = sum(lines.map((line) => moneyPaise(line.taxableAmount)));
-  return fromLines > 0 ? fromLines : null;
+  const declaredCandidates = [
+    moneyPaise(fields.totalTaxableAmount),
+    moneyPaise(fields.subtotal),
+  ].filter((value): value is number => value !== null && value > 0);
+  const declared = declaredCandidates.length > 0
+    ? Math.max(...declaredCandidates)
+    : null;
+
+  // OCR/AI occasionally reads a quantity or another table value into
+  // totalTaxableAmount (for example 20,300 instead of 8,61,100). When the
+  // stored commercial rows add up to a larger positive amount, the rows are
+  // the stronger accounting signal and are also what the voucher will use.
+  if (fromLines > 0 && (declared === null || fromLines > declared)) return fromLines;
+  return declared ?? (fromLines > 0 ? fromLines : null);
 }
 
 function findLinkedLineSource(
@@ -1093,6 +1104,21 @@ function purchaseLedgerForLine(
     : localPurchase ? "M.S. Scrap Purchase" : "O.M.S. Scrap Purchase";
   const legacy = exactMasterName(masters, legacyName, ["ledger"]);
   if (legacy) return legacy;
+
+  // Small/test companies often have only one purchase ledger for the
+  // material, and its name may use the interstate prefix even when the
+  // current invoice is intrastate. Auto-select that unique material ledger;
+  // the tax mode is still determined independently from the two GST states.
+  const materialLedgers = dedupeLedgerMasters(activeMasters(masters)).filter((master) => {
+    if (!/purchase/i.test(masterIdentity(master))) return false;
+    const identity = masterIdentity(master);
+    return material === "ms_scrap"
+      ? /scrap/i.test(identity)
+      : material === "sponge_iron"
+        ? /sponge|iron/i.test(identity)
+        : false;
+  });
+  if (materialLedgers.length === 1) return materialLedgers[0].tally_name;
 
   return uniqueRankedLedger(masters, (master) => {
     const identity = masterIdentity(master);

@@ -947,6 +947,71 @@ test("missing invoice lines recover only from one strongly linked supporting doc
   assert.ok(result.warnings.some((warning) => warning.code === "INVOICE_LINES_RECOVERED_FROM_LINKED_DOCUMENT"));
 });
 
+test("linked invoice recovery ignores an obviously corrupted declared taxable total", () => {
+  const invoice = invoiceDocument({
+    totalAmount: "1016098.00",
+    taxAmount: "154998.00",
+    lines: [],
+  });
+  invoice.extracted_fields = {
+    ...invoice.extracted_fields,
+    subtotal: "861100.00",
+    totalTaxableAmount: "1",
+  };
+  delete invoice.extracted_fields.__lineItems;
+
+  const eway = {
+    id: "eway-corrupt-total",
+    document_type: "E-Way Bill",
+    source_file_name: "eway.pdf",
+    source_hint: "eway.pdf",
+    title: "E-Way Bill",
+    extracted_fields: {
+      referenceInvoiceNumber: "INV-100",
+      supplierGstin,
+      buyerGstin: maharashtraBuyerGstin,
+      totalTaxableAmount: "20300",
+      __lineItems: [
+        {
+          description: "MS Scrap",
+          hsnSac: "72044900",
+          quantity: "20300",
+          unit: "KG",
+          rate: "42",
+          taxableAmount: "852600",
+        },
+        {
+          description: "Freight and handling",
+          hsnSac: "9965",
+          quantity: "1",
+          unit: "lot",
+          rate: "8500",
+          taxableAmount: "8500",
+        },
+      ],
+    },
+  };
+
+  const result = preparePurchasePosting({
+    documents: [invoice, eway],
+    masters: completeMasters,
+    mappings: [],
+    savedReview: { sourceReferenceApproved: true, invoiceDate: "" },
+    caseStatus: "accepted",
+    connectionReady: true,
+    masterDataReady: true,
+    companyName: "Test Company",
+    companyGstin: maharashtraBuyerGstin,
+    sourceDocumentReference: "https://app.example/cases/case-1?sourceFileId=file-1",
+  });
+
+  assert.equal(result.source.lineRecovery, "linked_document");
+  assert.equal(result.source.lineSourceDocumentId, "eway-corrupt-total");
+  assert.equal(result.review.lines.length, 1);
+  assert.equal(result.review.lines[0].purchaseLedgerName, "M.S. Scrap Purchase");
+  assert.ok(!result.blockers.some((blocker) => blocker.code === "LINE_ITEMS_REQUIRED"));
+});
+
 test("ambiguous supporting documents do not silently recover invoice lines", () => {
   const invoice = invoiceDocument();
   invoice.extracted_fields = { ...invoice.extracted_fields };

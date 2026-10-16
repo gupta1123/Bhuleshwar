@@ -217,6 +217,7 @@ test("72044900 maps to the combined client stock and Maharashtra purchase rules"
 test("supplier name is recovered from another packet document when invoice OCR omits it", () => {
   const invoice = invoiceDocument();
   delete invoice.extracted_fields.vendorName;
+  invoice.markdown = "Tax Invoice\nSupplier: Scrap Supplier\nSupplier GSTIN: 27AAAAA0000A1Z5";
   const supportingDocument = {
     ...invoice,
     id: "eway-1",

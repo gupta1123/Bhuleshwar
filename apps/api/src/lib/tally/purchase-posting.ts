@@ -626,7 +626,13 @@ function packetSupplierName(
   const invoiceSupplierGstin = normalizeGstin(invoiceFields.supplierGstin);
   const supplierNameFrom = (document: PurchasePostingDocumentInput) => {
     const fields = fieldsOf(document);
-    const direct = text(fields.vendorName || fields.supplierName || fields.supplier);
+    const commercialFields = extractInvoiceCommercialFieldsFromText(document.markdown);
+    const direct = text(
+      fields.vendorName ||
+      fields.supplierName ||
+      fields.supplier ||
+      commercialFields.vendorName
+    );
     if (direct) return direct;
     // E-Way Bills can identify the supplier in dispatchFrom when invoice OCR
     // did not expose a vendor-name field.

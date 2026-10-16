@@ -2384,7 +2384,7 @@ async function validatePurchasePayloadMasters(tallyUrl, companyName, payload) {
   const ledgerXml = await exportTallyCollection(tallyUrl, {
       collectionName: "Kalika Validate Purchase Ledgers",
       tallyType: "Ledger",
-      fetchFields: "Name,Parent,GUID,PartyGSTIN,TaxType,GSTDutyHead,RateOfTaxCalculation",
+      fetchFields: "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,TaxType,GSTDutyHead,RateOfTaxCalculation",
       companyName,
       formulae: [{
         name: ledgerFilterName,
@@ -6374,7 +6374,7 @@ export async function collectTallyMasters(config, commandPayload = {}) {
     fetches.push([key, bankIdentity ? request : request()]);
   };
   fetchMaster("ledgerXml", "ledger", "Autodealer Ledgers Sync",
-    "Name,Parent,GUID,ClosingBalance,PartyGSTIN,IsBillWiseOn,BankName,Bank,BankerName,BankAccountNumber,AccountNumber,BankAccountNo,BankAcNo,AcNumber,IFSCCODE,IFSCODE,IFSC,BankIFSCCODE,BranchName,BankBranchName,Branch,BankAccHolderName,BankAccountName,BankAccountHolderName,AccountHolderName,Email,EmailId,LedgerEmail,LedgerEmailId,LedgerMobile,Mobile,MobileNo,PhoneNumber,Phone,LedgerPhone,ContactPerson,Contact,AttentionTo,Address,Address1,Address2,Address3,Address4,Pincode,TaxType,GSTDutyHead,RateOfTaxCalculation");
+    "Name,Parent,GUID,ClosingBalance,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,IsBillWiseOn,BankName,Bank,BankerName,BankAccountNumber,AccountNumber,BankAccountNo,BankAcNo,AcNumber,IFSCCODE,IFSCODE,IFSC,BankIFSCCODE,BranchName,BankBranchName,Branch,BankAccHolderName,BankAccountName,BankAccountHolderName,AccountHolderName,Email,EmailId,LedgerEmail,LedgerEmailId,LedgerMobile,Mobile,MobileNo,PhoneNumber,Phone,LedgerPhone,ContactPerson,Contact,AttentionTo,Address,Address1,Address2,Address3,Address4,Pincode,TaxType,GSTDutyHead,RateOfTaxCalculation");
   fetchMaster("groupXml", "group", "Autodealer Groups Sync", "Name,Parent,GUID");
   fetchMaster("stockItemXml", "stock_item", "Autodealer Stock Items Sync",
     "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,IsGSTApplicable");
@@ -6471,7 +6471,7 @@ async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
     collectionName: "Kalika Live Purchase Ledgers",
     tallyType: "Ledger",
     fetchFields:
-      "Name,Parent,GUID,PartyGSTIN,TaxType,GSTDutyHead,RateOfTaxCalculation",
+      "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,TaxType,GSTDutyHead,RateOfTaxCalculation",
     companyName,
   });
   const groupXml = await exportTallyCollection(tallyUrl, {

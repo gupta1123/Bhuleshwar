@@ -78,7 +78,7 @@ export class TallyAgentGateway {
 
   async changedMasters(identity, { masterType, afterAlterId = 0, batchSize = 50, fieldProfile = "full", signal } = {}) {
     const ledgerIdentityFields = ["Name", "GUID", "MasterID", "AlterID", "Parent"];
-    const ledgerPurchaseFields = [...ledgerIdentityFields, "PartyGSTIN", "TaxType", "GSTDutyHead", "RateOfTaxCalculation"];
+    const ledgerPurchaseFields = [...ledgerIdentityFields, "PartyGSTIN", "GSTIN", "GSTRegistrationNumber", "GSTRegNumber", "TaxType", "GSTDutyHead", "RateOfTaxCalculation"];
     const ledgerFullFields = [
       ...ledgerPurchaseFields, "ClosingBalance", "IsBillWiseOn", "Alias", "MailingName",
       "StateName", "CountryName", "Email", "LedgerMobile", "LedgerContact",
@@ -104,7 +104,8 @@ export class TallyAgentGateway {
       const taxRate = tag(block, "GSTTAXRATE") || tag(block, "RATEOFTAXCALCULATION") || tag(block, "GSTRATE") || tag(block, "RATEOFVAT") || null;
       return {
         name: tag(block, "NAME"), guid: tag(block, "GUID"), masterId: tag(block, "MASTERID"),
-        alterId: Number(tag(block, "ALTERID") || 0), parent: tag(block, "PARENT"), gstin: tag(block, "PARTYGSTIN") || null,
+        alterId: Number(tag(block, "ALTERID") || 0), parent: tag(block, "PARENT"),
+        gstin: tag(block, "PARTYGSTIN") || tag(block, "GSTIN") || tag(block, "GSTREGISTRATIONNUMBER") || tag(block, "GSTREGNUMBER") || null,
         alias: tag(block, "ALIAS") || null, mailingName: tag(block, "MAILINGNAME") || null,
         stateName: tag(block, "STATENAME") || null, countryName: tag(block, "COUNTRYNAME") || null,
         email: tag(block, "EMAIL") || null, phone: tag(block, "LEDGERMOBILE") || null,

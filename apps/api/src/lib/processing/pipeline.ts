@@ -2350,9 +2350,13 @@ function extractEWayCommercialAmounts(text: string, fields: Partial<Record<Field
   const existingSubtotal = normalizeEWayAmount(fields.subtotal);
   const existingTax = normalizeEWayAmount(fields.taxAmount);
   const existingTotal = normalizeEWayAmount(fields.totalAmount);
-  const subtotal = existingSubtotal ?? amounts[0] ?? null;
+  // Prefer a clearly labelled amount from the E-Way Bill text over a model
+  // value. A model can otherwise copy a prominent quantity into `subtotal`.
+  const subtotal = amounts[0] ?? existingSubtotal ?? null;
   const blockTotal = amounts.length >= 2 ? amounts[amounts.length - 1] : null;
-  const total = existingTotal ?? (blockTotal !== null && subtotal !== null && blockTotal >= subtotal ? blockTotal : null);
+  const total =
+    (blockTotal !== null && subtotal !== null && blockTotal >= subtotal ? blockTotal : null) ??
+    existingTotal;
   const taxAmount =
     existingTax ??
     (subtotal !== null && total !== null && total >= subtotal
@@ -2458,13 +2462,11 @@ function applyEWayBillAddressFallback(
     ...(!referenceInvoiceNumber || referenceInvoiceNumber === fields.referenceInvoiceNumber ? {} : { referenceInvoiceNumber }),
     ...(fields.documentDate || !documentDate ? {} : { documentDate }),
     ...(!validityDate || validityDate === fields.validityDate ? {} : { validityDate }),
-    ...(fields.subtotal || !amounts.subtotal ? {} : { subtotal: amounts.subtotal }),
-    ...(fields.totalTaxableAmount || !(amounts.totalTaxableAmount ?? amounts.subtotal)
-      ? {}
-      : { totalTaxableAmount: amounts.totalTaxableAmount ?? amounts.subtotal }),
-    ...(fields.taxAmount || !amounts.taxAmount ? {} : { taxAmount: amounts.taxAmount }),
-    ...(fields.taxRate || !amounts.taxRate ? {} : { taxRate: amounts.taxRate }),
-    ...(fields.totalAmount || !amounts.totalAmount ? {} : { totalAmount: amounts.totalAmount }),
+    ...(amounts.subtotal ? { subtotal: amounts.subtotal } : {}),
+    ...(amounts.totalTaxableAmount ? { totalTaxableAmount: amounts.totalTaxableAmount } : {}),
+    ...(amounts.taxAmount ? { taxAmount: amounts.taxAmount } : {}),
+    ...(amounts.taxRate ? { taxRate: amounts.taxRate } : {}),
+    ...(amounts.totalAmount ? { totalAmount: amounts.totalAmount } : {}),
     ...(!transporterName ? {} : { transporterName }),
     ...(fields.lorryReceiptNumber || !transport.lorryReceiptNumber ? {} : { lorryReceiptNumber: transport.lorryReceiptNumber }),
     ...(!vehicleNumber || vehicleNumber === fields.vehicleNumber ? {} : { vehicleNumber }),
@@ -2607,6 +2609,46 @@ const COMMERCIAL_TOTAL_DOC_TYPES = new Set<DocType>([
   "Invoice",
   "Tax Invoice",
 ]);
+
+function correctEWayBillTotals(doc: CaseDoc) {
+  if (doc.type !== "E-Way Bill" || !doc.lineItems?.length) return doc;
+
+  const lineSum = doc.lineItems
+    .map((item) => parseLooseNumber(item.taxableAmount ?? item.lineTotal))
+    .filter((value): value is number => value !== null && value >= 0)
+    .reduce((total, value) => total + value, 0);
+  if (lineSum <= 0) return doc;
+
+  const fields = { ...doc.fields };
+  let changed = false;
+  const currentSubtotal = parseLooseNumber(fields.subtotal);
+  const currentTaxable = parseLooseNumber(fields.totalTaxableAmount);
+  const currentTotal = parseLooseNumber(fields.totalAmount);
+  const currentTax = parseLooseNumber(fields.taxAmount);
+
+  // The E-Way Bill goods table is authoritative when it contains monetary
+  // taxable amounts. This prevents a quantity such as 20,300 from surviving
+  // as the document subtotal.
+  if (currentSubtotal === null || !numbersClose(currentSubtotal, lineSum, 0.5)) {
+    fields.subtotal = formatNumberForField(lineSum);
+    changed = true;
+  }
+  if (currentTaxable === null || !numbersClose(currentTaxable, lineSum, 0.5)) {
+    fields.totalTaxableAmount = formatNumberForField(lineSum);
+    changed = true;
+  }
+
+  if (currentTax === null && currentTotal !== null && currentTotal >= lineSum) {
+    fields.taxAmount = formatNumberForField(currentTotal - lineSum);
+    changed = true;
+  }
+  if (currentTotal === null && currentTax !== null) {
+    fields.totalAmount = formatNumberForField(lineSum + currentTax);
+    changed = true;
+  }
+
+  return changed ? { ...doc, fields } : doc;
+}
 
 const WEIGHT_MISMATCH_FIELDS = new Set<FieldKey>(["grossWeight", "tareWeight", "netWeight"]);
 const VEHICLE_CONSENSUS_DOC_TYPE_WEIGHT: Partial<Record<DocType, number>> = {
@@ -3831,6 +3873,7 @@ function correctInvoiceTotalMisreadAsTaxableValue(doc: CaseDoc) {
 }
 
 function correctCommercialTotals(doc: CaseDoc) {
+  doc = correctEWayBillTotals(doc);
   doc = correctInvoiceTotalMisreadAsTaxableValue(doc);
   if (!COMMERCIAL_TOTAL_DOC_TYPES.has(doc.type) || !doc.lineItems?.length) return doc;
 

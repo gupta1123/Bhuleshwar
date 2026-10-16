@@ -153,7 +153,12 @@ function Convert-Ledger {
     name = $name
     guid = Get-Text -Node $Node -Name "GUID"
     parent = $parent
-    gstin = (Get-Text -Node $Node -Name "PARTYGSTIN")
+    gstin = @(
+      (Get-Text -Node $Node -Name "PARTYGSTIN"),
+      (Get-Text -Node $Node -Name "GSTIN"),
+      (Get-Text -Node $Node -Name "GSTREGISTRATIONNUMBER"),
+      (Get-Text -Node $Node -Name "GSTREGNUMBER")
+    ) | Where-Object { $_ } | Select-Object -First 1
     raw = @{
       parent = $parent
       reservedName = Get-Attribute -Node $Node -Name "RESERVEDNAME"
@@ -175,8 +180,12 @@ function Convert-StockItem {
       (Get-Text -Node $Node -Name "HSNSACCODE"),
       (Get-Text -Node $Node -Name "GSTOVRDNHSNCODE"),
       (Get-Text -Node $Node -Name "HSNOVRDNCLASSIFICATION"),
+      (Get-Text -Node $Node -Name "HSN"),
+      (Get-Text -Node $Node -Name "HSNSAC"),
+      (Get-Text -Node $Node -Name "HSNCLASSIFICATION"),
       (Get-Text -Node $Node -Name "GSTHSNNAME"),
-      (Get-Text -Node $Node -Name "GSTHSNSACNAME")
+      (Get-Text -Node $Node -Name "GSTHSNSACNAME"),
+      (Get-Text -Node $Node -Name "HSNSACNAME")
     ) | Where-Object { $_ -and $_ -notmatch '^(?i:not found|not available|n/?a|none|null|undefined|-+)$' } | Select-Object -First 1
     taxRate = @(
       (Get-Text -Node $Node -Name "GSTTAXRATE"),
@@ -211,7 +220,7 @@ Write-Host "Company: $CompanyName"
 $ledgerNodes = Invoke-TallyCollection `
   -CollectionName "Autodealer Ledgers Sync" `
   -TallyType "Ledger" `
-  -Fetch "Name,Parent,GUID,PartyGSTIN" `
+  -Fetch "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber" `
   -NodeName "LEDGER"
 
 $groupNodes = Invoke-TallyCollection `
@@ -223,7 +232,7 @@ $groupNodes = Invoke-TallyCollection `
 $stockItemNodes = Invoke-TallyCollection `
   -CollectionName "Autodealer Stock Items Sync" `
   -TallyType "StockItem" `
-  -Fetch "Name,Parent,GUID,GSTHSNCode,GSTHSNName,GSTHSNSACCode,HSNCode,HSNSACCode,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,BaseUnits,GSTApplicable" `
+  -Fetch "Name,Parent,GUID,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,BaseUnits,GSTApplicable" `
   -NodeName "STOCKITEM"
 
 $unitNodes = Invoke-TallyCollection `

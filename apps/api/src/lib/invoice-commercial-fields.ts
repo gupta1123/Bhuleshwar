@@ -186,6 +186,45 @@ function sumAmounts(values: string[]) {
   return Number.isFinite(total) ? String(Math.round(total * 100) / 100) : "";
 }
 
+function amountPaise(value: unknown) {
+  const normalized = String(value ?? "").replace(/[,₹\s]/g, "").replace(/^(?:INR|RS\.?)/i, "");
+  if (!/^[+-]?\d+(?:\.\d{1,2})?$/.test(normalized)) return null;
+  const amount = Number(normalized);
+  return Number.isFinite(amount) ? Math.round(amount * 100) : null;
+}
+
+// The markdown also contains an "Extracted Fields" section. It can repeat an
+// incorrect AI value, so financial corrections must use the original text only.
+export function invoiceVisibleText(markdown: string | null | undefined) {
+  const raw = String(markdown ?? "");
+  const marker = "## Visible Text";
+  const start = raw.indexOf(marker);
+  if (start >= 0) return raw.slice(start + marker.length).replace(/^#+\s+Page\s+\d+\s*$/gim, "").trim();
+  return raw.includes("## Extracted Fields") ? "" : raw;
+}
+
+// Replace a plausible-looking AI amount only when the printed taxable value,
+// GST and invoice total agree to the paise. Otherwise preserve the discrepancy
+// for review instead of manufacturing an amount from arithmetic alone.
+export function verifiedInvoiceCommercialAmounts(
+  fields: Record<string, unknown>,
+  visibleText: string | null | undefined
+) {
+  const printed = extractInvoiceCommercialFieldsFromText(visibleText);
+  const taxable = amountPaise(fields.totalTaxableAmount ?? fields.subtotal) ??
+    amountPaise(amountNearLabel(String(visibleText ?? ""), "TAXABLE\\s+(?:VALUE|AMOUNT)"));
+  const total = amountPaise(fields.totalAmount) ?? amountPaise(printed.totalAmount);
+  const tax = amountPaise(printed.taxAmount);
+  if (taxable === null || total === null || tax === null || Math.abs(taxable + tax - total) > 1) {
+    return null;
+  }
+  const freight = amountPaise(printed.freightAmount);
+  return {
+    taxAmount: printed.taxAmount,
+    freightAmount: freight !== null && freight > 0 && freight <= taxable ? printed.freightAmount : "",
+  };
+}
+
 export function extractInvoiceCommercialFieldsFromText(
   visibleText: string | null | undefined
 ): InvoiceCommercialFields {
@@ -309,6 +348,11 @@ export function applyInvoiceCommercialFieldFallback(
 
   for (const key of recoverableKeys) {
     if (!next[key] && recovered[key]) next[key] = recovered[key];
+  }
+  const verifiedAmounts = verifiedInvoiceCommercialAmounts(next, visibleText);
+  if (verifiedAmounts) {
+    next.taxAmount = verifiedAmounts.taxAmount;
+    if (verifiedAmounts.freightAmount) next.freightAmount = verifiedAmounts.freightAmount;
   }
   const partyKey = (value: string | undefined) =>
     String(value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();

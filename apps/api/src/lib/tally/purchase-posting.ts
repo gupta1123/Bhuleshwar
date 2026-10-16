@@ -1,5 +1,9 @@
 import { readStoredLineItems } from "@/lib/line-items";
-import { extractInvoiceCommercialFieldsFromText } from "@/lib/invoice-commercial-fields";
+import {
+  extractInvoiceCommercialFieldsFromText,
+  invoiceVisibleText,
+  verifiedInvoiceCommercialAmounts,
+} from "@/lib/invoice-commercial-fields";
 import type {
   PurchaseAccountingSettings,
   PurchaseValidationPolicy,
@@ -182,6 +186,8 @@ export type PurchasePostingSource = {
   invoiceTdsAmount: string;
   invoiceTdsRate: string;
   invoiceFreightAmount: string;
+  invoiceFreightVerified: boolean;
+  invoiceFreightExtractedAmount: string;
   invoiceFreightGstRate: string;
   invoiceTds194qAmount: string;
   invoiceTds194qRate: string;
@@ -811,6 +817,7 @@ function buildSource(
 ): PurchasePostingSource {
   const fields = fieldsOf(document);
   const commercialFields = extractInvoiceCommercialFieldsFromText(document.markdown);
+  const verifiedAmounts = verifiedInvoiceCommercialAmounts(fields, invoiceVisibleText(document.markdown));
   // Freight printed as an invoice row ("Transportation Charges") is booked on
   // the freight ledger, never as a stock line. Keeping it in both places
   // counted it twice and inflated GST, 194Q and the total.
@@ -821,7 +828,13 @@ function buildSource(
   const freightRows = itemRows.filter(({ item, line }) => isFreightChargeRow(item, line));
   const lines = itemRows.filter((row) => !freightRows.includes(row)).map(({ line }) => line);
   const freightFromRows = sum(freightRows.map(({ line }) => moneyPaise(line.taxableAmount)));
-  const printedFreight = text(fields.freightAmount) || commercialFields.freightAmount;
+  const printedTaxable = moneyPaise(fields.totalTaxableAmount ?? fields.subtotal);
+  const goodsTaxable = sum(lines.map((line) => moneyPaise(line.taxableAmount)));
+  const freightRowsAgreeWithInvoice = freightFromRows > 0 && printedTaxable !== null &&
+    Math.abs(goodsTaxable + freightFromRows - printedTaxable) <= TOTAL_TOLERANCE_PAISE;
+  const printedFreight = freightRowsAgreeWithInvoice
+    ? formatPaise(freightFromRows)
+    : verifiedAmounts?.freightAmount || text(fields.freightAmount) || commercialFields.freightAmount;
   return {
     documentId: document.id,
     documentType: document.document_type,
@@ -841,12 +854,14 @@ function buildSource(
     vehicleNumber: packetVehicleNumber(document, documents),
     invoiceTaxableAmount: text(fields.totalTaxableAmount || fields.subtotal),
     invoiceTaxRate: text(fields.taxRate),
-    invoiceTaxAmount: text(fields.taxAmount) || commercialFields.taxAmount,
+    invoiceTaxAmount: verifiedAmounts?.taxAmount || text(fields.taxAmount) || commercialFields.taxAmount,
     invoiceTotal: text(fields.totalAmount),
     invoiceTdsAmount: text(fields.tdsAmount) || commercialFields.tdsAmount,
     invoiceTdsRate: text(fields.tdsRate) || commercialFields.tdsRate,
     invoiceFreightAmount:
       printedFreight || (freightFromRows > 0 ? formatPaise(freightFromRows) : ""),
+    invoiceFreightVerified: freightRowsAgreeWithInvoice || Boolean(verifiedAmounts?.freightAmount),
+    invoiceFreightExtractedAmount: text(fields.freightAmount),
     invoiceFreightGstRate:
       text(fields.freightGstRate) || commercialFields.freightGstRate ||
       (printedFreight ? "" : freightRows.map(({ line }) => line.taxRate).find(Boolean) || ""),
@@ -1356,7 +1371,12 @@ function buildDefaultReview(
     sgstLedgerName: exactMasterName(masters, saved?.sgstLedgerName || "", ["ledger", "gst_ledger", "tax_ledger"]) || baseReview.sgstLedgerName,
     igstLedgerName: exactMasterName(masters, saved?.igstLedgerName || "", ["ledger", "gst_ledger", "tax_ledger"]) || baseReview.igstLedgerName,
     freightAmount: moneyPaise(source.invoiceFreightAmount)
-      ? saved?.freightAmount ?? baseReview.freightAmount
+      ? source.invoiceFreightVerified &&
+          source.invoiceFreightExtractedAmount &&
+          moneyPaise(saved?.freightAmount) === moneyPaise(source.invoiceFreightExtractedAmount) &&
+          moneyPaise(source.invoiceFreightAmount) !== moneyPaise(source.invoiceFreightExtractedAmount)
+        ? baseReview.freightAmount
+        : saved?.freightAmount ?? baseReview.freightAmount
       : "",
     freightGstRate: moneyPaise(source.invoiceFreightAmount)
       ? saved?.freightGstRate ?? baseReview.freightGstRate

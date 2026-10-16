@@ -337,6 +337,50 @@ test("the Nyx sample's goods plus freight reconcile GST and total without round-
   assert.equal(result.calculation.roundOffAmount, "0.00");
 });
 
+test("an already-saved Nyx review recovers printed freight and GST rather than trusting the erroneous extracted summary", () => {
+  const invoice = invoiceDocument({
+    totalAmount: "1016098.00",
+    taxAmount: "153468.00",
+    tdsAmount: "",
+    lines: [
+      { description: "M.S. Scrap & Sponge Iron", hsnSac: "7204", quantity: "20300", unit: "KG", rate: "42.00", taxableAmount: "852600.00", taxRate: "18" },
+      { description: "Freight and handling", hsnSac: "9965", quantity: "1", unit: "lot", rate: "8500.00", taxableAmount: "8500.00", taxRate: "18" },
+    ],
+  });
+  Object.assign(invoice.extracted_fields, {
+    totalTaxableAmount: "861100.00",
+    freightAmount: "42.00",
+    supplierGstin: "27ABCDE1234F1Z0",
+  });
+  invoice.markdown = `## Extracted Fields
+- **Freight Amount**: 42.00
+- **Tax Amount**: 153468.00
+
+## Visible Text
+1 M.S. Scrap & Sponge Iron 7204 20,300 kg INR 42.00/kg INR 852,600.00
+2 Freight and handling 9965 1 lot INR 8,500.00 INR 8,500.00
+Taxable value INR 861,100.00
+CGST @ 9% INR 77,499.00
+SGST @ 9% INR 77,499.00
+Grand total INR 1,016,098.00`;
+  const result = prepare(invoice, {
+    savedReview: { freightAmount: "42.00", applyTds194q: false, applyTransportTds: false, applyGstTds: false },
+    accountingSettings: { purchaseGoodsTdsEnabled: false, transporterTdsEnabled: false, gstTdsEnabled: false },
+  });
+  assert.equal(result.source.invoiceFreightAmount, "8500.00");
+  assert.equal(result.source.invoiceTaxAmount, "154998");
+  assert.equal(result.review.freightAmount, "8500.00");
+  assert.equal(result.calculation.gstDifference, "0.00");
+  assert.equal(result.calculation.totalDifference, "0.00");
+  assert.equal(result.calculation.roundOffAmount, "0.00");
+
+  const manuallyChanged = prepare(invoice, {
+    savedReview: { freightAmount: "7000.00", applyTds194q: false, applyTransportTds: false, applyGstTds: false },
+    accountingSettings: { purchaseGoodsTdsEnabled: false, transporterTdsEnabled: false, gstTdsEnabled: false },
+  });
+  assert.equal(manuallyChanged.review.freightAmount, "7000.00");
+});
+
 test("supplier ledger cannot also be selected as an item purchase ledger", () => {
   const document = invoiceDocument();
   const initial = prepare(document);

@@ -35,7 +35,83 @@ import {
   buildOpenBillAmountIndex,
   matchOpenBillsByAmount,
   sharedPurchaseDocumentFileName,
+  parseMasterCollection,
+  mergeTargetedPurchaseLedgerDetails,
+  purchaseMasterDiagnostics,
+  shouldUseLivePurchaseMasterRead,
 } from "./bridge.mjs";
+
+test("purchase refreshes bypass the stale incremental master catalogue", () => {
+  assert.equal(shouldUseLivePurchaseMasterRead(true, { requireFresh: true }), true);
+  assert.equal(shouldUseLivePurchaseMasterRead(true, { requireFresh: false }), false);
+  assert.equal(shouldUseLivePurchaseMasterRead(false, { requireFresh: true }), false);
+});
+
+test("purchase master parsing reads nested and attribute GSTIN/HSN values", () => {
+  const xml = `
+    <ENVELOPE><BODY>
+      <LEDGER NAME="KTC-260707 Test Supplier">
+        <NAME>KTC-260707 Test Supplier</NAME>
+        <LEDGERGSTREGDETAILS.LIST GSTIN="27ABCDE1234F1Z0"><REGISTRATIONTYPE>Regular</REGISTRATIONTYPE></LEDGERGSTREGDETAILS.LIST>
+      </LEDGER>
+      <STOCKITEM NAME="M.S. Scrap &amp; Sponge Iron">
+        <NAME>M.S. Scrap &amp; Sponge Iron</NAME><BASEUNITS>KG</BASEUNITS>
+        <GSTDETAILS.LIST><HSNCODE>Not Found</HSNCODE><GSTHSNNAME>7204 - Ferrous waste and scrap</GSTHSNNAME></GSTDETAILS.LIST>
+      </STOCKITEM>
+    </BODY></ENVELOPE>`;
+  const ledgers = parseMasterCollection(xml, "LEDGER");
+  const stockItems = parseMasterCollection(xml, "STOCKITEM");
+  assert.equal(ledgers[0].gstin, "27ABCDE1234F1Z0");
+  assert.equal(stockItems[0].hsnCode, "7204");
+});
+
+test("purchase master parsing accepts Tally's LEDGERGSTIN field", () => {
+  const xml = `<ENVELOPE><BODY><LEDGER NAME="KTC-260707 Test Supplier">
+    <NAME>KTC-260707 Test Supplier</NAME><LEDGERGSTIN>27ABCDE1234F1Z0</LEDGERGSTIN>
+  </LEDGER></BODY></ENVELOPE>`;
+  const [ledger] = parseMasterCollection(xml, "LEDGER");
+  assert.equal(ledger.gstin, "27ABCDE1234F1Z0");
+});
+
+test("exact named-ledger details restore GSTIN omitted by a broad collection", () => {
+  const [ledger] = mergeTargetedPurchaseLedgerDetails(
+    [{ name: "KTC-260707 Test Supplier", guid: "ledger-guid", parent: "Sundry Creditors", gstin: null, raw: {} }],
+    [{ name: "KTC-260707 Test Supplier", guid: "ledger-guid", parent: "Sundry Creditors", gstin: "27ABCDE1234F1Z0", raw: { tallyTag: "LEDGER" } }]
+  );
+  assert.equal(ledger.gstin, "27ABCDE1234F1Z0");
+});
+
+test("purchase master diagnostics recognize Tally's Led GST Reg Details collection", () => {
+  const xml = `<ENVELOPE><BODY><LEDGER NAME="KTC-260707 Test Supplier">
+    <NAME>KTC-260707 Test Supplier</NAME>
+    <LEDGSTREGDETAILS.LIST><GSTIN>27ABCDE1234F1Z0</GSTIN></LEDGSTREGDETAILS.LIST>
+  </LEDGER></BODY></ENVELOPE>`;
+  const [ledger] = parseMasterCollection(xml, "LEDGER");
+  assert.equal(ledger.gstin, "27ABCDE1234F1Z0");
+  const [diagnostic] = purchaseMasterDiagnostics(xml, "LEDGER", ["KTC-260707 Test Supplier"]);
+  assert.equal(diagnostic.parsed.gstin, "27ABCDE1234F1Z0");
+  assert.match(diagnostic.rawXml, /LEDGSTREGDETAILS\.LIST/);
+});
+
+test("purchase master diagnostics expose the real matching XML evidence", () => {
+  const xml = `
+    <ENVELOPE><BODY>
+      <LEDGER NAME="KTC-260707 Test Supplier">
+        <NAME>KTC-260707 Test Supplier</NAME>
+        <GSTREGISTRATIONDETAILS.LIST><GSTIN>27ABCDE1234F1Z0</GSTIN></GSTREGISTRATIONDETAILS.LIST>
+      </LEDGER>
+      <STOCKITEM NAME="M.S. Scrap &amp; Sponge Iron">
+        <NAME>M.S. Scrap &amp; Sponge Iron</NAME><BASEUNITS>KG</BASEUNITS>
+        <GSTDETAILS.LIST><GSTHSNCODE>7204</GSTHSNCODE></GSTDETAILS.LIST>
+      </STOCKITEM>
+    </BODY></ENVELOPE>`;
+  const ledger = purchaseMasterDiagnostics(xml, "LEDGER", ["KTC-260707 Test Supplier"]);
+  const stockItem = purchaseMasterDiagnostics(xml, "STOCKITEM", ["M.S. Scrap & Sponge Iron"]);
+  assert.equal(ledger[0].parsed.gstin, "27ABCDE1234F1Z0");
+  assert.deepEqual(ledger[0].tagEvidence.GSTIN, ["27ABCDE1234F1Z0"]);
+  assert.equal(stockItem[0].parsed.hsnCode, "7204");
+  assert.match(stockItem[0].rawXml, /GSTHSNCODE>7204/);
+});
 
 test("shared-folder purchase PDFs are named <Supplier> <Invoice No>.pdf and fill the Attach Documents add-on", () => {
   assert.equal(sharedPurchaseDocumentFileName({ supplierLedgerName: "Surya Steel Trading Co", supplierInvoiceNumber: "SSTC-26/27-182" }),

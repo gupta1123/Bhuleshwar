@@ -870,6 +870,20 @@ export function TallyPurchasePostingPanel({
         moduleName: "purchase",
         persist: false,
         requestedMasterTypes: ["ledger", "group", "stock_item", "unit", "gst_ledger", "tax_ledger"],
+        // Some Tally Prime releases omit registration fields from a broad
+        // Ledger collection. Exact names let the connector dereference the
+        // selected supplier master and merge its GSTIN into the live result.
+        targetedLedgerNames: Array.from(new Set([
+          next.review?.supplierLedgerName,
+          next.review?.supplierName,
+        ].map((value) => value?.trim()).filter((value): value is string => Boolean(value)))),
+        diagnostics: {
+          masterNames: Array.from(new Set([
+            next.review?.supplierLedgerName,
+            next.review?.supplierName,
+            ...(next.review?.lines ?? []).flatMap((line) => [line.stockItemName, line.description]),
+          ].map((value) => value?.trim()).filter((value): value is string => Boolean(value)))),
+        },
         // Always fetch godowns so a location can be chosen even when the
         // invoice prints none.
         includeInventoryLocations: true,
@@ -1855,6 +1869,17 @@ export function TallyPurchasePostingPanel({
           persist: false,
           requireFresh: true,
           requestedMasterTypes: ["ledger", "group", "stock_item", "unit", "gst_ledger", "tax_ledger"],
+          targetedLedgerNames: Array.from(new Set([
+            review?.supplierLedgerName,
+            review?.supplierName,
+          ].map((value) => value?.trim()).filter((value): value is string => Boolean(value)))),
+          diagnostics: {
+            masterNames: Array.from(new Set([
+              review?.supplierLedgerName,
+              review?.supplierName,
+              ...(review?.lines ?? []).flatMap((line) => [line.stockItemName, line.description]),
+            ].map((value) => value?.trim()).filter((value): value is string => Boolean(value)))),
+          },
           // Always fetch godowns so a location can be chosen even when the
           // invoice prints none.
           includeInventoryLocations: true,
@@ -2154,10 +2179,19 @@ export function TallyPurchasePostingPanel({
   const extractedCgst = payload.source?.lines.reduce((sum, line) => sum + Number(line.invoiceCgstAmount || 0), 0) ?? 0;
   const extractedSgst = payload.source?.lines.reduce((sum, line) => sum + Number(line.invoiceSgstAmount || 0), 0) ?? 0;
   const halfInvoiceGst = invoiceTaxKnown ? String(Number(payload.source?.invoiceTaxAmount) / 2) : null;
+  const extractedIntrastateGstMatchesVerifiedTotal =
+    invoiceTaxKnown &&
+    extractedCgst > 0 &&
+    extractedSgst > 0 &&
+    Math.abs(extractedCgst + extractedSgst - Number(payload.source?.invoiceTaxAmount)) <= 0.01;
   const cgstInvoiceAmount =
-    calculation?.taxMode === "cgst_sgst" ? (extractedCgst ? String(extractedCgst) : halfInvoiceGst) : null;
+    calculation?.taxMode === "cgst_sgst"
+      ? (extractedIntrastateGstMatchesVerifiedTotal ? String(extractedCgst) : halfInvoiceGst)
+      : null;
   const sgstInvoiceAmount =
-    calculation?.taxMode === "cgst_sgst" ? (extractedSgst ? String(extractedSgst) : halfInvoiceGst) : null;
+    calculation?.taxMode === "cgst_sgst"
+      ? (extractedIntrastateGstMatchesVerifiedTotal ? String(extractedSgst) : halfInvoiceGst)
+      : null;
   const igstInvoiceAmount =
     calculation?.taxMode === "igst" && invoiceTaxKnown
       ? payload.source?.invoiceTaxAmount ?? null

@@ -372,6 +372,14 @@ function getTagText(block, tagName) {
   return match ? cleanXmlText(match[1]) : null;
 }
 
+function getAttributeFromAnyElement(block, attributeName) {
+  const match = String(block || "").match(new RegExp(
+    `<[^>\\s]+\\b[^>]*\\b${attributeName}\\s*=\\s*(["'])(.*?)\\1`,
+    "i"
+  ));
+  return match ? cleanXmlText(match[2]) : null;
+}
+
 function getUdfTagText(block, tagName) {
   const match = block.match(
     new RegExp(`<(?:UDF:)?${tagName}\\b[^>]*>([\\s\\S]*?)<\\/(?:UDF:)?${tagName}>`, "i")
@@ -384,9 +392,18 @@ function getTagTexts(block, tagName) {
   return matches.map((match) => cleanXmlText(match[1])).filter(Boolean);
 }
 
-function hsnCodeFromBlock(block, ...tagNames) {
+function getXmlValues(block, tagNames) {
+  const values = [];
   for (const tagName of tagNames) {
-    const raw = getTagText(block, tagName) || "";
+    values.push(...getTagTexts(block, tagName));
+    const attributeValue = getAttributeFromAnyElement(block, tagName);
+    if (attributeValue) values.push(attributeValue);
+  }
+  return values.filter(Boolean);
+}
+
+function hsnCodeFromBlock(block, ...tagNames) {
+  for (const raw of getXmlValues(block, tagNames)) {
     if (/^(?:not\s+found|not\s+available|n\/?a|none|null|undefined|-+)$/i.test(raw)) continue;
     const value = raw.replace(/\D/g, "");
     if (/^\d{4,8}$/.test(value)) return value;
@@ -2384,7 +2401,7 @@ async function validatePurchasePayloadMasters(tallyUrl, companyName, payload) {
   const ledgerXml = await exportTallyCollection(tallyUrl, {
       collectionName: "Kalika Validate Purchase Ledgers",
       tallyType: "Ledger",
-      fetchFields: "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,TaxType,GSTDutyHead,RateOfTaxCalculation",
+      fetchFields: "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,GSTNo,GSTNumber,GSTIdentificationNumber,LedgerGSTIN,TaxType,GSTDutyHead,RateOfTaxCalculation,GSTDetails.*,GSTDetails.LIST.*,GSTRegistrationDetails.*,GSTRegistrationDetails.LIST.*,LedgerGSTRegistrationDetails.*,LedgerGSTRegistrationDetails.LIST.*,LedgerGSTRegDetails.*,LedgerGSTRegDetails.LIST.*,LedGSTRegDetails.*,LedGSTRegDetails.LIST.*",
       companyName,
       formulae: [{
         name: ledgerFilterName,
@@ -2395,7 +2412,7 @@ async function validatePurchasePayloadMasters(tallyUrl, companyName, payload) {
   const stockXml = await exportTallyCollection(tallyUrl, {
       collectionName: "Kalika Validate Purchase Stock",
       tallyType: "StockItem",
-      fetchFields: "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT",
+      fetchFields: "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,HSNName,HSNDescription,GSTHSN,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,GSTDetails.*,GSTDetails.LIST.*,GSTHSNDetails.*,GSTHSNDetails.LIST.*,HSNDetails.*,HSNDetails.LIST.*",
       companyName,
       formulae: [{
         name: stockFilterName,
@@ -3579,6 +3596,16 @@ function toMaster(block, tagName) {
       ? null
       : normalized;
   };
+  const gstinFromBlock = () => {
+    for (const candidate of getXmlValues(block, [
+      "PARTYGSTIN", "GSTIN", "GSTREGISTRATIONNUMBER", "GSTREGNUMBER",
+      "GSTNO", "GSTNUMBER", "GSTIDENTIFICATIONNUMBER", "LEDGERGSTIN",
+    ])) {
+      const normalized = candidate.replace(/\s+/g, "").toUpperCase();
+      if (/^\d{2}[0-9A-Z]{13}$/.test(normalized)) return normalized;
+    }
+    return null;
+  };
 
   const bankName =
     getTagText(block, "BANKNAME") ||
@@ -3640,12 +3667,7 @@ function toMaster(block, tagName) {
     name,
     guid: getTagText(block, "GUID"),
     parent: getTagText(block, "PARENT"),
-    gstin: optionalMasterValue(
-      getTagText(block, "PARTYGSTIN") ||
-      getTagText(block, "GSTIN") ||
-      getTagText(block, "GSTREGISTRATIONNUMBER") ||
-      getTagText(block, "GSTREGNUMBER")
-    ),
+    gstin: optionalMasterValue(gstinFromBlock()),
     bankName,
     bankAccountNumber,
     ifscCode,
@@ -3668,7 +3690,9 @@ function toMaster(block, tagName) {
       "HSNCLASSIFICATION",
       "GSTHSNNAME",
       "GSTHSNSACNAME",
-      "HSNSACNAME"
+      "HSNSACNAME",
+      "HSNNAME",
+      "HSNDESCRIPTION"
     )),
     unitName: optionalMasterValue(getTagText(block, "BASEUNITS") || getTagText(block, "ORIGINALBASEUNITS")),
     taxRate: optionalMasterValue(taxRate),
@@ -3721,6 +3745,83 @@ function parseMasterCollection(xml, tagName) {
       .map((block) => toMaster(block, tagName))
       .filter(Boolean)
   );
+}
+
+// Some Tally Prime releases omit PartyGSTIN from a broad Ledger collection
+// while returning it for an exact named-master dereference. Merge only fields
+// read from that exact Tally master; never infer a ledger GSTIN from an invoice.
+function mergeTargetedPurchaseLedgerDetails(ledgers, targetedDetails) {
+  const targetedByName = new Map(
+    (targetedDetails || []).map((master) => [normalizeLooseName(master?.name), master])
+  );
+  return (ledgers || []).map((ledger) => {
+    const targeted = targetedByName.get(normalizeLooseName(ledger?.name));
+    if (!targeted) return ledger;
+    return {
+      ...ledger,
+      guid: targeted.guid || ledger.guid,
+      parent: targeted.parent || ledger.parent,
+      gstin: targeted.gstin || ledger.gstin || null,
+      raw: { ...(ledger.raw || {}), ...(targeted.raw || {}) },
+    };
+  });
+}
+
+const PURCHASE_MASTER_DIAGNOSTIC_TAGS = Object.freeze({
+  ledger: [
+    "PARTYGSTIN", "GSTIN", "GSTREGISTRATIONNUMBER", "GSTREGNUMBER",
+    "GSTNO", "GSTNUMBER", "GSTIDENTIFICATIONNUMBER", "LEDGERGSTIN",
+    "GSTDETAILS", "GSTREGISTRATIONDETAILS", "LEDGERGSTREGISTRATIONDETAILS", "LEDGSTREGDETAILS",
+  ],
+  stock_item: [
+    "GSTHSNCODE", "GSTHSNSACCODE", "HSNCODE", "HSNSACCODE",
+    "GSTOVRDNHSNCODE", "HSNOVRDNCLASSIFICATION", "HSN", "HSNSAC",
+    "HSNCLASSIFICATION", "GSTHSNNAME", "GSTHSNSACNAME", "HSNSACNAME",
+    "HSNNAME", "HSNDESCRIPTION", "GSTHSN", "GSTDETAILS", "GSTHSNDETAILS",
+    "HSNDETAILS",
+  ],
+});
+
+function diagnosticMasterName(block) {
+  return getAttribute(block, "NAME") || getTagText(block, "NAME") || "";
+}
+
+function diagnosticTagEvidence(block, tagNames) {
+  return Object.fromEntries(tagNames.flatMap((tagName) => {
+    const values = getTagTexts(block, tagName);
+    const attribute = getAttributeFromAnyElement(block, tagName);
+    if (attribute) values.push(`@attribute:${attribute}`);
+    const unique = [...new Set(values.filter(Boolean))];
+    return unique.length ? [[tagName, unique]] : [];
+  }));
+}
+
+function purchaseMasterDiagnostics(xml, tagName, requestedNames = []) {
+  const normalizedTagName = String(tagName || "").toLowerCase();
+  const targets = [...new Set(requestedNames
+    .map((value) => String(value || "").trim())
+    .filter(Boolean))].slice(0, 10);
+  if (!targets.length) return [];
+
+  const blocks = extractBlocks(xml, tagName);
+  const tagNames = PURCHASE_MASTER_DIAGNOSTIC_TAGS[normalizedTagName] || [];
+  return targets.map((requestedName) => {
+    const block = blocks.find((candidate) => normalizeLooseName(diagnosticMasterName(candidate)) === normalizeLooseName(requestedName));
+    if (!block) {
+      return { requestedName, found: false, availableBlockCount: blocks.length };
+    }
+    const parsed = toMaster(block, tagName);
+    return {
+      requestedName,
+      found: true,
+      returnedName: diagnosticMasterName(block),
+      parsed: parsed
+        ? { gstin: parsed.gstin || null, hsnCode: parsed.hsnCode || null, unitName: parsed.unitName || null, parent: parsed.parent || null }
+        : null,
+      tagEvidence: diagnosticTagEvidence(block, tagNames),
+      rawXml: block.slice(0, 50_000),
+    };
+  });
 }
 
 function toVoucher(block) {
@@ -6374,10 +6475,10 @@ export async function collectTallyMasters(config, commandPayload = {}) {
     fetches.push([key, bankIdentity ? request : request()]);
   };
   fetchMaster("ledgerXml", "ledger", "Autodealer Ledgers Sync",
-    "Name,Parent,GUID,ClosingBalance,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,IsBillWiseOn,BankName,Bank,BankerName,BankAccountNumber,AccountNumber,BankAccountNo,BankAcNo,AcNumber,IFSCCODE,IFSCODE,IFSC,BankIFSCCODE,BranchName,BankBranchName,Branch,BankAccHolderName,BankAccountName,BankAccountHolderName,AccountHolderName,Email,EmailId,LedgerEmail,LedgerEmailId,LedgerMobile,Mobile,MobileNo,PhoneNumber,Phone,LedgerPhone,ContactPerson,Contact,AttentionTo,Address,Address1,Address2,Address3,Address4,Pincode,TaxType,GSTDutyHead,RateOfTaxCalculation");
+    "Name,Parent,GUID,ClosingBalance,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,GSTNo,GSTNumber,GSTIdentificationNumber,LedgerGSTIN,IsBillWiseOn,BankName,Bank,BankerName,BankAccountNumber,AccountNumber,BankAccountNo,BankAcNo,AcNumber,IFSCCODE,IFSCODE,IFSC,BankIFSCCODE,BranchName,BankBranchName,Branch,BankAccHolderName,BankAccountName,BankAccountHolderName,AccountHolderName,Email,EmailId,LedgerEmail,LedgerEmailId,LedgerMobile,Mobile,MobileNo,PhoneNumber,Phone,LedgerPhone,ContactPerson,Contact,AttentionTo,Address,Address1,Address2,Address3,Address4,Pincode,TaxType,GSTDutyHead,RateOfTaxCalculation,GSTDetails.*,GSTDetails.LIST.*,GSTRegistrationDetails.*,GSTRegistrationDetails.LIST.*,LedgerGSTRegistrationDetails.*,LedgerGSTRegistrationDetails.LIST.*,LedgerGSTRegDetails.*,LedgerGSTRegDetails.LIST.*,LedGSTRegDetails.*,LedGSTRegDetails.LIST.*");
   fetchMaster("groupXml", "group", "Autodealer Groups Sync", "Name,Parent,GUID");
   fetchMaster("stockItemXml", "stock_item", "Autodealer Stock Items Sync",
-    "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,IsGSTApplicable");
+    "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,HSNName,HSNDescription,GSTHSN,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,GSTDetails.*,GSTDetails.LIST.*,GSTHSNDetails.*,GSTHSNDetails.LIST.*,HSNDetails.*,HSNDetails.LIST.*,IsGSTApplicable");
   fetchMaster("unitXml", "unit", "Autodealer Units Sync", "Name,GUID,OriginalName,DecimalPlaces,IsSimpleUnit");
   fetchMaster("voucherTypeXml", "voucher_type", "Autodealer Voucher Types Sync", "Name,Parent,GUID");
   if (shouldFetch("ledger")) {
@@ -6471,7 +6572,7 @@ async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
     collectionName: "Kalika Live Purchase Ledgers",
     tallyType: "Ledger",
     fetchFields:
-      "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,TaxType,GSTDutyHead,RateOfTaxCalculation",
+      "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,GSTNo,GSTNumber,GSTIdentificationNumber,LedgerGSTIN,TaxType,GSTDutyHead,RateOfTaxCalculation,GSTDetails.*,GSTDetails.LIST.*,GSTRegistrationDetails.*,GSTRegistrationDetails.LIST.*,LedgerGSTRegistrationDetails.*,LedgerGSTRegistrationDetails.LIST.*,LedgerGSTRegDetails.*,LedgerGSTRegDetails.LIST.*,LedGSTRegDetails.*,LedGSTRegDetails.LIST.*",
     companyName,
   });
   const groupXml = await exportTallyCollection(tallyUrl, {
@@ -6484,7 +6585,7 @@ async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
     collectionName: "Kalika Live Purchase Stock Items",
     tallyType: "StockItem",
     fetchFields:
-      "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,IsGSTApplicable",
+      "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,HSNName,HSNDescription,GSTHSN,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,GSTDetails.*,GSTDetails.LIST.*,GSTHSNDetails.*,GSTHSNDetails.LIST.*,HSNDetails.*,HSNDetails.LIST.*,IsGSTApplicable",
     companyName,
   });
   const unitXml = await exportTallyCollection(tallyUrl, {
@@ -6509,7 +6610,7 @@ async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
     companyName,
   }).catch(() => "");
 
-  const ledgers = parseMasterCollection(ledgerXml, "LEDGER");
+  let ledgers = parseMasterCollection(ledgerXml, "LEDGER");
   const groups = parseMasterCollection(groupXml, "GROUP");
   const stockItems = parseMasterCollection(stockItemXml, "STOCKITEM");
   const units = parseMasterCollection(unitXml, "UNIT");
@@ -6519,6 +6620,50 @@ async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
     (company) => normalizeLooseName(company.name) === normalizeLooseName(companyName)
   ) || companies[0] || null;
   const companyGstin = activeCompany?.gstin || null;
+
+  const requestedTargetedLedgerNames = Array.isArray(commandPayload.targetedLedgerNames)
+    ? [...new Set(commandPayload.targetedLedgerNames
+        .map((value) => String(value || "").trim())
+        .filter(Boolean))].slice(0, 10)
+    : [];
+  const requestedTargetKeys = new Set(requestedTargetedLedgerNames.map(normalizeLooseName));
+  const exactMissingGstinNames = ledgers
+    .filter((ledger) => requestedTargetKeys.has(normalizeLooseName(ledger.name)) && !ledger.gstin)
+    .map((ledger) => ledger.name);
+  if (exactMissingGstinNames.length > 0) {
+    try {
+      const targetedDetails = await exportNamedCashDiscountMasters(
+        { ...config, tallyUrl },
+        companyName,
+        exactMissingGstinNames,
+        "Ledger"
+      );
+      ledgers = mergeTargetedPurchaseLedgerDetails(ledgers, targetedDetails);
+      log("info", `Purchase supplier detail read requested=${exactMissingGstinNames.length}, GSTIN recovered=${targetedDetails.filter((master) => master.gstin).length}.`);
+    } catch (error) {
+      log("warn", `Purchase supplier detail read failed: ${error instanceof Error ? error.message : String(error)}.`);
+    }
+  }
+
+  const diagnosticPayload = commandPayload.diagnostics && typeof commandPayload.diagnostics === "object"
+    ? commandPayload.diagnostics
+    : {};
+  const diagnosticNames = Array.isArray(diagnosticPayload.masterNames)
+    ? diagnosticPayload.masterNames
+    : [];
+  const diagnostics = diagnosticNames.length
+    ? {
+        company: {
+          requestedName: companyName,
+          returnedName: activeCompany?.name || null,
+          guid: activeCompany?.guid || null,
+          gstin: companyGstin,
+          readinessCompany: readiness.companyName || null,
+        },
+        ledgerMasters: purchaseMasterDiagnostics(ledgerXml, "LEDGER", diagnosticNames),
+        stockItemMasters: purchaseMasterDiagnostics(stockItemXml, "STOCKITEM", diagnosticNames),
+      }
+    : null;
 
   if (ledgers.length === 0) {
     throw new Error("Tally returned zero ledgers for the active company.");
@@ -6543,6 +6688,7 @@ async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
           null,
         stateName: activeCompany?.raw?.stateName || null,
       },
+      diagnostics,
       masters: { ledgers, groups, stockItems, units, godowns },
       totals: {
         ledger: ledgers.length,
@@ -6573,6 +6719,13 @@ async function fetchPurchaseInventoryLocationsFromTally(config, commandPayload =
     companyName,
   });
   return parseMasterCollection(godownXml, "GODOWN");
+}
+
+// Purchase review refreshes must bypass the AlterID-backed local catalogue.
+// A master can gain GSTIN/HSN metadata without an AlterID delta that the
+// incremental catalogue sees, so the review path needs the current Tally XML.
+function shouldUseLivePurchaseMasterRead(isPurchaseRead, payload = {}) {
+  return Boolean(isPurchaseRead && payload?.requireFresh === true);
 }
 
 async function postMastersToBackend(config, payload) {
@@ -8126,14 +8279,15 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
             requestedTypes,
             includeInventoryLocations: Boolean(message.payload?.includeInventoryLocations),
           };
-          const localCatalogue = !message.payload?.forceRefresh
-            ? message.payload?.requireFresh === true
-              ? await config.__agentRuntime?.refreshLocalMasterCatalogue(purchaseScope, {
-                  moduleName: isPurchaseRead ? "purchase" : "bank",
-                  signal: controller.signal,
-                  progress: (progressMessage) => send({ type: "progress", requestId, message: progressMessage }),
-                })
-              : await config.__agentRuntime?.localMasterCatalogue(purchaseScope, { moduleName: isPurchaseRead ? "purchase" : "bank" })
+          // A case-page purchase refresh must read the masters from Tally now.
+          // The incremental Local Agent catalogue is intentionally retained for
+          // background reads, but it cannot discover a GSTIN/HSN that was added
+          // to an unchanged master: its AlterID cursor quite correctly skips
+          // that master. AutoDealer's purchase flow always uses the live master
+          // export, so keep the same semantics here for requireFresh reads.
+          const requireLivePurchaseRead = shouldUseLivePurchaseMasterRead(isPurchaseRead, message.payload);
+          const localCatalogue = !message.payload?.forceRefresh && !requireLivePurchaseRead
+            ? await config.__agentRuntime?.localMasterCatalogue(purchaseScope, { moduleName: isPurchaseRead ? "purchase" : "bank" })
             : null;
           if (localCatalogue) {
             send({ type: "progress", requestId, message: message.payload?.requireFresh === true
@@ -8170,6 +8324,8 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
                 companyName: message.companyName,
                 financialYear: message.financialYear,
                 includeInventoryLocations: Boolean(message.payload?.includeInventoryLocations),
+                targetedLedgerNames: message.payload?.targetedLedgerNames,
+                diagnostics: message.payload?.diagnostics,
               }))).result
             : await collectTallyMasters(config, {
                 companyName: message.companyName,
@@ -9471,6 +9627,10 @@ export {
   purchasePayloadMasterNames,
   purchaseVoucherFinancialYearRange,
   purchaseVoucherReadbackComparison,
+  parseMasterCollection,
+  mergeTargetedPurchaseLedgerDetails,
+  purchaseMasterDiagnostics,
+  shouldUseLivePurchaseMasterRead,
   readConfig,
   reconcileBankTransactionsInTally,
   strictBankTransactionCandidates,

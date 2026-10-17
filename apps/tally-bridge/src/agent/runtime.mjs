@@ -827,7 +827,18 @@ export class LocalAgentRuntime {
       requested.has("stock_item") ? this.storage.call("listMasters", { datasetKey: key, masterType: "stock_item" }) : [],
       requested.has("unit") ? this.storage.call("listMasters", { datasetKey: key, masterType: "unit" }) : [],
     ]);
-    if (requested.has("ledger") && !ledgers.length) return null;
+    // A purchase review cannot be served by a ledger-only cache. The browser
+    // needs the party ledgers, stock items, and units together to populate the
+    // posting controls. Returning a partial catalogue here made the bridge
+    // report success while the page rendered empty "Select from Tally"
+    // dropdowns. Groups are intentionally optional because valid Tally
+    // companies can have no stock groups.
+    const purchaseCatalogueIncomplete = moduleName === "purchase" && (
+      (requested.has("ledger") && !ledgers.length) ||
+      (requested.has("stock_item") && !stockItems.length) ||
+      (requested.has("unit") && !units.length)
+    );
+    if (purchaseCatalogueIncomplete || (requested.has("ledger") && !ledgers.length)) return null;
     const totals = { ledger: ledgers.length, group: groups.length, stock_item: stockItems.length, unit: units.length, godown: 0 };
     const validatedAt = dataset.cacheHealth?.validatedAt || dataset.last_sync_at;
     const dataUpdatedAt = dataset.cacheHealth?.dataUpdatedAt || dataset.last_sync_at;

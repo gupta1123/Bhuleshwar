@@ -2,9 +2,22 @@ const XML_ESCAPE = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'":
 function escapeXml(value) { return String(value ?? "").replace(/[&<>"']/g, (character) => XML_ESCAPE[character]); }
 function decodeXml(value) { return String(value || "").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&amp;/gi, "&"); }
 function tag(block, name) { return decodeXml(block.match(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${name}>`, "i"))?.[1]?.trim() || ""); }
+function tagValues(block, name) {
+  return [...String(block || "").matchAll(new RegExp(`<${name}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/${name}>`, "gi"))]
+    .map((match) => decodeXml(match[1]?.trim() || "")).filter(Boolean);
+}
+function attributeValue(block, name) {
+  return decodeXml(String(block || "").match(new RegExp(`<[^>\\s]+\\b[^>]*\\b${name}\\s*=\\s*(["'])(.*?)\\1`, "i"))?.[2]?.trim() || "");
+}
+function values(block, names) {
+  return names.flatMap((name) => [...tagValues(block, name), attributeValue(block, name)].filter(Boolean));
+}
+function gstin(block) {
+  return values(block, ["PARTYGSTIN", "GSTIN", "GSTREGISTRATIONNUMBER", "GSTREGNUMBER", "GSTNO", "GSTNUMBER", "GSTIDENTIFICATIONNUMBER", "LEDGERGSTIN"])
+    .map((value) => value.replace(/\s+/g, "").toUpperCase()).find((value) => /^\d{2}[0-9A-Z]{13}$/.test(value)) || null;
+}
 function hsnCode(block, ...names) {
-  for (const name of names) {
-    const raw = tag(block, name);
+  for (const raw of values(block, names)) {
     if (/^(?:not\s+found|not\s+available|n\/?a|none|null|undefined|-+)$/i.test(raw)) continue;
     const value = raw.replace(/\D/g, "");
     if (/^\d{4,8}$/.test(value)) return value;
@@ -78,7 +91,7 @@ export class TallyAgentGateway {
 
   async changedMasters(identity, { masterType, afterAlterId = 0, batchSize = 50, fieldProfile = "full", signal } = {}) {
     const ledgerIdentityFields = ["Name", "GUID", "MasterID", "AlterID", "Parent"];
-    const ledgerPurchaseFields = [...ledgerIdentityFields, "PartyGSTIN", "GSTIN", "GSTRegistrationNumber", "GSTRegNumber", "TaxType", "GSTDutyHead", "RateOfTaxCalculation"];
+    const ledgerPurchaseFields = [...ledgerIdentityFields, "PartyGSTIN", "GSTIN", "GSTRegistrationNumber", "GSTRegNumber", "GSTNo", "GSTNumber", "GSTIdentificationNumber", "LedgerGSTIN", "TaxType", "GSTDutyHead", "RateOfTaxCalculation", "GSTDetails.*", "GSTDetails.LIST.*", "GSTRegistrationDetails.*", "GSTRegistrationDetails.LIST.*", "LedgerGSTRegistrationDetails.*", "LedgerGSTRegistrationDetails.LIST.*", "LedgerGSTRegDetails.*", "LedgerGSTRegDetails.LIST.*", "LedGSTRegDetails.*", "LedGSTRegDetails.LIST.*"];
     const ledgerFullFields = [
       ...ledgerPurchaseFields, "ClosingBalance", "IsBillWiseOn", "Alias", "MailingName",
       "StateName", "CountryName", "Email", "LedgerMobile", "LedgerContact",
@@ -89,7 +102,7 @@ export class TallyAgentGateway {
         fieldProfile === "identity" ? ledgerIdentityFields : fieldProfile === "purchase" ? ledgerPurchaseFields : ledgerFullFields },
       stock_item: { collectionType: "Stock Item", block: "STOCKITEM", fields: [
         "Name", "GUID", "MasterID", "AlterID", "Parent", "BaseUnits", "OriginalBaseUnits",
-        "GSTApplicable", "IsGSTApplicable", "GSTHSNCode", "GSTHSNName", "GSTHSNSACCode", "GSTHSNSACName", "HSNCode", "HSNSACCode", "HSNSACName", "GSTOVRDNHSNCODE", "HSNOVRDNCLASSIFICATION", "HSN", "HSNSAC", "HSNCLASSIFICATION", "GSTTaxRate", "RateOfTaxCalculation", "GSTRATE", "RateOfVAT",
+        "GSTApplicable", "IsGSTApplicable", "GSTHSNCode", "GSTHSNName", "GSTHSNSACCode", "GSTHSNSACName", "HSNCode", "HSNSACCode", "HSNSACName", "GSTOVRDNHSNCODE", "HSNOVRDNCLASSIFICATION", "HSN", "HSNSAC", "HSNCLASSIFICATION", "HSNName", "HSNDescription", "GSTHSN", "GSTDetails.*", "GSTDetails.LIST.*", "GSTHSNDetails.*", "GSTHSNDetails.LIST.*", "HSNDetails.*", "HSNDetails.LIST.*", "GSTTaxRate", "RateOfTaxCalculation", "GSTRATE", "RateOfVAT",
       ] },
       group: { collectionType: "Group", block: "GROUP", fields: ["Name", "GUID", "MasterID", "AlterID", "Parent", "IsRevenue"] },
       unit: { collectionType: "Unit", block: "UNIT", fields: ["Name", "GUID", "MasterID", "AlterID", "OriginalName", "DecimalPlaces"] },
@@ -105,7 +118,7 @@ export class TallyAgentGateway {
       return {
         name: tag(block, "NAME"), guid: tag(block, "GUID"), masterId: tag(block, "MASTERID"),
         alterId: Number(tag(block, "ALTERID") || 0), parent: tag(block, "PARENT"),
-        gstin: tag(block, "PARTYGSTIN") || tag(block, "GSTIN") || tag(block, "GSTREGISTRATIONNUMBER") || tag(block, "GSTREGNUMBER") || null,
+        gstin: gstin(block),
         alias: tag(block, "ALIAS") || null, mailingName: tag(block, "MAILINGNAME") || null,
         stateName: tag(block, "STATENAME") || null, countryName: tag(block, "COUNTRYNAME") || null,
         email: tag(block, "EMAIL") || null, phone: tag(block, "LEDGERMOBILE") || null,
@@ -116,7 +129,7 @@ export class TallyAgentGateway {
         accountHolderName: tag(block, "BANKACCHOLDERNAME") || null,
         // Tally Prime commonly exports the stock-item HSN/SAC entered on the
         // master as GSTHSNNAME. Keep the older tags for other Tally versions.
-        hsnCode: hsnCode(block, "GSTHSNCODE", "GSTHSNSACCODE", "HSNCODE", "HSNSACCODE", "GSTOVRDNHSNCODE", "HSNOVRDNCLASSIFICATION", "HSN", "HSNSAC", "HSNCLASSIFICATION", "GSTHSNNAME", "GSTHSNSACNAME", "HSNSACNAME"),
+        hsnCode: hsnCode(block, "GSTHSNCODE", "GSTHSNSACCODE", "HSNCODE", "HSNSACCODE", "GSTOVRDNHSNCODE", "HSNOVRDNCLASSIFICATION", "HSN", "HSNSAC", "HSNCLASSIFICATION", "GSTHSNNAME", "GSTHSNSACNAME", "HSNSACNAME", "HSNNAME", "HSNDESCRIPTION"),
         unitName: tag(block, "BASEUNITS") || tag(block, "ORIGINALBASEUNITS") || null,
         baseUnits: tag(block, "BASEUNITS") || null, taxRate,
         closingBalance: Number.isFinite(closingNumber) ? Math.abs(closingNumber) : null,

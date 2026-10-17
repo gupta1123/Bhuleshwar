@@ -10,6 +10,10 @@ test("direct master lookup never creates a full ledger/group collection", () => 
     assert.match(text, /Company &amp; Co/);
     assert.match(text, /\$\$Chr:34/);
     assert.match(text, /KalikaMasterSeed1,KalikaMasterSeed2/);
+    if (type === "Ledger") {
+      assert.match(text, /PartyGSTIN/);
+      assert.match(text, /LedgerGSTIN/);
+    }
   }
   assert.throws(() => buildTargetedMastersXml({ names: Array(51).fill("A") }));
 });

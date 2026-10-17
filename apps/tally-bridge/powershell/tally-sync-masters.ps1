@@ -113,6 +113,68 @@ function Get-Text {
   return $value.Trim()
 }
 
+function Get-TextOrAttribute {
+  param(
+    [System.Xml.XmlNode] $Node,
+    [string] $Name
+  )
+
+  $value = Get-Text -Node $Node -Name $Name
+  if (-not [string]::IsNullOrWhiteSpace($value)) {
+    return $value
+  }
+
+  $attribute = $Node.Attributes[$Name]
+  if ($null -eq $attribute) {
+    return $null
+  }
+
+  $value = [string] $attribute.Value
+  if ([string]::IsNullOrWhiteSpace($value)) {
+    return $null
+  }
+
+  return $value.Trim()
+}
+
+function Get-Gstin {
+  param([System.Xml.XmlNode] $Node)
+
+  foreach ($name in @('PARTYGSTIN', 'GSTIN', 'GSTREGISTRATIONNUMBER', 'GSTREGNUMBER', 'GSTNO', 'GSTNUMBER', 'GSTIDENTIFICATIONNUMBER', 'LEDGERGSTIN')) {
+    $candidates = @(
+      (Get-TextOrAttribute -Node $Node -Name $name)
+      $Node.SelectNodes(".//*[local-name()='$name']") | ForEach-Object { $_.InnerText }
+      $Node.SelectNodes(".//*[@*[local-name()='$name']]") | ForEach-Object { $_.Attributes[$name].Value }
+    )
+    foreach ($candidate in $candidates) {
+      if ([string]::IsNullOrWhiteSpace($candidate)) { continue }
+      $normalized = ($candidate -replace '\s', '').ToUpperInvariant()
+      if ($normalized -match '^\d{2}[0-9A-Z]{13}$') { return $normalized }
+    }
+  }
+
+  return $null
+}
+
+function Get-HsnCode {
+  param([System.Xml.XmlNode] $Node)
+
+  foreach ($name in @('GSTHSNCODE', 'GSTHSNSACCODE', 'HSNCODE', 'HSNSACCODE', 'GSTOVRDNHSNCODE', 'HSNOVRDNCLASSIFICATION', 'HSN', 'HSNSAC', 'HSNCLASSIFICATION', 'HSNNAME', 'HSNDESCRIPTION', 'GSTHSNNAME', 'GSTHSNSACNAME', 'HSNSACNAME')) {
+    $candidates = @(
+      (Get-TextOrAttribute -Node $Node -Name $name)
+      $Node.SelectNodes(".//*[local-name()='$name']") | ForEach-Object { $_.InnerText }
+      $Node.SelectNodes(".//*[@*[local-name()='$name']]") | ForEach-Object { $_.Attributes[$name].Value }
+    )
+    foreach ($candidate in $candidates) {
+      if ([string]::IsNullOrWhiteSpace($candidate) -or $candidate -match '^(?i:not found|not available|n/?a|none|null|undefined|-+)$') { continue }
+      $digits = $candidate -replace '\D', ''
+      if ($digits -match '^\d{4,8}$') { return $digits }
+    }
+  }
+
+  return $null
+}
+
 function Get-Attribute {
   param(
     [System.Xml.XmlNode] $Node,
@@ -153,12 +215,7 @@ function Convert-Ledger {
     name = $name
     guid = Get-Text -Node $Node -Name "GUID"
     parent = $parent
-    gstin = @(
-      (Get-Text -Node $Node -Name "PARTYGSTIN"),
-      (Get-Text -Node $Node -Name "GSTIN"),
-      (Get-Text -Node $Node -Name "GSTREGISTRATIONNUMBER"),
-      (Get-Text -Node $Node -Name "GSTREGNUMBER")
-    ) | Where-Object { $_ } | Select-Object -First 1
+    gstin = Get-Gstin -Node $Node
     raw = @{
       parent = $parent
       reservedName = Get-Attribute -Node $Node -Name "RESERVEDNAME"
@@ -173,20 +230,7 @@ function Convert-StockItem {
     name = Get-Name -Node $Node
     guid = Get-Text -Node $Node -Name "GUID"
     parent = Get-Text -Node $Node -Name "PARENT"
-    hsnCode = @(
-      (Get-Text -Node $Node -Name "GSTHSNCODE"),
-      (Get-Text -Node $Node -Name "GSTHSNSACCODE"),
-      (Get-Text -Node $Node -Name "HSNCODE"),
-      (Get-Text -Node $Node -Name "HSNSACCODE"),
-      (Get-Text -Node $Node -Name "GSTOVRDNHSNCODE"),
-      (Get-Text -Node $Node -Name "HSNOVRDNCLASSIFICATION"),
-      (Get-Text -Node $Node -Name "HSN"),
-      (Get-Text -Node $Node -Name "HSNSAC"),
-      (Get-Text -Node $Node -Name "HSNCLASSIFICATION"),
-      (Get-Text -Node $Node -Name "GSTHSNNAME"),
-      (Get-Text -Node $Node -Name "GSTHSNSACNAME"),
-      (Get-Text -Node $Node -Name "HSNSACNAME")
-    ) | Where-Object { $_ -and $_ -notmatch '^(?i:not found|not available|n/?a|none|null|undefined|-+)$' } | Select-Object -First 1
+    hsnCode = Get-HsnCode -Node $Node
     taxRate = @(
       (Get-Text -Node $Node -Name "GSTTAXRATE"),
       (Get-Text -Node $Node -Name "RATEOFTAXCALCULATION"),
@@ -220,7 +264,7 @@ Write-Host "Company: $CompanyName"
 $ledgerNodes = Invoke-TallyCollection `
   -CollectionName "Autodealer Ledgers Sync" `
   -TallyType "Ledger" `
-  -Fetch "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber" `
+  -Fetch "Name,Parent,GUID,PartyGSTIN,GSTIN,GSTRegistrationNumber,GSTRegNumber,GSTNo,GSTNumber,GSTIdentificationNumber,LedgerGSTIN,GSTDetails.*,GSTDetails.LIST.*,GSTRegistrationDetails.*,GSTRegistrationDetails.LIST.*,LedgerGSTRegistrationDetails.*,LedgerGSTRegistrationDetails.LIST.*,LedgerGSTRegDetails.*,LedgerGSTRegDetails.LIST.*,LedGSTRegDetails.*,LedGSTRegDetails.LIST.*" `
   -NodeName "LEDGER"
 
 $groupNodes = Invoke-TallyCollection `
@@ -232,7 +276,7 @@ $groupNodes = Invoke-TallyCollection `
 $stockItemNodes = Invoke-TallyCollection `
   -CollectionName "Autodealer Stock Items Sync" `
   -TallyType "StockItem" `
-  -Fetch "Name,Parent,GUID,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,BaseUnits,GSTApplicable" `
+  -Fetch "Name,Parent,GUID,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,HSNName,HSNDescription,GSTHSN,GSTDetails.*,GSTDetails.LIST.*,GSTHSNDetails.*,GSTHSNDetails.LIST.*,HSNDetails.*,HSNDetails.LIST.*,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,BaseUnits,GSTApplicable" `
   -NodeName "STOCKITEM"
 
 $unitNodes = Invoke-TallyCollection `

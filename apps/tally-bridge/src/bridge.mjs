@@ -6547,7 +6547,11 @@ export async function collectTallyMasters(config, commandPayload = {}) {
   };
 }
 
-async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
+async function fetchPurchaseMastersFromTally(
+  config,
+  commandPayload = {},
+  logger = (_level, message) => console.log(message)
+) {
   const tallyUrl = normalizeTallyUrl(commandPayload.tallyUrl || config.tallyUrl);
   const readiness = await testTally(tallyUrl);
   if (!readiness.tallyReachable || !readiness.companyLoaded) {
@@ -6639,9 +6643,9 @@ async function fetchPurchaseMastersFromTally(config, commandPayload = {}) {
         "Ledger"
       );
       ledgers = mergeTargetedPurchaseLedgerDetails(ledgers, targetedDetails);
-      log("info", `Purchase supplier detail read requested=${exactMissingGstinNames.length}, GSTIN recovered=${targetedDetails.filter((master) => master.gstin).length}.`);
+      logger("info", `Purchase supplier detail read requested=${exactMissingGstinNames.length}, GSTIN recovered=${targetedDetails.filter((master) => master.gstin).length}.`);
     } catch (error) {
-      log("warn", `Purchase supplier detail read failed: ${error instanceof Error ? error.message : String(error)}.`);
+      logger("warn", `Purchase supplier detail read failed: ${error instanceof Error ? error.message : String(error)}.`);
     }
   }
 
@@ -8326,7 +8330,7 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
                 includeInventoryLocations: Boolean(message.payload?.includeInventoryLocations),
                 targetedLedgerNames: message.payload?.targetedLedgerNames,
                 diagnostics: message.payload?.diagnostics,
-              }))).result
+              }, log))).result
             : await collectTallyMasters(config, {
                 companyName: message.companyName,
                 bankDocumentIdentity: bankIdentity,

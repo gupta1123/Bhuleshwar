@@ -1,7 +1,7 @@
 {
   "name": "kalika-local-agent",
   "productName": "Kalika Local Agent",
-  "version": "1.2.40",
+  "version": "1.2.41",
   "description": "Secure local workflow agent connecting Kalika to Tally Prime.",
   "author": "Kalika",
   "private": true,

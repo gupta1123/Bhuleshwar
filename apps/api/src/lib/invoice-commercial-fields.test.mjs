@@ -50,6 +50,21 @@ Grand total INR 1,016,098.00`;
   assert.equal(fields.taxAmount, "154998");
 });
 
+test("uses the printed taxable value when a noisy extracted totalTaxableAmount hides the correct subtotal", () => {
+  // Reproduce the uploaded case: its OCR markdown contains the complete page
+  // as one flattened line rather than one line per invoice row.
+  const visibleText = `Supplier invoice for goods and freight 1 M.S. Scrap & Sponge Iron 7204 20,300 kg INR 42.00/kg INR 852,600.00 2 Freight and handling 9965 1 lot INR 8,500.00 INR 8,500.00 Taxable value INR 861,100.00 CGST @ 9% INR 77,499.00 SGST @ 9% INR 77,499.00 Grand total INR 1,016,098.00`;
+  const fields = applyInvoiceCommercialFieldFallback({
+    totalTaxableAmount: "1",
+    subtotal: "861100",
+    totalAmount: "1016098",
+    freightAmount: "42.00",
+    taxAmount: "154998",
+  }, "Tax Invoice", visibleText);
+  assert.equal(fields.freightAmount, "8500.00");
+  assert.equal(fields.taxAmount, "154998");
+});
+
 test("does not replace extracted amounts if printed tax cannot reconcile to the invoice total", () => {
   const fields = applyInvoiceCommercialFieldFallback({
     totalTaxableAmount: "861100.00",

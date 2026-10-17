@@ -828,10 +828,19 @@ function buildSource(
   const freightRows = itemRows.filter(({ item, line }) => isFreightChargeRow(item, line));
   const lines = itemRows.filter((row) => !freightRows.includes(row)).map(({ line }) => line);
   const freightFromRows = sum(freightRows.map(({ line }) => moneyPaise(line.taxableAmount)));
-  const printedTaxable = moneyPaise(fields.totalTaxableAmount ?? fields.subtotal);
+  const printedTaxableCandidates = [
+    moneyPaise(fields.totalTaxableAmount),
+    moneyPaise(fields.subtotal),
+  ].filter((value): value is number => value !== null);
   const goodsTaxable = sum(lines.map((line) => moneyPaise(line.taxableAmount)));
-  const freightRowsAgreeWithInvoice = freightFromRows > 0 && printedTaxable !== null &&
-    Math.abs(goodsTaxable + freightFromRows - printedTaxable) <= TOTAL_TOLERANCE_PAISE;
+  // Extraction can emit a noisy totalTaxableAmount while still preserving the
+  // correct subtotal. Use whichever candidate reconciles the goods and freight
+  // rows instead of accepting the first merely non-empty field.
+  const reconciledPrintedTaxable = printedTaxableCandidates.find((candidate) =>
+    freightFromRows > 0 &&
+    Math.abs(goodsTaxable + freightFromRows - candidate) <= TOTAL_TOLERANCE_PAISE
+  ) ?? null;
+  const freightRowsAgreeWithInvoice = reconciledPrintedTaxable !== null;
   const printedFreight = freightRowsAgreeWithInvoice
     ? formatPaise(freightFromRows)
     : verifiedAmounts?.freightAmount || text(fields.freightAmount) || commercialFields.freightAmount;
@@ -852,7 +861,9 @@ function buildSource(
     buyerName: text(fields.buyerName),
     buyerGstin: normalizeGstin(fields.buyerGstin),
     vehicleNumber: packetVehicleNumber(document, documents),
-    invoiceTaxableAmount: text(fields.totalTaxableAmount || fields.subtotal),
+    invoiceTaxableAmount: reconciledPrintedTaxable !== null
+      ? formatPaise(reconciledPrintedTaxable)
+      : text(fields.totalTaxableAmount || fields.subtotal),
     invoiceTaxRate: text(fields.taxRate),
     invoiceTaxAmount: verifiedAmounts?.taxAmount || text(fields.taxAmount) || commercialFields.taxAmount,
     invoiceTotal: text(fields.totalAmount),

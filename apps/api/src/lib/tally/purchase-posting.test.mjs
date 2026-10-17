@@ -348,7 +348,8 @@ test("an already-saved Nyx review recovers printed freight and GST rather than t
     ],
   });
   Object.assign(invoice.extracted_fields, {
-    totalTaxableAmount: "861100.00",
+    totalTaxableAmount: "1",
+    subtotal: "861100.00",
     freightAmount: "42.00",
     supplierGstin: "27ABCDE1234F1Z0",
   });

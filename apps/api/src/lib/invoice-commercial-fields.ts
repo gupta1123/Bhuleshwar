@@ -86,14 +86,19 @@ function amountNearLabel(
   labelPattern: string,
   options: { signed?: boolean } = {}
 ) {
+  // Match only the label here and slice its following text separately. If the
+  // whole OCR page is one line, consuming the 400-character tail as part of a
+  // global regex would hide later occurrences of the same label.
   const matches = [
-    ...source.matchAll(new RegExp(`\\b(?:${labelPattern})\\b([^\\r\\n]{0,400})`, "gi")),
+    ...source.matchAll(new RegExp(`\\b(?:${labelPattern})\\b`, "gi")),
   ];
   const candidates: Array<{ value: string; score: number }> = [];
 
   for (const match of matches) {
-    const context = `${match[0] ?? ""}`;
-    const tail = `${match[1] ?? ""}`.replace(/\b\d+(?:\.\d+)?\s*%/g, " ");
+    const label = `${match[0] ?? ""}`;
+    const tailStart = (match.index ?? 0) + label.length;
+    const tail = source.slice(tailStart, tailStart + 400).replace(/\b\d+(?:\.\d+)?\s*%/g, " ");
+    const context = `${label}${tail}`;
     const isRateOnly = /\bRATE\b/i.test(context);
     const currency = tail.match(
       /(?:INR|RS\.?|₹|â‚¹)\s*([+-]?\s*[\d,]+(?:\.\d{1,2})?)/i
@@ -101,9 +106,15 @@ function amountNearLabel(
     if (currency?.[1]) {
       const value = cleanAmount(currency[1]);
       if (value) {
+        // OCR providers sometimes flatten the entire page into one line. In
+        // that shape a heading such as "goods and freight" can see a later
+        // goods unit rate before the actual freight row. Prefer the amount
+        // closest to the matching label so "Freight and handling INR 8,500"
+        // wins over "goods and freight ... INR 42/kg".
+        const proximity = Math.max(0, 100 - (currency.index ?? 100));
         candidates.push({
           value: options.signed ? value : value.replace(/^-/, ""),
-          score: 10 + (/\bAMOUNT\b/i.test(context) ? 2 : 0),
+          score: 10 + proximity + (/\bAMOUNT\b/i.test(context) ? 2 : 0),
         });
       }
       continue;
@@ -211,9 +222,18 @@ export function verifiedInvoiceCommercialAmounts(
   visibleText: string | null | undefined
 ) {
   const printed = extractInvoiceCommercialFieldsFromText(visibleText);
-  const taxable = amountPaise(fields.totalTaxableAmount ?? fields.subtotal) ??
-    amountPaise(amountNearLabel(String(visibleText ?? ""), "TAXABLE\\s+(?:VALUE|AMOUNT)"));
-  const total = amountPaise(fields.totalAmount) ?? amountPaise(printed.totalAmount);
+  const printedTaxable = amountPaise(
+    amountNearLabel(String(visibleText ?? ""), "TAXABLE\\s+(?:VALUE|AMOUNT)")
+  );
+  const extractedTaxableCandidates = [
+    amountPaise(fields.totalTaxableAmount),
+    amountPaise(fields.subtotal),
+  ].filter((value): value is number => value !== null);
+  const taxable = printedTaxable ??
+    extractedTaxableCandidates.find((value) => value > 0) ??
+    null;
+  const printedTotal = amountPaise(printed.totalAmount);
+  const total = printedTotal ?? amountPaise(fields.totalAmount);
   const tax = amountPaise(printed.taxAmount);
   if (taxable === null || total === null || tax === null || Math.abs(taxable + tax - total) > 1) {
     return null;

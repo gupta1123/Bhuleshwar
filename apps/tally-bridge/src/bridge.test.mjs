@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   buildCollectionExportXml,
+  buildLedgerGstRegistrationExportXml,
   collectCashDiscountCustomerEvidence,
   buildBankVoucherBatchXml,
   buildBankVoucherXml,
@@ -36,6 +37,8 @@ import {
   matchOpenBillsByAmount,
   sharedPurchaseDocumentFileName,
   parseMasterCollection,
+  parseNativeLedgerRegistrationXml,
+  exportNativeLedgerGstRegistrations,
   mergeTargetedPurchaseLedgerDetails,
   purchaseMasterDiagnostics,
   shouldUseLivePurchaseMasterRead,
@@ -91,6 +94,49 @@ test("purchase master diagnostics recognize Tally's Led GST Reg Details collecti
   const [diagnostic] = purchaseMasterDiagnostics(xml, "LEDGER", ["KTC-260707 Test Supplier"]);
   assert.equal(diagnostic.parsed.gstin, "27ABCDE1234F1Z0");
   assert.match(diagnostic.rawXml, /LEDGSTREGDETAILS\.LIST/);
+});
+
+test("native ledger GST export requests TallyPrime's effective-dated registration aggregate", () => {
+  const xml = buildLedgerGstRegistrationExportXml({
+    companyName: "Nyx & Company",
+    ledgerName: "KTC-260707 Test Supplier",
+  });
+  assert.match(xml, /<TYPE>OBJECT<\/TYPE>/);
+  assert.match(xml, /<SUBTYPE>Ledger<\/SUBTYPE>/);
+  assert.match(xml, /<ID TYPE="Name">KTC-260707 Test Supplier<\/ID>/);
+  assert.match(xml, /<SVCURRENTCOMPANY>Nyx &amp; Company<\/SVCURRENTCOMPANY>/);
+  assert.match(xml, /<FETCH>Led GST Reg Details<\/FETCH>/);
+  assert.match(xml, /<FETCH>LedGSTRegDetails\.\*<\/FETCH>/);
+});
+
+test("native ledger GST parser reads the Led GST Reg Details response", () => {
+  const xml = `<ENVELOPE><BODY><DATA><TALLYMESSAGE>
+    <LEDGER NAME="KTC-260707 Test Supplier">
+      <NAME>KTC-260707 Test Supplier</NAME>
+      <LEDGSTREGDETAILS.LIST>
+        <APPLICABLEFROM>20260401</APPLICABLEFROM>
+        <GSTREGISTRATIONTYPE>Regular</GSTREGISTRATIONTYPE>
+        <GSTIN>27ABCDE1234F1Z0</GSTIN>
+      </LEDGSTREGDETAILS.LIST>
+    </LEDGER>
+  </TALLYMESSAGE></DATA></BODY></ENVELOPE>`;
+  const [ledger] = parseNativeLedgerRegistrationXml(xml, "KTC-260707 Test Supplier");
+  assert.equal(ledger.name, "KTC-260707 Test Supplier");
+  assert.equal(ledger.gstin, "27ABCDE1234F1Z0");
+});
+
+test("native ledger GST reader merges only an exact named ledger result", async () => {
+  const calls = [];
+  const masters = await exportNativeLedgerGstRegistrations(
+    "http://127.0.0.1:9000",
+    { companyName: "Nyx", ledgerNames: ["KTC-260707 Test Supplier"] },
+    async (_url, requestXml) => {
+      calls.push(requestXml);
+      return `<LEDGER NAME="KTC-260707 Test Supplier"><NAME>KTC-260707 Test Supplier</NAME><LEDGSTREGDETAILS.LIST><GSTIN>27ABCDE1234F1Z0</GSTIN></LEDGSTREGDETAILS.LIST></LEDGER>`;
+    }
+  );
+  assert.equal(calls.length, 1);
+  assert.equal(masters[0].gstin, "27ABCDE1234F1Z0");
 });
 
 test("purchase master diagnostics expose the real matching XML evidence", () => {

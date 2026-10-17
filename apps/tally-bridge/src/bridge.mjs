@@ -548,6 +548,45 @@ function buildLedgerBalanceExportXml({ companyName, ledgerName, dateFrom, dateTo
   ].join("");
 }
 
+// TallyPrime 3+ stores a ledger's GST registration in the effective-dated
+// `Led GST Reg Details` aggregate. Broad Ledger collections commonly omit this
+// aggregate even when the GSTIN is visible in Ledger Alteration, so read the
+// exact native Ledger object and explicitly fetch the registration storage.
+function buildLedgerGstRegistrationExportXml({ companyName, ledgerName }) {
+  const companyVariable = companyName
+    ? `<SVCURRENTCOMPANY>${escapeXml(companyName)}</SVCURRENTCOMPANY>`
+    : "";
+
+  return [
+    "<ENVELOPE>",
+    "<HEADER>",
+    "<VERSION>1</VERSION>",
+    "<TALLYREQUEST>EXPORT</TALLYREQUEST>",
+    "<TYPE>OBJECT</TYPE>",
+    "<SUBTYPE>Ledger</SUBTYPE>",
+    `<ID TYPE="Name">${escapeXml(ledgerName)}</ID>`,
+    "</HEADER>",
+    "<BODY>",
+    "<DESC>",
+    "<STATICVARIABLES>",
+    companyVariable,
+    "<SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT>",
+    "</STATICVARIABLES>",
+    "<FETCHLIST>",
+    "<FETCH>Name</FETCH>",
+    "<FETCH>GUID</FETCH>",
+    "<FETCH>Parent</FETCH>",
+    "<FETCH>PartyGSTIN</FETCH>",
+    "<FETCH>GSTIN</FETCH>",
+    "<FETCH>Led GST Reg Details</FETCH>",
+    "<FETCH>LedGSTRegDetails.*</FETCH>",
+    "</FETCHLIST>",
+    "</DESC>",
+    "</BODY>",
+    "</ENVELOPE>",
+  ].join("");
+}
+
 function tallyFormulaString(value) {
   return `"${String(value ?? "").replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
@@ -3747,6 +3786,42 @@ function parseMasterCollection(xml, tagName) {
   );
 }
 
+function parseNativeLedgerRegistrationXml(xml, ledgerName) {
+  const nativeLedgers = parseMasterCollection(xml, "LEDGER");
+  if (nativeLedgers.length > 0) return nativeLedgers;
+
+  // Some Tally releases return an OBJECT export as a bare payload instead of
+  // wrapping it in a LEDGER element. Re-wrap only the response body so the
+  // normal, validated GSTIN parser remains the single source of truth.
+  const response = String(xml || "").trim();
+  if (!response) return [];
+  const wrapped = `<LEDGER NAME="${escapeXml(ledgerName)}"><NAME>${escapeXml(ledgerName)}</NAME>${response}</LEDGER>`;
+  const master = toMaster(wrapped, "LEDGER");
+  return master?.gstin ? [master] : [];
+}
+
+async function exportNativeLedgerGstRegistrations(
+  tallyUrl,
+  { companyName, ledgerNames },
+  exportXml = exportTallyXml
+) {
+  const names = [...new Set((ledgerNames || [])
+    .map((value) => String(value || "").trim())
+    .filter(Boolean))].slice(0, 10);
+  const masters = [];
+  for (const ledgerName of names) {
+    const xml = await exportXml(
+      tallyUrl,
+      buildLedgerGstRegistrationExportXml({ companyName, ledgerName }),
+      `Purchase supplier GST registration: ${ledgerName}`
+    );
+    const parsed = parseNativeLedgerRegistrationXml(xml, ledgerName);
+    const exact = parsed.find((master) => normalizeLooseName(master.name) === normalizeLooseName(ledgerName));
+    if (exact?.gstin) masters.push(exact);
+  }
+  return masters;
+}
+
 // Some Tally Prime releases omit PartyGSTIN from a broad Ledger collection
 // while returning it for an exact named-master dereference. Merge only fields
 // read from that exact Tally master; never infer a ledger GSTIN from an invoice.
@@ -6646,6 +6721,21 @@ async function fetchPurchaseMastersFromTally(
       logger("info", `Purchase supplier detail read requested=${exactMissingGstinNames.length}, GSTIN recovered=${targetedDetails.filter((master) => master.gstin).length}.`);
     } catch (error) {
       logger("warn", `Purchase supplier detail read failed: ${error instanceof Error ? error.message : String(error)}.`);
+    }
+  }
+  const nativeMissingGstinNames = ledgers
+    .filter((ledger) => requestedTargetKeys.has(normalizeLooseName(ledger.name)) && !ledger.gstin)
+    .map((ledger) => ledger.name);
+  if (nativeMissingGstinNames.length > 0) {
+    try {
+      const nativeDetails = await exportNativeLedgerGstRegistrations(tallyUrl, {
+        companyName,
+        ledgerNames: nativeMissingGstinNames,
+      });
+      ledgers = mergeTargetedPurchaseLedgerDetails(ledgers, nativeDetails);
+      logger("info", `Purchase supplier native registration read requested=${nativeMissingGstinNames.length}, GSTIN recovered=${nativeDetails.filter((master) => master.gstin).length}.`);
+    } catch (error) {
+      logger("warn", `Purchase supplier native registration read failed: ${error instanceof Error ? error.message : String(error)}.`);
     }
   }
 
@@ -9604,6 +9694,7 @@ export {
   collectCashDiscountCustomerEvidence,
   collectTallyCompanyCheck,
   buildCollectionExportXml,
+  buildLedgerGstRegistrationExportXml,
   adoptHeartbeatIdentity,
   buildRequestedLedgerFormula,
   buildPurchaseVoucherXml,
@@ -9632,6 +9723,8 @@ export {
   purchaseVoucherFinancialYearRange,
   purchaseVoucherReadbackComparison,
   parseMasterCollection,
+  parseNativeLedgerRegistrationXml,
+  exportNativeLedgerGstRegistrations,
   mergeTargetedPurchaseLedgerDetails,
   purchaseMasterDiagnostics,
   shouldUseLivePurchaseMasterRead,

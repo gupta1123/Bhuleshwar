@@ -876,6 +876,23 @@ test("freight is a separate charge, expands the GST basis, and has its own TDS",
   assert.equal(result.blockers.length, 0);
 });
 
+test("component freight GST rate is normalized to the combined invoice rate", () => {
+  const document = invoiceDocument({
+    taxAmount: "198.00",
+    totalAmount: "1298.00",
+    tdsAmount: "",
+  });
+  document.extracted_fields.cgstRate = "9";
+  document.extracted_fields.sgstRate = "9";
+  document.extracted_fields.freightAmount = "100.00";
+  document.extracted_fields.freightGstRate = "9";
+
+  const result = prepare(document);
+  assert.equal(result.review.freightGstRate, "18");
+  assert.equal(result.calculation.gstTaxableAmount, "1100.00");
+  assert.equal(result.calculation.gstAmount, "198.00");
+});
+
 test("72031000 uses the combined stock, O.M.S. purchase, IGST, and no scrap deduction", () => {
   const document = invoiceDocument({
     hsn: "72031000",
@@ -1634,7 +1651,7 @@ test("the case's e-way bill page is read for the voucher and only sent when vali
       dispatchFrom: "PLOT NO 22, MIDC AREA HINGNA ROAD, NAGPUR, NAGPUR,MAHARASHTRA-440016",
       shipTo: "C-7&8 ADDITIONAL MIDC AREA, JALNA, JALNA,MAHARASHTRA-431203",
     },
-    markdown: "eWay Bill No: 2622 6409 7358\nMode: Road\nApprox Distance: 437km",
+    markdown: "eWay Bill No: 2622 6409 7358\nMode of transport | Road\nDistance | 437 km",
   };
   const run = (savedReview) => preparePurchasePosting({
     documents: [invoice, eway], masters: completeMasters, mappings: [], savedReview,

@@ -844,6 +844,26 @@ function buildSource(
   const printedFreight = freightRowsAgreeWithInvoice
     ? formatPaise(freightFromRows)
     : verifiedAmounts?.freightAmount || text(fields.freightAmount) || commercialFields.freightAmount;
+  const invoiceTaxRate = text(fields.taxRate);
+  const extractedFreightRate =
+    freightRows.map(({ line }) => text(line.taxRate)).find(Boolean) ||
+    text(fields.freightGstRate) ||
+    commercialFields.freightGstRate;
+  const freightRateNumber = Number(extractedFreightRate);
+  const invoiceRateNumber = Number(invoiceTaxRate);
+  const cgstRateNumber = Number(text(fields.cgstRate));
+  const sgstRateNumber = Number(text(fields.sgstRate));
+  // Some extractors report the component CGST/SGST rate (9%) as the freight
+  // GST rate even though the invoice uses the combined rate (18%). Normalize
+  // only when both component rates and the invoice rate prove that relationship.
+  const invoiceFreightGstRate =
+    freightRateNumber > 0 &&
+    invoiceRateNumber > 0 &&
+    freightRateNumber * 2 === invoiceRateNumber &&
+    cgstRateNumber === freightRateNumber &&
+    sgstRateNumber === freightRateNumber
+      ? invoiceTaxRate
+      : extractedFreightRate;
   return {
     documentId: document.id,
     documentType: document.document_type,
@@ -864,7 +884,7 @@ function buildSource(
     invoiceTaxableAmount: reconciledPrintedTaxable !== null
       ? formatPaise(reconciledPrintedTaxable)
       : text(fields.totalTaxableAmount || fields.subtotal),
-    invoiceTaxRate: text(fields.taxRate),
+    invoiceTaxRate,
     invoiceTaxAmount: verifiedAmounts?.taxAmount || text(fields.taxAmount) || commercialFields.taxAmount,
     invoiceTotal: text(fields.totalAmount),
     invoiceTdsAmount: text(fields.tdsAmount) || commercialFields.tdsAmount,
@@ -873,9 +893,7 @@ function buildSource(
       printedFreight || (freightFromRows > 0 ? formatPaise(freightFromRows) : ""),
     invoiceFreightVerified: freightRowsAgreeWithInvoice || Boolean(verifiedAmounts?.freightAmount),
     invoiceFreightExtractedAmount: text(fields.freightAmount),
-    invoiceFreightGstRate:
-      text(fields.freightGstRate) || commercialFields.freightGstRate ||
-      (printedFreight ? "" : freightRows.map(({ line }) => line.taxRate).find(Boolean) || ""),
+    invoiceFreightGstRate,
     invoiceTds194qAmount:
       text(fields.tds194qAmount) || commercialFields.tds194qAmount,
     invoiceTds194qRate:
@@ -946,8 +964,13 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
   if (!number) return null;
   const from = splitEwayAddress(text(fields.dispatchFrom));
   const to = splitEwayAddress(text(fields.shipTo));
-  const distance = pageText.match(/approx\.?\s*distance\s*:?\s*(\d{1,4})\s*km/i)?.[1] ?? "";
-  const mode = pageText.match(/\bmode\s*:?\s*(road|rail|air|ship)\b/i)?.[1]?.toLowerCase() ?? "road";
+  const distance =
+    text(fields.distanceKm || fields.distance || fields.approxDistance).match(/\b(\d{1,4})\b/)?.[1] ??
+    pageText.match(/\b(?:approx(?:imate)?\.?\s*)?distance(?:\s*\(\s*in\s*km\s*\))?[^\d\n]{0,20}(\d{1,4})(?:\s*km)?\b/i)?.[1] ??
+    "";
+  const mode =
+    pageText.match(/\b(?:mode(?:\s+of\s+transport)?|transport\s+mode)[^a-z\n]{0,20}(road|rail|air|ship)\b/i)?.[1]?.toLowerCase() ??
+    "road";
   const modeCode = { road: "1 - Road", rail: "2 - Rail", air: "3 - Air", ship: "4 - Ship" }[mode] ?? "1 - Road";
   return {
     record: true,

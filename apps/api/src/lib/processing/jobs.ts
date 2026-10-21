@@ -51,7 +51,9 @@ export async function getLatestProcessingJob(caseId: string) {
   const supabase = createSupabaseAdminClient();
   const { data, error } = await supabase
     .from("packet_processing_jobs")
-    .select("*")
+    .select(
+      "id, case_id, owner_user_id, job_type, status, attempt_count, max_attempts, progress, stage, error, result, locked_at, locked_by, next_run_at, started_at, finished_at, created_at, updated_at"
+    )
     .eq("case_id", caseId)
     .order("created_at", { ascending: false })
     .limit(1)

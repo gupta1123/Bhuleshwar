@@ -1251,7 +1251,7 @@ async function POSTHandler(request: Request, contextParam: { params: Promise<{ i
       const requestedConnectionId = typeof body.connectionId === "string" ? body.connectionId : null;
       const requestedCompanyName = typeof body.companyName === "string" ? body.companyName : null;
       const initial = await loadContext(request, id, user.id, requestedConnectionId, requestedCompanyName);
-      const context = initial.posting?.connection_id
+      const context = initial.posting?.connection_id && initial.connection?.id !== initial.posting.connection_id
         ? await loadContext(request, id, user.id, initial.posting.connection_id, requestedCompanyName)
         : initial;
       if (!context.posting || context.posting.status !== "verification_required" || !context.posting.command_id) {

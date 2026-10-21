@@ -51,11 +51,14 @@ export type FieldKey =
   | "paidAmount"
   | "statementAmount"
   | "freightAmount"
+  | "discountAmount"
   | "advanceAmount"
   | "toPayAmount"
   | "itemDescription"
   | "materialGrade"
   | "itemQuantity"
+  | "receivedQuantity"
+  | "receivedUnit"
   | "unit"
   | "hsnSac"
   | "batchNumber"
@@ -147,6 +150,7 @@ export interface CommercialLineItem {
   unit?: string;
   rate?: string;
   discountPercent?: string;
+  discountAmount?: string;
   netRate?: string;
   taxableAmount?: string;
   cgstRate?: string;

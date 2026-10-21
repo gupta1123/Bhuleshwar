@@ -2316,11 +2316,6 @@ export function preparePurchasePosting(params: {
     if (!transportTdsMaster || (!isWithholdingLedger(transportTdsMaster, "transport") && !mappingSelects(params.masters, params.mappings ?? [], "tds_ledger", ["transport", "goods_transport"], review.transportTdsLedgerName))) {
       blockers.push(withholdingLedgerIssue("TRANSPORT_TDS_LEDGER_REQUIRED", "Transport TDS ledger missing", "goods-transport TDS", "transport", review.transportTdsLedgerName, params.masters));
     }
-  }
-  if (tcsReceivableActive) {
-    if (!review.tcsLedgerName || !hasMaster(params.masters, review.tcsLedgerName, ["ledger", "tax_ledger"])) {
-      blockers.push(issue("TCS_LEDGER_REQUIRED", "TCS ledger missing", "Select the configured TCS Receivable ledger.", "tax"));
-    }
     if (moneyPaise(calculation.transportTdsDifference) !== 0) {
       blockers.push(issue(
         "TRANSPORT_TDS_MISMATCH",
@@ -2328,6 +2323,11 @@ export function preparePurchasePosting(params: {
         `The extracted deduction differs from ${review.transportTdsRate}% of freight by ₹${calculation.transportTdsDifference}. Correct the extracted invoice before posting.`,
         "tax"
       ));
+    }
+  }
+  if (tcsReceivableActive) {
+    if (!review.tcsLedgerName || !hasMaster(params.masters, review.tcsLedgerName, ["ledger", "tax_ledger"])) {
+      blockers.push(issue("TCS_LEDGER_REQUIRED", "TCS ledger missing", "Select the configured TCS Receivable ledger.", "tax"));
     }
   }
   if (moneyPaise(calculation.gstDifference) !== null && Math.abs(moneyPaise(calculation.gstDifference) ?? 0) > TAX_TOLERANCE_PAISE) {

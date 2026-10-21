@@ -48,11 +48,23 @@ import {
   getQualityExtractionReasoning,
 } from "./openrouter";
 
+const callOpenRouterRaw = callOpenRouter;
+
 const STORAGE_BUCKET = "packet-files";
 const execFileAsync = promisify(execFile);
 const PDF_RENDER_DPI = Number(process.env.PACKET_PDF_RENDER_DPI ?? 160);
-const PDF_RENDER_MAX_PAGES = Number(process.env.PACKET_PDF_RENDER_MAX_PAGES ?? 8);
-const PDF_SMART_SPLIT_MAX_PAGES = Number(process.env.PACKET_PDF_SMART_SPLIT_MAX_PAGES ?? 20);
+// Zero means render every page. A positive value is an explicit operational cap
+// and is always logged so pages cannot be dropped silently.
+const PDF_RENDER_MAX_PAGES = Number(process.env.PACKET_PDF_RENDER_MAX_PAGES ?? 0);
+const PDF_SMART_SPLIT_MAX_PAGES = Number(process.env.PACKET_PDF_SMART_SPLIT_MAX_PAGES ?? 0);
+const PACKET_TEXT_EXTRACTION_BATCH_MAX_CHARS = Math.max(
+  8_000,
+  Number(process.env.PACKET_TEXT_EXTRACTION_BATCH_MAX_CHARS ?? 18_000) || 18_000
+);
+const PACKET_SMART_SPLIT_PAGE_CLASSIFICATION_THRESHOLD = Math.max(
+  8,
+  Number(process.env.PACKET_SMART_SPLIT_PAGE_CLASSIFICATION_THRESHOLD ?? 20) || 20
+);
 const PROVIDER_IMAGE_HARD_LIMIT_BYTES = Number(process.env.PACKET_PROVIDER_IMAGE_HARD_LIMIT_BYTES ?? 20 * 1024 * 1024);
 const PROVIDER_IMAGE_TARGET_BYTES = Number(process.env.PACKET_PROVIDER_IMAGE_TARGET_BYTES ?? 8 * 1024 * 1024);
 const PROVIDER_IMAGE_MAX_DIMENSION = Number(process.env.PACKET_PROVIDER_IMAGE_MAX_DIMENSION ?? 3200);
@@ -60,6 +72,25 @@ const PACKET_AI_CONCURRENCY = Math.max(
   1,
   Math.min(6, Number(process.env.PACKET_AI_CONCURRENCY ?? 3) || 3)
 );
+const PACKET_FILE_CONCURRENCY = Math.max(
+  1,
+  Math.min(3, Number(process.env.PACKET_FILE_CONCURRENCY ?? 2) || 2)
+);
+const PACKET_AI_GLOBAL_CONCURRENCY = Math.max(
+  1,
+  Math.min(
+    12,
+    Number(process.env.PACKET_AI_GLOBAL_CONCURRENCY ?? PACKET_AI_CONCURRENCY * PACKET_FILE_CONCURRENCY) ||
+      PACKET_AI_CONCURRENCY * PACKET_FILE_CONCURRENCY
+  )
+);
+const PACKET_PDF_TEXT_CONCURRENCY = Math.max(
+  1,
+  Math.min(6, Number(process.env.PACKET_PDF_TEXT_CONCURRENCY ?? 3) || 3)
+);
+// Use an explicit filename hint for single-file uploads; ambiguous names still
+// go through AI classification. Smart-split PDFs still classify their pages.
+const TRUST_STRONG_FILENAME_TYPE_HINTS = process.env.PACKET_TRUST_FILENAME_TYPE !== "false";
 const PHOTO_VEHICLE_NUMBER_NOT_VISIBLE_COPY = "Vehicle number is not clearly visible in this image.";
 const PO_NUMBER_FIELD_KEYS: FieldKey[] = ["poNumber", "referencePoNumber"];
 const INDENT_LABEL_PATTERN = /\b(?:indent|ind\.?\s*no|indent\s*(?:no|number|form|ref|reference)?)\b/i;
@@ -81,6 +112,10 @@ const DIRECT_BUYER_CONTEXT_PATTERN = /\b(?:buyer|bill\s*to|bill-to|customer|purc
 const STORE_EVIDENCE_DOC_TYPES = new Set<DocType>(["Invoice", "Tax Invoice", "Delivery Challan", "Delivery Note"]);
 const STAMP_SIGNATURE_EXTRACTION_INSTRUCTION =
   "For stamp/signature presence fields, return only Yes, No, or Unclear. Use Yes only when the mark is visibly present, No only when the relevant area is visible and clearly absent, otherwise Unclear. For invoice/delivery receiving evidence, a buyer or receiver stamp block such as Kalika, SMS Division, Store, Gate, or Security with Date and Name & Sign lines means hasStoreStamp=Yes; if handwritten marks or signatures appear on those Name & Sign lines, hasStoreSignature=Yes. Do not confuse the supplier Authorized Signatory with store signature. ";
+const CLASSIFICATION_EVIDENCE_INSTRUCTION =
+  "Classify from the visible document layout, labels, and purpose. Use the filename only as a fallback when document evidence is missing or inconclusive. If the visible document type conflicts with the filename, trust the visible document. Never invent a document type from the filename alone. ";
+const EXTRACTION_EVIDENCE_INSTRUCTION =
+  "Extract only values clearly visible in this document. Evidence priority is: explicitly labelled value on the current page, clearly visible content on the current document, then another page belonging to the same physical document. Do not copy values from other documents during first-pass extraction; cross-document enrichment happens later in the application. Do not infer values from filenames, arithmetic, expectations, or nearby documents. If a value is partly visible or uncertain, omit the structured field and preserve the uncertainty in visibleText. For document-level fields, prefer a clearly labelled header, primary-page, or total-section value and do not replace it with a weaker unlabelled value from another page. ";
 
 async function mapWithConcurrency<T, R>(
   items: readonly T[],
@@ -103,6 +138,26 @@ async function mapWithConcurrency<T, R>(
   );
   await Promise.all(workers);
   return results;
+}
+
+let activePacketAiCalls = 0;
+const waitingPacketAiCalls: Array<() => void> = [];
+
+async function callPacketOpenRouter(
+  messages: Parameters<typeof callOpenRouterRaw>[0],
+  options?: Parameters<typeof callOpenRouterRaw>[1]
+) {
+  if (activePacketAiCalls >= PACKET_AI_GLOBAL_CONCURRENCY) {
+    await new Promise<void>((resolve) => waitingPacketAiCalls.push(resolve));
+  }
+
+  activePacketAiCalls += 1;
+  try {
+    return await callOpenRouterRaw(messages, options);
+  } finally {
+    activePacketAiCalls -= 1;
+    waitingPacketAiCalls.shift()?.();
+  }
 }
 
 function resolvePdfJsWorkerSrc() {
@@ -211,12 +266,15 @@ const FIELD_MAPPINGS: Partial<Record<FieldKey, string[]>> = {
   paidAmount: ["paidAmount", "amountPaid", "paidTollAmount", "tollAmount", "amountReceived", "receivedAmount"],
   statementAmount: ["statementAmount", "availableBalance", "availableBal", "avblBal", "balance", "debitAmount", "creditAmount", "transactionAmount"],
   freightAmount: ["freightAmount", "freight", "transportCharge"],
+  discountAmount: ["discountAmount", "discount", "rebateAmount", "cashDiscountAmount"],
   freightGstRate: ["freightGstRate", "freightTaxRate", "transportGstRate"],
   advanceAmount: ["advanceAmount", "advancePaid"],
   toPayAmount: ["toPayAmount", "toPay", "ttbAmount"],
   itemDescription: ["itemDescription", "description", "productDescription"],
   materialGrade: ["materialGrade", "grade", "steelGrade"],
   itemQuantity: ["itemQuantity", "quantity", "qty"],
+  receivedQuantity: ["receivedQuantity", "receivedQty", "actualReceivedQuantity"],
+  receivedUnit: ["receivedUnit", "receivedUom", "receivedUnitOfMeasure"],
   unit: ["unit", "uom"],
   hsnSac: ["hsnSac", "hsn", "sac", "hsnCode"],
   batchNumber: ["batchNumber", "batchNo", "lotNumber"],
@@ -303,15 +361,16 @@ function getLineItemExtractionInstruction(docType: DocType) {
 
   return (
     "Also extract every commercial table row into a top-level lineItems array. " +
-    "Each line item may contain lineNumber, itemCode, description, hsnSac, quantity, unit, rate, discountPercent, netRate, taxableAmount, cgstRate, cgstAmount, sgstRate, sgstAmount, igstRate, igstAmount, taxRate, taxAmount, lineTotal, referencePoLineNumber, rawText, and sourcePage. " +
+    "Each line item may contain lineNumber, itemCode, description, hsnSac, quantity, unit, rate, discountPercent, discountAmount, netRate, taxableAmount, cgstRate, cgstAmount, sgstRate, sgstAmount, igstRate, igstAmount, taxRate, taxAmount, lineTotal, referencePoLineNumber, rawText, and sourcePage. " +
     "When the prompt text or rendered images contain multiple pages, set sourcePage to the visible page number where the row appears. " +
     "When the item description cell contains a generic item name plus a product/model/specification code, split it: put the generic item name in description and put the remaining product/model/specification text in itemCode. For example, extract \"Guide Roller 5374 ERG150\" as description \"Guide Roller\" and itemCode \"5374 ERG150\". " +
-    "Preserve one entry per visible PO, invoice, delivery challan/note, or e-way bill goods row; do not merge different rows or sum unlike units. Use rawText for the original row text when OCR is uncertain. " +
-    "Do not extract HSN/SAC-wise tax summary rows as lineItems. Rows that only contain HSN/SAC, taxable value, and tax amount are summary rows, not product/service lines. " +
+    "Preserve one entry per visible PO, invoice, delivery challan/note, or e-way bill product/service row; do not merge different rows or sum unlike units. Use rawText for the original row text when OCR is uncertain. " +
+    "Exclude HSN/SAC-wise tax summaries, subtotal rows, grand-total rows, GST summaries, freight-only summaries, package-count rows, payment rows, and balance rows from lineItems. Rows that only contain HSN/SAC, taxable value, and tax amount are summary rows, not product/service lines. " +
     "When invoice GST rates appear only in an HSN/SAC tax summary, map the visible CGST, SGST, IGST, or GST rates from that summary onto the matching product/service lineItems by HSN/SAC and taxable amount. " +
     "For invoice rows, taxableAmount is the row amount before GST; when the row shows only quantity, rate, and amount, use that amount as taxableAmount and lineTotal. Do not treat packing, freight, P&F, or other charge percentages as GST rates unless the row or tax summary explicitly labels CGST, SGST, IGST, GST, or tax. " +
     "Only set taxableAmount or lineTotal when a monetary amount/value column is visible. Do not use quantity totals such as TOTAL 1.000 as monetary amounts, and omit amount fields instead of writing 0 when the document does not show an amount. " +
-    "For product/service rows, keep item name only in description, keep product/model/specification identifiers in itemCode, and keep HSN/SAC only in hsnSac. Never copy HSN/SAC codes, GST labels, quantities, units, rates, tax rates, taxable amounts, tax amounts, or totals into description or itemCode. "
+    "For product/service rows, keep item name only in description, keep product/model/specification identifiers in itemCode, and keep HSN/SAC only in hsnSac. Never copy HSN/SAC codes, GST labels, quantities, units, rates, tax rates, taxable amounts, tax amounts, or totals into description or itemCode. " +
+    "A line-item discount is different from a cash discount or prompt-payment discount. Use discountPercent and discountAmount only for discounts applied directly to a product/service row. Do not put cash-discount terms or payment-window discounts into line-item discount fields; preserve them in an allowed payment/terms field and visibleText when clearly visible. "
   );
 }
 
@@ -341,7 +400,8 @@ function getDocumentSpecificExtractionInstruction(docType: DocType) {
       return (
         "For Delivery Challan or Delivery Note documents, itemQuantity must be the actual goods/item quantity from a goods row. " +
         "Never set itemQuantity from Total Packages, No. of packages, boxes, cartons, bundles, bags, coils packed, packing count, or shipment count. " +
-        "If only package count is visible and no actual goods quantity is shown, omit itemQuantity. "
+        "If only package count is visible and no actual goods quantity is shown, omit itemQuantity. " +
+        "If the receiver has handwritten or printed received quantity fields, extract them separately as receivedQuantity and receivedUnit; do not overwrite the dispatched itemQuantity. "
       );
     case "E-Way Bill":
       return (
@@ -355,6 +415,7 @@ function getDocumentSpecificExtractionInstruction(docType: DocType) {
       return (
         "For Lorry Receipt documents, prioritize lorryReceiptNumber, vehicleNumber, routeFrom, routeTo, transporterName, netWeight, and authorized signature presence. " +
         "Extract the receipt/consignment date as documentDate. Preserve the printed weight unit (for example KG, MT, or MTS) in netWeight; a declared weight in MTS must not be returned as a unitless number. " +
+        "If the LR contains a receiver-filled received quantity, shortage quantity, or received weight, extract the receiver value as receivedQuantity and receivedUnit separately from the dispatched quantity or netWeight. Preserve handwritten receiving remarks in visibleText. " +
         "Lorry No is the vehicleNumber. G.C. Note, LR No, Consignment No, or Transporter Doc No is lorryReceiptNumber. " +
         "Do not return package, freight, weight, amount, total, to-pay, or to-be-billed rows as lineItems; keep logistics quantities and weights in fields only. " +
         "Read Indian vehicle numbers carefully from the image; distinguish letters from similar-looking digits, especially G/9, J/S, O/0, S/5, T/7, D/G, and C/G. "
@@ -1112,7 +1173,7 @@ export async function assessCaseTermsComplianceDetailed(documents: CaseDoc[]): P
 
   let raw = "";
   try {
-    raw = await callOpenRouter(
+    raw = await callPacketOpenRouter(
       [
         {
           role: "system",
@@ -1642,6 +1703,7 @@ const INVOICE_LINE_ITEM_KEYS: Array<keyof CommercialLineItem> = [
   "unit",
   "rate",
   "discountPercent",
+  "discountAmount",
   "netRate",
   "taxableAmount",
   "cgstRate",
@@ -4034,6 +4096,37 @@ function inferDocTypeFromFilename(fileName: string): DocType {
   return "Unknown";
 }
 
+function hasStrongFilenameTypeHint(fileName: string, docType: DocType) {
+  if (!TRUST_STRONG_FILENAME_TYPE_HINTS || docType === "Unknown") return false;
+  const name = fileName.toLowerCase().replace(/[.\-_]+/g, " ");
+  switch (docType) {
+    case "Purchase Order":
+      return /\bpurchase\s+order\b|\bpo\b/.test(name);
+    case "Amended Purchase Order":
+      return /\bamended\b/.test(name) && /\bpo\b|purchase\s+order/.test(name);
+    case "Tax Invoice":
+      return /\btax\s+invoice\b/.test(name);
+    case "Invoice":
+      return /\binvoice\b|\bbill\b/.test(name);
+    case "E-Way Bill":
+      return /\be\s*way\b/.test(name);
+    case "Weighment Slip":
+      return /\bweigh(?:ment|bridge)\b|\bweight\b/.test(name);
+    case "Lorry Receipt":
+      return /\blorry\b|\bconsignment\b|\blr\b/.test(name);
+    case "Delivery Challan":
+      return /\bdelivery\s+challan\b|\bchallan\b/.test(name);
+    case "Delivery Note":
+      return /\bdelivery\s+note\b/.test(name);
+    case "Receipt":
+      return /\breceipt\b/.test(name);
+    case "Bank Statement":
+      return /\bbank\s+statement\b/.test(name);
+    default:
+      return false;
+  }
+}
+
 function normaliseDocType(raw?: string): DocType {
   if (!raw) return "Unknown";
   const value = raw.toLowerCase();
@@ -4409,17 +4502,23 @@ async function renderPdfToImagePages(data: Uint8Array, options?: { maxPages?: nu
 
   try {
     fs.writeFileSync(inputPath, Buffer.from(data));
-    await execFileAsync("pdftoppm", [
+    const renderArgs = [
       "-r",
       String(PDF_RENDER_DPI),
       "-png",
       "-f",
       "1",
-      "-l",
-      String(maxPages),
       inputPath,
       outputPrefix,
-    ]);
+    ];
+    if (maxPages > 0) {
+      console.warn(
+        `[packet-processing] PDF render cap is enabled for ${options?.sourceName ?? "PDF"}: only the first ${maxPages} pages will be rendered. ` +
+          "Unset PACKET_PDF_RENDER_MAX_PAGES and PACKET_PDF_SMART_SPLIT_MAX_PAGES to process every page."
+      );
+      renderArgs.splice(5, 0, "-l", String(maxPages));
+    }
+    await execFileAsync("pdftoppm", renderArgs);
 
     const pageFileNames = fs
       .readdirSync(tmpDir)
@@ -4458,21 +4557,20 @@ async function extractPdfTextPages(data: Uint8Array) {
     data,
     disableWorker: true,
   }).promise;
-  const pages: string[] = [];
-
-  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
-    const page = await pdf.getPage(pageNumber);
-    const textContent = await page.getTextContent();
-    const text = textContent.items
-      .map((item) => ("str" in item && typeof item.str === "string" ? item.str : ""))
-      .filter(Boolean)
-      .join(" ")
-      .replace(/\s+/g, " ")
-      .trim();
-    pages.push(text);
-  }
-
-  return pages;
+  return mapWithConcurrency(
+    Array.from({ length: pdf.numPages }, (_, index) => index + 1),
+    PACKET_PDF_TEXT_CONCURRENCY,
+    async (pageNumber) => {
+      const page = await pdf.getPage(pageNumber);
+      const textContent = await page.getTextContent();
+      return textContent.items
+        .map((item) => ("str" in item && typeof item.str === "string" ? item.str : ""))
+        .filter(Boolean)
+        .join(" ")
+        .replace(/\s+/g, " ")
+        .trim();
+    }
+  );
 }
 
 async function classifyDocumentFromImage(image: string, fileName = ""): Promise<DocType> {
@@ -4480,13 +4578,17 @@ async function classifyDocumentFromImage(image: string, fileName = ""): Promise<
   if (!image.startsWith("data:image/")) {
     return inferred;
   }
+  if (hasStrongFilenameTypeHint(fileName, inferred)) {
+    return inferred;
+  }
 
-  const raw = await callOpenRouter(
+  const raw = await callPacketOpenRouter(
     [
       {
         role: "system",
         content:
           `Classify procurement packet pages. Return only JSON like {"documentType":"Purchase Order"} using one of: ${SUPPORTED_DOC_TYPES.join(", ")}. ` +
+          CLASSIFICATION_EVIDENCE_INSTRUCTION +
           "Some pages may be handwritten/manual or mixed printed and handwritten; classify by the document layout and purpose, not only by machine-readable printed text. " +
           "If the page is headed Delivery Challan or shows Challan No/Challan Date, classify it as Delivery Challan even when it references a PO No; PO No on logistics documents is only a reference.",
       },
@@ -4508,19 +4610,26 @@ async function classifyDocumentFromImage(image: string, fileName = ""): Promise<
 
 async function classifyDocumentFromText(textPages: string[], fileName = ""): Promise<DocType> {
   const inferred = inferDocTypeFromFilename(fileName);
-  const visibleText = textPages.map((page, index) => `Page ${index + 1}: ${page}`).join("\n").slice(0, 12000);
+  if (hasStrongFilenameTypeHint(fileName, inferred)) {
+    return inferred;
+  }
+  const joinedText = textPages.map((page, index) => `Page ${index + 1}: ${page}`).join("\n");
+  const visibleText = joinedText.length <= 12_000
+    ? joinedText
+    : `${joinedText.slice(0, 8_000)}\n...[middle pages omitted for classification only]...\n${joinedText.slice(-4_000)}`;
 
   if (!visibleText.trim()) {
     return inferred;
   }
 
-  const raw = await callOpenRouter(
+  const raw = await callPacketOpenRouter(
     [
       {
         role: "system",
         content:
           `Classify procurement packet text. Return only JSON like {"documentType":"Purchase Order"} using one of: ${SUPPORTED_DOC_TYPES.join(", ")}. ` +
-          "The text may omit handwritten entries, so use file name hints and any visible labels when the embedded text is sparse. " +
+          CLASSIFICATION_EVIDENCE_INSTRUCTION +
+          "The text may omit handwritten entries, so use visible labels and the filename only as a fallback when the embedded text is sparse. " +
           "If the text is headed Delivery Challan or shows Challan No/Challan Date, classify it as Delivery Challan even when it references a PO No; PO No on logistics documents is only a reference.",
       },
       {
@@ -4739,10 +4848,11 @@ async function splitPdfPagesIndividually(params: {
     `Classify one page from a procurement packet PDF. Return only JSON with a top-level "documents" array. ` +
     `Each item must contain documentType and confidence. Also include documentNumber, primaryPartyName, vehicleNumber, and splitReason when visible. ` +
     `Use only these documentType values: ${SUPPORTED_DOC_TYPES.join(", ")}. ` +
+    CLASSIFICATION_EVIDENCE_INSTRUCTION +
     `Use the rendered page image as the source of truth when available; use text only as supporting context. ` +
     `If this one page visibly contains multiple separate documents or cards, return multiple records. ` +
     `If a page contains a separate invoice, identify that invoice by visible invoice number and party/customer/supplier name. ` +
-    `Do not infer document type from the file name when the page image/text shows a different document. ` +
+    `If the page image/text shows a different document from the filename, trust the page image/text. ` +
     `A page headed Delivery Challan or showing Challan No/Challan Date is Delivery Challan even if it contains PO No as a reference.`;
 
   const pageGroups = await mapWithConcurrency(
@@ -4754,7 +4864,7 @@ async function splitPdfPagesIndividually(params: {
     const pageImage = params.pageImages[index];
 
     const raw = pageImage
-      ? await callOpenRouter(
+      ? await callPacketOpenRouter(
           [
             {
               role: "system",
@@ -4779,7 +4889,7 @@ async function splitPdfPagesIndividually(params: {
             reasoning: getQualityExtractionReasoning(),
           }
         )
-      : await callOpenRouter(
+      : await callPacketOpenRouter(
           [
             {
               role: "system",
@@ -4852,6 +4962,7 @@ async function splitPdfIntoDocumentGroups(params: {
     `You split uploaded procurement packet PDFs into separate documents. Return only JSON with a top-level "documents" array. ` +
     `Each item must contain documentType, pageStart, pageEnd, and confidence. Also include documentNumber, primaryPartyName, vehicleNumber, and splitReason when visible. ` +
     `Use only these documentType values: ${SUPPORTED_DOC_TYPES.join(", ")}. ` +
+    CLASSIFICATION_EVIDENCE_INSTRUCTION +
     `Group consecutive pages belonging to the same physical/logical document. Do not merge different document types just because they are in one PDF. ` +
     `Do not merge separate documents just because they have the same documentType. Split same-type documents when invoice number, bill number, PO number, party/customer/supplier name, GSTIN, vehicle number, page numbering, letterhead, total section, or document heading resets or changes. ` +
     `A single uploaded PDF can contain two or more invoices for the same vehicle but different parties; emit each invoice as its own Invoice document with its own page range and party identity. ` +
@@ -4871,8 +4982,15 @@ async function splitPdfIntoDocumentGroups(params: {
     return [{ documentType: inferDocTypeFromFilename(params.fileName), pageStart: 1, pageEnd: pageCount }];
   }
 
+  // Avoid an unbounded all-pages split prompt for large PDFs. Page-level
+  // classification is slower than one combined request, but it is bounded,
+  // preserves every page, and is still limited by PACKET_AI_CONCURRENCY.
+  if (pageCount > PACKET_SMART_SPLIT_PAGE_CLASSIFICATION_THRESHOLD) {
+    return splitPdfPagesIndividually({ ...params, pageCount });
+  }
+
   const raw = hasText
-    ? await callOpenRouter(
+    ? await callPacketOpenRouter(
         [
           {
             role: "system",
@@ -4893,7 +5011,7 @@ async function splitPdfIntoDocumentGroups(params: {
         }
       )
     : params.pageImages.length
-    ? await callOpenRouter(
+    ? await callPacketOpenRouter(
         [
           {
             role: "system",
@@ -4921,7 +5039,7 @@ async function splitPdfIntoDocumentGroups(params: {
           reasoning: getQualityExtractionReasoning(),
         }
       )
-    : await callOpenRouter(
+    : await callPacketOpenRouter(
         [
           {
             role: "system",
@@ -5067,20 +5185,21 @@ async function extractDataFromImagePages(params: {
   const lineItemInstruction = getLineItemExtractionInstruction(params.documentType);
   const documentSpecificInstruction = getDocumentSpecificExtractionInstruction(params.documentType);
   const qualityInstruction = params.qualityRetry
-    ? "This is a quality retry because the first extraction was incomplete. Re-read the page carefully, including every visible commercial item row, handwritten/manual entries, small text, IDs, stamps, QR-adjacent text, and rotated/cropped regions. If the document has an item table, return each goods or service row in lineItems with its visible description, HSN/SAC, quantity, unit, rate, taxable amount, and tax values. Do not return empty fields when any requested value is visible. "
+    ? "This is a quality retry because the first extraction was incomplete. Re-read the page carefully, including every visible commercial item row, handwritten/manual entries, small text, IDs, stamps, QR-adjacent text, and rotated/cropped regions. If the document has an item table, return each goods or service row in lineItems with its visible description, HSN/SAC, quantity, unit, rate, taxable amount, and tax values. Fill every requested field that is clearly readable, but do not guess unclear characters or create values from partial evidence. "
     : "";
 
   const extracted = await mapWithConcurrency(
     params.pageImages,
     PACKET_AI_CONCURRENCY,
     async (image, index) => {
-    const raw = await callOpenRouter(
+    const raw = await callPacketOpenRouter(
       [
         {
           role: "system",
           content:
             `Extract structured fields and visible text from procurement, logistics, transport, vehicle KYC, FASTag, quality certificate, and photo-evidence documents and return only JSON with keys "fields", "lineItems", and "visibleText". ` +
             `This document is a ${params.documentType}. Use only these field keys for this document type: ${allowedFieldKeysText}. ` +
+            EXTRACTION_EVIDENCE_INSTRUCTION +
             "visibleText must be a raw OCR-style transcription of the important visible text on the page. " +
             IMAGE_HANDWRITTEN_EXTRACTION_INSTRUCTION +
             AMOUNT_EXTRACTION_INSTRUCTION +
@@ -5118,8 +5237,12 @@ async function extractDataFromImagePages(params: {
     }
   );
 
-  const combinedFields = extracted.reduce((acc, current) => ({ ...acc, ...current.fields }), {});
-  const visibleTextPages = extracted.map((page) => page.visibleText).filter(Boolean);
+  const combinedFields = extracted.reduce(
+    (acc, current) => mergeFieldRecords(acc, current.fields),
+    {} as Partial<Record<FieldKey, string>>
+  );
+  // Preserve page positions so sourcePage continues to refer to the real page.
+  const visibleTextPages = extracted.map((page) => page.visibleText ?? "");
   const visibleText = visibleTextPages.join("\n");
   const mappedFields = mapFields(combinedFields, params.documentType);
   const lineItems = normalizeExtractedCommercialLineItems({
@@ -5187,10 +5310,11 @@ async function extractDataFromImagePages(params: {
   return doc;
 }
 
-async function extractDataFromTextPages(params: {
+async function extractDataFromTextBatch(params: {
   fileName: string;
   textPages: string[];
   documentType: DocType;
+  pageLabels?: string[];
   model?: string;
   reasoning?: ReturnType<typeof getQualityExtractionReasoning>;
   qualityRetry?: boolean;
@@ -5200,9 +5324,11 @@ async function extractDataFromTextPages(params: {
   const lineItemInstruction = getLineItemExtractionInstruction(params.documentType);
   const documentSpecificInstruction = getDocumentSpecificExtractionInstruction(params.documentType);
   const qualityInstruction = params.qualityRetry
-    ? "This is a quality retry because the first extraction was incomplete. Re-read the text carefully, capture every visible commercial item row in lineItems, and do not return empty fields when any requested value is visible. "
+    ? "This is a quality retry because the first extraction was incomplete. Re-read the text carefully and capture every clearly visible commercial item row in lineItems. Fill every requested field that is clearly readable, but do not guess unclear characters or create values from partial evidence. "
     : "";
-  const visibleText = params.textPages.map((page, index) => `Page ${index + 1}: ${page}`).join("\n\n");
+  const visibleText = params.textPages
+    .map((page, index) => `${params.pageLabels?.[index] ?? `Page ${index + 1}`}: ${page}`)
+    .join("\n\n");
 
   if (!visibleText.trim()) {
     return fallbackDoc(params.fileName, params.documentType, {
@@ -5210,13 +5336,14 @@ async function extractDataFromTextPages(params: {
     });
   }
 
-  const raw = await callOpenRouter(
+  const raw = await callPacketOpenRouter(
     [
       {
         role: "system",
         content:
           `Extract structured fields from procurement packet text and return only JSON with keys "fields", "lineItems", and "visibleText". ` +
           `This document is a ${params.documentType}. Use only these field keys for this document type: ${allowedFieldKeysText}. ` +
+          EXTRACTION_EVIDENCE_INSTRUCTION +
           TEXT_HANDWRITTEN_EXTRACTION_INSTRUCTION +
           AMOUNT_EXTRACTION_INSTRUCTION +
           CONSIGNEE_EXTRACTION_INSTRUCTION +
@@ -5229,7 +5356,7 @@ async function extractDataFromTextPages(params: {
       },
       {
         role: "user",
-        content: `File name: ${params.fileName}\n\nVisible text:\n${visibleText.slice(0, 24000)}`,
+        content: `File name: ${params.fileName}\n\nVisible text:\n${visibleText}`,
       },
     ],
     { expectJson: true, model: params.model, reasoning: params.reasoning }
@@ -5303,6 +5430,111 @@ async function extractDataFromTextPages(params: {
   return doc;
 }
 
+function buildTextPageBatches(textPages: string[], maxChars: number) {
+  const batches: Array<{ pages: string[]; labels: string[]; sourcePageNumbers: number[]; startIndex: number }> = [];
+  let currentPages: string[] = [];
+  let currentLabels: string[] = [];
+  let currentSourcePageNumbers: number[] = [];
+  let currentChars = 0;
+  let currentStartIndex = 0;
+
+  textPages.forEach((page, index) => {
+    const pageBudget = Math.max(1, maxChars - `Page ${index + 1}: `.length);
+    const chunks = page.length > pageBudget
+      ? Array.from({ length: Math.ceil(page.length / pageBudget) }, (_, chunkIndex) =>
+          page.slice(chunkIndex * pageBudget, (chunkIndex + 1) * pageBudget)
+        )
+      : [page];
+    chunks.forEach((chunk, chunkIndex) => {
+      const label = chunks.length > 1 ? `Page ${index + 1} (part ${chunkIndex + 1} of ${chunks.length})` : `Page ${index + 1}`;
+      const pageTextLength = label.length + 2 + chunk.length;
+      if (currentPages.length > 0 && currentChars + pageTextLength > maxChars) {
+        batches.push({ pages: currentPages, labels: currentLabels, sourcePageNumbers: currentSourcePageNumbers, startIndex: currentStartIndex });
+        currentPages = [];
+        currentLabels = [];
+        currentSourcePageNumbers = [];
+        currentChars = 0;
+        currentStartIndex = index;
+      }
+      if (currentPages.length === 0) currentStartIndex = index;
+      currentPages.push(chunk);
+      currentLabels.push(label);
+      currentSourcePageNumbers.push(index);
+      currentChars += pageTextLength;
+    });
+  });
+
+  if (currentPages.length) {
+    batches.push({ pages: currentPages, labels: currentLabels, sourcePageNumbers: currentSourcePageNumbers, startIndex: currentStartIndex });
+  }
+
+  return batches;
+}
+
+async function extractDataFromTextPages(params: {
+  fileName: string;
+  textPages: string[];
+  documentType: DocType;
+  model?: string;
+  reasoning?: ReturnType<typeof getQualityExtractionReasoning>;
+  qualityRetry?: boolean;
+}) {
+  const batches = buildTextPageBatches(params.textPages, PACKET_TEXT_EXTRACTION_BATCH_MAX_CHARS);
+  if (batches.length <= 1) {
+    return extractDataFromTextBatch(params);
+  }
+
+  console.info(
+    `[packet-processing] extracting ${params.fileName} text in ${batches.length} batches with concurrency ${PACKET_AI_CONCURRENCY}`
+  );
+
+  const documents = await mapWithConcurrency(batches, PACKET_AI_CONCURRENCY, async (batch, index) => {
+    const pageStart = batch.startIndex + 1;
+    const pageEnd = batch.startIndex + batch.pages.length;
+    return extractDataFromTextBatch({
+      ...params,
+      fileName: `${params.fileName} (pages ${pageStart}-${pageEnd}, batch ${index + 1})`,
+      textPages: batch.pages,
+      pageLabels: batch.labels,
+    });
+  });
+
+  const fields = documents.reduce(
+    (merged, document) => mergeFieldRecords(merged, document.fields),
+    {} as Partial<Record<FieldKey, string>>
+  );
+  const lineItems = documents.flatMap((document, documentIndex) => {
+    const sourcePageNumbers = batches[documentIndex]?.sourcePageNumbers ?? [];
+    return (document.lineItems ?? []).map((item) => ({
+      ...item,
+      sourcePage: item.sourcePage
+        ? (sourcePageNumbers[item.sourcePage - 1] ?? sourcePageNumbers[0] ?? item.sourcePage - 1) + 1
+        : item.sourcePage,
+    }));
+  });
+  const normalizedLineItems = normalizeExtractedCommercialLineItems({
+    docType: params.documentType,
+    lineItems,
+    visibleTextPages: params.textPages,
+    documentFields: fields,
+  });
+
+  let document: CaseDoc = {
+    id: `${params.fileName}-${Date.now()}`,
+    type: params.documentType,
+    title: `${formatDocType(params.documentType)} — ${params.fileName}`,
+    pages: Math.max(1, params.textPages.length),
+    fields,
+    lineItems: normalizedLineItems,
+    md: "",
+    sourceHint: params.fileName,
+    sourceFileName: params.fileName,
+  };
+  document = applyVisibleDocTypeRefinement(document, params.textPages);
+  document.md = buildMarkdown(document, params.textPages);
+  return document;
+}
+
 async function retryWeakImageExtraction(params: {
   document: CaseDoc;
   fileName: string;
@@ -5325,6 +5557,57 @@ async function retryWeakImageExtraction(params: {
   return !isWeakExtraction(retryDocument)
     ? mergeExtractedDocs(retryDocument, params.document)
     : mergeExtractedDocs(params.document, retryDocument);
+}
+
+function getMissingTextPageIndexes(textPages: string[]) {
+  return textPages.flatMap((page, index) =>
+    page.replace(/\s+/g, "").length > 20 ? [] : [index]
+  );
+}
+
+async function recoverMixedPdfPagesFromImages(params: {
+  document: CaseDoc;
+  fileName: string;
+  textPages: string[];
+  pageImages: string[];
+  documentType: DocType;
+}) {
+  const missingPageIndexes = getMissingTextPageIndexes(params.textPages);
+  if (!missingPageIndexes.length) return params.document;
+
+  if (params.pageImages.length < params.textPages.length) {
+    console.warn(
+      `[packet-processing] could not recover ${missingPageIndexes.length} text-empty page(s) from ${params.fileName}; ` +
+        `only ${params.pageImages.length} of ${params.textPages.length} PDF page images were rendered.`
+    );
+    return params.document;
+  }
+
+  const missingPageImages = missingPageIndexes.map((index) => params.pageImages[index]).filter(Boolean);
+  if (!missingPageImages.length) return params.document;
+
+  const supplement = await extractDataFromImagePages({
+    fileName: `${params.fileName} (text-empty pages)`,
+    pageImages: missingPageImages,
+    documentType: params.documentType,
+  });
+  const supplementalLineItems = (supplement.lineItems ?? []).map((item, index) => ({
+    ...item,
+    sourcePage:
+      item.sourcePage && missingPageIndexes[item.sourcePage - 1] !== undefined
+        ? missingPageIndexes[item.sourcePage - 1] + 1
+        : missingPageIndexes[index] !== undefined
+          ? missingPageIndexes[index] + 1
+          : item.sourcePage,
+  }));
+  const merged: CaseDoc = {
+    ...params.document,
+    pages: Math.max(params.document.pages, params.textPages.length),
+    fields: mergeFieldRecords(params.document.fields, supplement.fields),
+    lineItems: [...(params.document.lineItems ?? []), ...supplementalLineItems],
+    md: [params.document.md, supplement.md].filter((value) => value?.trim()).join("\n\n"),
+  };
+  return merged;
 }
 
 async function retryWeakPdfTextExtractionFromImages(params: {
@@ -5493,6 +5776,26 @@ export async function extractFileDocuments(params: {
         textPages,
         documentType,
       });
+      const missingTextPageIndexes = getMissingTextPageIndexes(textPages);
+      if (missingTextPageIndexes.length > 0) {
+        await params.onProgress?.(
+          0.42,
+          `Rendering ${missingTextPageIndexes.length} text-empty PDF page${missingTextPageIndexes.length === 1 ? "" : "s"} for image extraction ${position}: ${fileName}`
+        );
+        try {
+          const pageImages = await renderPdfToImagePages(bytes, { sourceName: fileName });
+          document = await recoverMixedPdfPagesFromImages({
+            document,
+            fileName,
+            textPages,
+            pageImages,
+            documentType,
+          });
+        } catch (error) {
+          const reason = error instanceof Error ? error.message : String(error ?? "Unknown error");
+          console.warn(`Unable to render text-empty pages for mixed PDF "${fileName}". Continuing with text extraction. ${reason}`);
+        }
+      }
       if (needsImageFallbackForTextExtraction(document)) {
         await params.onProgress?.(0.45, `Rereading PDF images for handwritten content ${position}: ${fileName}`);
 
@@ -5583,15 +5886,18 @@ export async function processStoredCaseFiles(params: {
     throw new Error("No files found for this case.");
   }
 
-  const documents: CaseDoc[] = [];
+  let lastFileProgress = 5;
+  const reportFileProgress = async (details: { progress: number; stage: string }) => {
+    lastFileProgress = Math.max(lastFileProgress, details.progress);
+    return params.onProgress?.({ ...details, progress: lastFileProgress });
+  };
 
-  for (let index = 0; index < files.length; index += 1) {
-    const file = files[index];
+  const fileDocumentsByIndex = await mapWithConcurrency(files, PACKET_FILE_CONCURRENCY, async (file, index) => {
     const bucket = file.storage_bucket || STORAGE_BUCKET;
     const fileProgress = (phase: number) =>
       Math.min(79, Math.max(5, Math.round(5 + ((index + phase) / files.length) * 72)));
 
-    await params.onProgress?.({
+    await reportFileProgress({
       progress: fileProgress(0.05),
       stage: `Reading file ${index + 1} of ${files.length}: ${file.original_name}`,
     });
@@ -5601,24 +5907,23 @@ export async function processStoredCaseFiles(params: {
       throw download.error;
     }
 
-    const fileDocuments = await extractFileDocuments({
+    return extractFileDocuments({
       bytes: new Uint8Array(await download.data.arrayBuffer()),
       fileName: file.original_name,
       mimeType: file.mime_type,
       analysisMode,
       position: `${index + 1} of ${files.length}`,
-      onProgress: (phase, stage) => params.onProgress?.({ progress: fileProgress(phase), stage }),
+      onProgress: (phase, stage) => reportFileProgress({ progress: fileProgress(phase), stage }),
     });
-    documents.push(...fileDocuments);
-  }
+  });
+  const documents = fileDocumentsByIndex.flat();
 
-  return finalizeExtractedDocuments({
+  return {
     documents,
     comparisonOptions,
     analysisMode,
     fieldConfiguration,
-    onProgress: params.onProgress,
-  });
+  };
 }
 
 // Collapses duplicate invoice copies, enriches, compares and summarizes extracted documents.

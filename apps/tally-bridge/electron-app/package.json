@@ -1,9 +1,9 @@
 {
-  "name": "kalika-local-agent",
-  "productName": "Kalika Local Agent",
+  "name": "bhuleshwar-local-agent",
+  "productName": "Bhuleshwar Local Agent",
   "version": "1.2.42",
-  "description": "Secure local workflow agent connecting Kalika to Tally Prime.",
-  "author": "Kalika",
+  "description": "Secure local workflow agent connecting Bhuleshwar to Tally Prime.",
+  "author": "Bhuleshwar",
   "private": true,
   "type": "module",
   "main": "main.mjs",
@@ -27,9 +27,9 @@
     "electron-builder": "26.15.3"
   },
   "build": {
-    "appId": "com.kalika.local-agent",
-    "productName": "Kalika Local Agent",
-    "artifactName": "KalikaLocalAgent-${version}-${arch}.${ext}",
+    "appId": "com.bhuleshwar.local-agent",
+    "productName": "Bhuleshwar Local Agent",
+    "artifactName": "BhuleshwarLocalAgent-${version}-${arch}.${ext}",
     "directories": {
       "output": "../output"
     },
@@ -96,13 +96,13 @@
       "include": "../nsis/local-agent.nsh",
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Kalika Local Agent"
+      "shortcutName": "Bhuleshwar Local Agent"
     },
     "publish": [
       {
         "provider": "github",
         "owner": "gupta1123",
-        "repo": "autodealer-workflow",
+        "repo": "Bhuleshwar",
         "releaseType": "release"
       }
     ]

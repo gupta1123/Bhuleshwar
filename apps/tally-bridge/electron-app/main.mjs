@@ -14,9 +14,12 @@ import { consumeSuccessfulUpdate, isNewerVersion, recordDownloadedUpdate } from 
 // Electron runtime before app startup.
 const { autoUpdater } = electronUpdater;
 
-const CONNECTOR_NAME = "Kalika Local Agent";
-const PROTOCOL_NAME = "kalika-tally";
-const APP_USER_MODEL_ID = "com.kalika.local-agent";
+const CONNECTOR_NAME = "Bhuleshwar Local Agent";
+const PROTOCOL_NAME = "bhuleshwar-tally";
+// The web app may still send the legacy scheme while a deployment catches up.
+const CONNECTOR_URL_PATTERN = /^(?:bhuleshwar|kalika)-tally:\/\//;
+const isConnectorUrl = (value) => typeof value === "string" && CONNECTOR_URL_PATTERN.test(value);
+const APP_USER_MODEL_ID = "com.bhuleshwar.local-agent";
 const HIDDEN_LAUNCH_ARG = "--hidden";
 // The installer starts the agent with --quit to close a running copy cleanly.
 const QUIT_LAUNCH_ARG = "--quit";
@@ -36,7 +39,7 @@ app.commandLine.appendSwitch("in-process-gpu");
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const localAgentRoot = path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
-  "Kalika",
+  "Bhuleshwar",
   "LocalAgent",
 );
 const runtimeLogDir = path.join(localAgentRoot, "logs");
@@ -64,7 +67,7 @@ let updateState = {
 };
 let lastStatus = {
   title: "Waiting for connection",
-  detail: "Open Kalika and click Connect.",
+  detail: "Open Bhuleshwar and click Connect.",
   state: "idle",
 };
 
@@ -84,7 +87,7 @@ function relaunchWithWindowsCertificateStore() {
   try {
     const configDir = path.join(
       process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
-      "Kalika", "LocalAgent", "config"
+      "Bhuleshwar", "LocalAgent", "config"
     );
     const certificatePath = path.join(configDir, "windows-ca-bundle.pem");
     const powershell = path.join(
@@ -236,7 +239,7 @@ function parseConnectUrl(value) {
     "pairing-code": url.searchParams.get("pairingCode") || url.searchParams.get("pairing-code") || "",
     "control-token": url.searchParams.get("controlToken") || url.searchParams.get("control-token") || "",
     "tally-url": url.searchParams.get("tallyUrl") || url.searchParams.get("tally-url") || "http://localhost:9000",
-    "bridge-name": "Kalika Tally Connector",
+    "bridge-name": "Bhuleshwar Tally Connector",
   };
 }
 
@@ -257,7 +260,7 @@ function sendUpdateStatus(status) {
 function configureUpdateFeed() {
   const packagedUpdateConfig = path.join(process.resourcesPath, "app-update.yml");
   if (!fs.existsSync(packagedUpdateConfig)) {
-    autoUpdater.setFeedURL({ provider: "github", owner: "gupta1123", repo: "autodealer-workflow" });
+    autoUpdater.setFeedURL({ provider: "github", owner: "gupta1123", repo: "Bhuleshwar" });
   }
 }
 
@@ -320,7 +323,7 @@ function installDownloadedUpdateWhenSafe() {
   if (!runner?.busy) {
     if (updateInstallTimer) clearInterval(updateInstallTimer);
     updateInstallTimer = null;
-    sendUpdateStatus({ state: "installing", percent: 100, message: "Installing the update. Kalika Local Agent will reopen automatically…" });
+    sendUpdateStatus({ state: "installing", percent: 100, message: "Installing the update. Bhuleshwar Local Agent will reopen automatically…" });
     safeQuitApproved = true;
     // Windows must release the running executable before NSIS can replace it.
     // Use a silent install and force the updated app to relaunch so this feels
@@ -421,7 +424,7 @@ async function startRunner() {
         const expired = /invalid bridge token/i.test(entry.message);
         sendStatus({
           title: expired ? "Reconnect required" : "Connector warning",
-          detail: expired ? "Open Kalika and click Connect again." : entry.message,
+          detail: expired ? "Open Bhuleshwar and click Connect again." : entry.message,
           state: expired ? "expired" : "warning",
         });
         return;
@@ -441,7 +444,7 @@ async function startRunner() {
     },
     onStop(event) {
       if (event.reason === "revoked") {
-        sendStatus({ title: "Reconnect required", detail: "Open Kalika and click Connect again.", state: "expired" });
+        sendStatus({ title: "Reconnect required", detail: "Open Bhuleshwar and click Connect again.", state: "expired" });
         return;
       }
       if (event.reason === "update required") {
@@ -526,7 +529,7 @@ async function handleConnectUrl(value) {
       throw new Error("Connect link is missing pairing details.");
     }
     showWindow();
-    sendStatus({ title: "Pairing connector", detail: "Checking Tally and connecting to Kalika.", state: "running" });
+    sendStatus({ title: "Pairing connector", detail: "Checking Tally and connecting to Bhuleshwar.", state: "running" });
     await pairBridge(args);
     sendStatus({ title: "Connector paired", detail: "Starting live sync.", state: "running" });
     await startRunner();
@@ -559,12 +562,12 @@ async function handleDisconnectUrl(value) {
 }
 
 function handleProtocolUrl(value) {
-  if (!value || !value.startsWith("kalika-tally://")) return;
-  if (value.startsWith("kalika-tally://connect")) {
+  if (!isConnectorUrl(value)) return;
+  if (/^(?:bhuleshwar|kalika)-tally:\/\/connect/.test(value)) {
     void handleConnectUrl(value);
     return;
   }
-  if (value.startsWith("kalika-tally://disconnect")) {
+  if (/^(?:bhuleshwar|kalika)-tally:\/\/disconnect/.test(value)) {
     void handleDisconnectUrl(value);
   }
 }
@@ -601,7 +604,7 @@ function createWindow() {
     <style>
       :root{font-family:"Segoe UI Variable Text","Segoe UI",Arial,sans-serif;color:#2d2d2d;background:transparent;font-size:13px}*{box-sizing:border-box}html,body{width:100%;height:100%;overflow:hidden}body{margin:0;background:transparent}.windowShell{position:absolute;inset:2px;border:1px solid rgba(45,45,45,.1);border-radius:16px;background:#f4f0e9;overflow:hidden}.titleBar{height:40px;display:flex;align-items:center;padding:0 8px 0 14px;background:#fbf8f3;border-bottom:1px solid #ddd2c2;-webkit-app-region:drag;user-select:none}.titleBrand{display:flex;align-items:center;gap:8px;font-size:12.5px;font-weight:650}.titleMark{width:22px;height:22px;display:grid;place-items:center;border-radius:7px;background:linear-gradient(150deg,#f1c889,#d48700 45%,#4ca154);color:#fff;font-weight:800}.windowControls{display:flex;margin-left:auto;height:100%;-webkit-app-region:no-drag}.windowControl{width:32px;height:28px;border:0;border-radius:7px;background:transparent;color:#706156;font-size:13px}.windowControl:hover{background:#e6ddd1;color:#2d2d2d}.windowControl.close:hover{background:#f0d8d2;color:#c1543b}.shell{height:calc(100% - 40px);overflow:auto;padding:14px}.top{display:flex;align-items:center;gap:11px}.brand{display:none}.heading h1{font-size:16.5px}.heading p{font-size:11.5px}.menu-wrap{margin-left:auto}.icon-button{width:30px;height:30px;border:0;border-radius:8px;background:transparent;cursor:pointer;font-size:18px;color:#2d2d2d}.icon-button:hover{background:#e6ddd1}.menu{top:34px}.status{margin-top:10px;padding:14px;border-radius:13px}.data-panel{margin-top:10px;padding:12px;border-radius:13px}.note{margin-top:10px}.toast{margin-top:8px}
     </style><style>.data-panel{margin-top:12px;padding:15px;border:1px solid #ded4c7;border-radius:16px;background:#fff}.panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.eyebrow{font-size:9px;letter-spacing:.12em;color:#a08f80;font-weight:800}.panel-head h2{margin:3px 0 0;font-size:15px}.freshness{padding:4px 8px;border-radius:999px;background:#f1ebe2;color:#806b59;font-size:10px;font-weight:700}.data-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.data-card{display:flex;align-items:center;gap:9px;min-width:0;padding:10px;border:1px solid #eee6dc;border-radius:11px;background:#fbfaf8}.data-icon{width:27px;height:27px;display:grid;place-items:center;border-radius:8px;background:#f4e4cc;color:#684a2e;font-weight:800}.data-icon.violet{background:#ece7f7;color:#5a4b86}.data-card b{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11.5px}.data-card span{display:block;margin-top:3px;color:#897b6e;font-size:10.5px}.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}.actions button{min-height:34px;border-radius:9px;padding:7px 10px;font:700 11px inherit;cursor:pointer}.primary-action{border:0;background:#251810;color:#fff}.secondary-action{border:1px solid #d9cebf;background:#fff;color:#4b3b30}.data-toast{min-height:16px;margin-top:9px;color:#806b59;font-size:10.5px}.actions button:disabled{opacity:.58;cursor:default}</style></head><body><main class="shell">
-      <header class="top"><div class="brand">K</div><div class="heading"><h1>Kalika Local Agent</h1><p>Secure local connection to Tally Prime</p></div>
+      <header class="top"><div class="brand">B</div><div class="heading"><h1>Bhuleshwar Local Agent</h1><p>Secure local connection to Tally Prime</p></div>
         <div class="menu-wrap"><button id="menu-button" class="icon-button" aria-label="Open agent menu" aria-expanded="false">⋯</button>
           <div id="menu" class="menu" role="menu">
             <div class="menu-title">Preferences</div>
@@ -627,17 +630,17 @@ function createWindow() {
         <div id="data-toast" class="data-toast" aria-live="polite"></div>
       </section>
       <section id="update-card" class="update"><span id="update-message"></span><button id="install-update" type="button">Restart &amp; update</button></section>
-      <div class="note">Keep this app running while Kalika uses Tally.</div><div id="toast" class="toast" aria-live="polite"></div>
+      <div class="note">Keep this app running while Bhuleshwar uses Tally.</div><div id="toast" class="toast" aria-live="polite"></div>
     </main><script>
       document.body.innerHTML=\`
         <div class="windowShell">
-          <header id="titleBar" class="titleBar"><div class="titleBrand"><span class="titleMark">K</span><span>Kalika Local Agent</span></div><div class="windowControls"><button id="minimizeBtn" class="windowControl">−</button><button id="maximizeBtn" class="windowControl">□</button><button id="closeBtn" class="windowControl close">×</button></div></header>
+          <header id="titleBar" class="titleBar"><div class="titleBrand"><span class="titleMark">B</span><span>Bhuleshwar Local Agent</span></div><div class="windowControls"><button id="minimizeBtn" class="windowControl">−</button><button id="maximizeBtn" class="windowControl">□</button><button id="closeBtn" class="windowControl close">×</button></div></header>
           <main id="appContent">
             <div class="globalbar"><div class="health"><strong id="homeCompany">Tally not connected</strong><span id="homeConnectionBadge" class="connectionBadge warning"></span></div><div class="moreWrap"><button id="menu-button" class="moreButton">⋮</button><div id="menu" class="menu"><button id="menuLocalMatching">Ledger matching</button><button id="menuCustomerDues">Customer dues</button><button id="updates">Connector updates</button><button id="menuDiagnostics">Send diagnostics to support</button><div class="menuLabel">Advanced</div><button id="menuReset" class="menuDanger">Factory reset…</button></div></div></div>
             <section id="homeView" class="homeView"><div id="homeTask" class="homeTask" hidden><div><b id="homeTaskText">Working…</b><span id="homeTaskPercent">0%</span></div><div class="homeProgress"><i></i></div></div><h1 id="homeTitle">Finish ledger setup</h1><p id="homeCopy">Prepare the company once. The connector keeps both parts up to date after that.</p><div class="homeStatusGrid"><button id="homeLedgerCard" class="homeStatusCard"><div id="homeLedgerIcon" class="homeStatusIcon">▦</div><b>Ledger data</b><span id="homeLedgerState">Not available</span></button><button id="homeVectorCard" class="homeStatusCard"><div id="homeVectorIcon" class="homeStatusIcon">◇</div><b>Smart matching</b><span id="homeVectorState">Not available</span></button><button id="homeDuesCard" class="homeStatusCard duesCard"><div id="homeDuesIcon" class="homeStatusIcon">₹</div><b>Customer dues</b><span id="homeDuesState">Not checked yet</span></button></div><button id="connectionCheckBtn" class="homeAction connectionAction" hidden>Recheck connection</button><button id="homeSetupBtn" class="homeAction">Set up ledger matching</button></section>
           </main>
           <section id="localPanel" class="pagePanel"><div class="stickyHeader"><button id="backBtn" class="backButton">←</button><h1>Ledger matching</h1></div><div class="contextLine"><strong id="matchingCompany">Checking Tally…</strong><span>·</span><span id="matchingLedgerCount" hidden></span></div><section id="ledgerStep" class="step"><div class="stepHeader"><span class="stepNumber">1</span><b>Ledgers</b></div><div class="stepRow"><div><div id="syncState">Ready</div><small id="lastSync">Not updated yet</small></div><button id="refresh-data" class="primary-action">Refresh</button></div></section><section id="vectorStep" class="step"><div class="stepHeader"><span class="stepNumber">2</span><b>Smart matching</b></div><div class="stepRow"><div><div id="vectorState">Waiting for ledgers</div><small id="lastVector">Not prepared yet</small></div><button id="rebuild-index" class="secondary-action">Prepare</button></div></section><div id="matchingReady" class="steadyHero" hidden><div class="steadyIcon">✓</div><div><div><b id="steadyTitle">Ledgers matched</b> <span id="freshnessPill">Up to date</span></div><small id="steadySubtitle">Synced today</small></div></div><div id="data-toast" class="data-toast"></div></section>
-          <section id="duesPanel" class="pagePanel"><div class="stickyHeader"><button id="duesBackBtn" class="backButton">←</button><h1>Customer dues</h1></div><p class="updateContext">For Payment Follow-ups and Cash Discounts</p><div class="updateHero"><div id="duesTile" class="updateTile">₹</div><div><p id="duesCompany">Checking Tally…</p><h2 id="duesTitle">Get customer dues ready</h2><p id="duesDetail">Makes Payment Follow-ups and Cash Discounts open instantly. The first check takes a few minutes.</p></div></div><div id="duesProgress" class="updateProgress"><i id="duesProgressBar"></i></div><p id="duesStep" class="duesStep"></p><button id="duesCheckBtn" class="updateAction">Check customer dues</button><p class="duesNote">After the first check, Kalika follows changes in Tally automatically. Tally stays usable while this runs.</p><button id="duesFullBtn" class="duesFullLink" hidden>Check everything again</button></section><section id="updatesPanel" class="pagePanel"><div class="stickyHeader"><button id="updatesBackBtn" class="backButton">←</button><h1>Connector updates</h1></div><p class="updateContext">Keep the connector secure and reliable</p><div class="updateHero"><div class="updateTile">✓</div><div><p id="updateVersion">Current version</p><h2 id="updateTitle">You're up to date</h2><p id="update-message">Last checked a few minutes ago.</p></div></div><button id="checkUpdatesBtn" class="updateAction">Check for updates</button><section id="update-card" class="update"><button id="install-update">Restart &amp; update</button></section></section>
+          <section id="duesPanel" class="pagePanel"><div class="stickyHeader"><button id="duesBackBtn" class="backButton">←</button><h1>Customer dues</h1></div><p class="updateContext">For Payment Follow-ups and Cash Discounts</p><div class="updateHero"><div id="duesTile" class="updateTile">₹</div><div><p id="duesCompany">Checking Tally…</p><h2 id="duesTitle">Get customer dues ready</h2><p id="duesDetail">Makes Payment Follow-ups and Cash Discounts open instantly. The first check takes a few minutes.</p></div></div><div id="duesProgress" class="updateProgress"><i id="duesProgressBar"></i></div><p id="duesStep" class="duesStep"></p><button id="duesCheckBtn" class="updateAction">Check customer dues</button><p class="duesNote">After the first check, Bhuleshwar follows changes in Tally automatically. Tally stays usable while this runs.</p><button id="duesFullBtn" class="duesFullLink" hidden>Check everything again</button></section><section id="updatesPanel" class="pagePanel"><div class="stickyHeader"><button id="updatesBackBtn" class="backButton">←</button><h1>Connector updates</h1></div><p class="updateContext">Keep the connector secure and reliable</p><div class="updateHero"><div class="updateTile">✓</div><div><p id="updateVersion">Current version</p><h2 id="updateTitle">You're up to date</h2><p id="update-message">Last checked a few minutes ago.</p></div></div><button id="checkUpdatesBtn" class="updateAction">Check for updates</button><section id="update-card" class="update"><button id="install-update">Restart &amp; update</button></section></section>
           <div class="legacyControls" hidden><div id="card"><span id="title"></span><span id="detail"></span></div><span id="version"></span><span id="metrics"></span><span id="company"></span><span id="company-state"></span><span id="ledger-detail"></span><span id="freshness"></span><span id="toast"></span></div>
         </div>\`;
       const visualStyles=document.createElement('style'); visualStyles.textContent=\`
@@ -662,17 +665,17 @@ function createWindow() {
       const updateCard=document.getElementById('update-card'),updateMessage=document.getElementById('update-message'),installUpdate=document.getElementById('install-update'),updates=document.getElementById('updates');
       document.getElementById('checkUpdatesBtn').insertAdjacentHTML('beforebegin','<div id="updateProgress" class="updateProgress"><i id="updateProgressBar"></i></div>');installUpdate.className='installAction';
       function renderUpdate(data={}){const state=data.state||'idle',percent=Math.max(0,Math.min(100,Number(data.percent||0))),busy=['checking','available','downloading','waiting','installing'].includes(state),canInstall=['ready','waiting','installing'].includes(state),titles={idle:'Updates are automatic',checking:'Checking for updates…',current:"You're up to date",available:'Update found',downloading:'Downloading update…',ready:'Ready to install',waiting:'Finishing Tally work',installing:'Installing update…',failed:'Update check failed',unavailable:'Updates unavailable',installed:'Update installed'};document.getElementById('updateTitle').textContent=titles[state]||'Connector updates';updateMessage.textContent=data.message||'Updates are checked automatically.';document.getElementById('updateVersion').textContent='Current version '+(data.installedVersion||'${app.getVersion()}')+(data.availableVersion?' · Version '+data.availableVersion+' available':'');const tile=document.querySelector('.updateTile');tile.className='updateTile '+state;tile.textContent=state==='checking'||state==='installing'?'↻':state==='downloading'?'↓':state==='failed'||state==='unavailable'?'!':'✓';const progress=document.getElementById('updateProgress');progress.className='updateProgress'+(['downloading','installing'].includes(state)?' show':'');document.getElementById('updateProgressBar').style.width=(state==='installing'?100:percent)+'%';const check=document.getElementById('checkUpdatesBtn');check.disabled=busy;check.style.display=['ready','waiting','installing'].includes(state)?'none':'block';check.textContent=state==='checking'?'Checking…':state==='available'?'Preparing download…':state==='downloading'?'Downloading… '+percent+'%':state==='failed'?'Retry update check':'Check for updates';updateCard.className='update'+(canInstall?' show':'');installUpdate.style.display=canInstall?'block':'none';installUpdate.disabled=state!=='ready';installUpdate.textContent=state==='waiting'?'Waiting for Tally operation…':state==='installing'?'Installing and reopening…':'Restart & update';if(state==='installed')setTimeout(()=>showUpdatesPage(),0)}
-      window.kalikaAgent.onUpdateStatus(renderUpdate);installUpdate.onclick=async()=>{installUpdate.disabled=true;renderUpdate({...await window.kalikaAgent.getUpdateStatus(),state:'installing',message:'Preparing the update. Kalika Local Agent will reopen automatically…'});try{const result=await window.kalikaAgent.installUpdate();if(result?.waiting)renderUpdate({...await window.kalikaAgent.getUpdateStatus(),state:'waiting'})}catch(error){renderUpdate({state:'failed',message:error?.message||'The update could not be installed.'})}};window.kalikaAgent.getUpdateStatus().then(renderUpdate).catch(()=>{});
+      window.kalikaAgent.onUpdateStatus(renderUpdate);installUpdate.onclick=async()=>{installUpdate.disabled=true;renderUpdate({...await window.kalikaAgent.getUpdateStatus(),state:'installing',message:'Preparing the update. Bhuleshwar Local Agent will reopen automatically…'});try{const result=await window.kalikaAgent.installUpdate();if(result?.waiting)renderUpdate({...await window.kalikaAgent.getUpdateStatus(),state:'waiting'})}catch(error){renderUpdate({state:'failed',message:error?.message||'The update could not be installed.'})}};window.kalikaAgent.getUpdateStatus().then(renderUpdate).catch(()=>{});
       async function refreshConnection(){renderConnection(await window.kalikaAgent.getConnectionStatus())}
       async function loadAgent(){await refreshConnection();const [status,connection]=await Promise.all([window.kalikaAgent.getStatus(),window.kalikaAgent.getConnectionStatus()]);const storage=status.storage||{};document.getElementById('version').textContent='Agent '+(status.agentVersion||'Loading…');document.getElementById('metrics').textContent=Math.round((storage.sizeBytes||0)/1024)+' KB · '+(storage.queuedJobs||0)+' queued';const datasets=Array.isArray(status.datasets)?status.datasets:[];const ready=datasets.find((d)=>d.status==='ready'||d.state==='ready');const active=connection?.companyName||connection?.title||'Tally company';document.getElementById('company').textContent=active;document.getElementById('company-state').textContent=connection?.state==='connected'?'Connected':'Waiting for Tally';document.getElementById('ledger-detail').textContent=ready?.ledgerCount?Number(ready.ledgerCount).toLocaleString()+' ledgers synced':(datasets.length?'Syncing catalogue…':'Not synced yet');document.getElementById('freshness').textContent=ready?'Ready':'Needs refresh'}
       async function runAgentAction(button, message){button.disabled=true;button.classList.add('busy');document.getElementById('data-toast').textContent=message;try{await window.kalikaAgent.runOnce();await loadAgent();document.getElementById('data-toast').textContent='Refresh requested. The connector will continue in the background.'}catch(error){document.getElementById('data-toast').textContent=error?.message||'The refresh could not be started.'}finally{button.disabled=false;button.classList.remove('busy')}}
       function showError(error){toast.textContent=error?.message||'The action could not be completed.'}
       async function action(work,success){closeMenu();toast.textContent='Working…';try{await work();toast.textContent=success;await loadAgent()}catch(error){showError(error)}}
-      document.getElementById('menuDiagnostics').onclick=()=>action(()=>window.kalikaAgent.exportDiagnostics(),'Diagnostics saved. Send the file to Kalika support.');document.getElementById('menuReset').onclick=()=>{closeMenu();window.kalikaAgent.factoryReset().catch(showError)};
+      document.getElementById('menuDiagnostics').onclick=()=>action(()=>window.kalikaAgent.exportDiagnostics(),'Diagnostics saved. Send the file to Bhuleshwar support.');document.getElementById('menuReset').onclick=()=>{closeMenu();window.kalikaAgent.factoryReset().catch(showError)};
       const duesPanel=document.getElementById('duesPanel'),localPanel=document.getElementById('localPanel'),updatesPanel=document.getElementById('updatesPanel'),matchingReady=document.getElementById('matchingReady');matchingReady.className='';matchingReady.innerHTML='<div class="steadyHero"><div class="steadyIcon">✓</div><div class="steadyCopy"><div class="steadyHeroHead"><b id="steadyTitle">Ledgers matched</b><span id="freshnessPill">Up to date</span></div><small id="steadySubtitle">Synced today</small></div></div><div class="steadyActions"><button id="steadySyncBtn" class="primary-action" hidden>Sync now</button><button id="steadyCheckBtn" class="secondary-action">Check for changes</button></div><div class="steadyMeta"><span>Smart matching</span><strong id="steadyVectorMeta">— ledgers indexed</strong></div>';function showHome(){localPanel.classList.remove('open');updatesPanel.classList.remove('open');duesPanel.classList.remove('open')}function showDues(){closeMenu();localPanel.classList.remove('open');updatesPanel.classList.remove('open');duesPanel.classList.add('open');refreshVisible().catch(showError)}function showMatching(){closeMenu();updatesPanel.classList.remove('open');duesPanel.classList.remove('open');localPanel.classList.add('open');refreshVisible().catch(showError)}function showUpdatesPage(){closeMenu();localPanel.classList.remove('open');duesPanel.classList.remove('open');updatesPanel.classList.add('open')}
       async function runMatchingAction(button,message,work){button.disabled=true;const original=button.textContent;button.textContent=message;document.getElementById('data-toast').textContent=message;try{const result=await work();await refreshVisible();document.getElementById('data-toast').textContent='Ledger data and smart matching are up to date.';return result}catch(error){document.getElementById('data-toast').textContent=error?.message||'The operation could not be completed.';throw error}finally{button.disabled=false;button.textContent=original}}
       document.getElementById('refresh-data').onclick=()=>runMatchingAction(document.getElementById('refresh-data'),'Updating…',()=>window.kalikaAgent.syncLedgers());document.getElementById('rebuild-index').onclick=()=>runMatchingAction(document.getElementById('rebuild-index'),'Indexing…',()=>window.kalikaAgent.rebuildVectorIndex());document.getElementById('steadyCheckBtn').onclick=()=>runMatchingAction(document.getElementById('steadyCheckBtn'),'Checking…',()=>window.kalikaAgent.syncLedgers());document.getElementById('steadySyncBtn').onclick=()=>runMatchingAction(document.getElementById('steadySyncBtn'),'Syncing…',()=>window.kalikaAgent.syncLedgers());
-      document.getElementById('menuLocalMatching').onclick=showMatching;document.getElementById('menuCustomerDues').onclick=showDues;document.getElementById('homeDuesCard').onclick=showDues;document.getElementById('duesBackBtn').onclick=showHome;async function runDuesCheck(full){const quick=!full&&lastDues.status==='ready';duesBusy=true;renderDues(lastDues,{phase:quick?'checking_changes':'checking_company'});try{const result=await window.kalikaAgent.prepareCustomerDues({full});duesBusy=false;renderDues(result,null)}catch(error){duesBusy=false;renderDues({...lastDues,status:quick?lastDues.status:'failed',lastError:error?.message||'The check could not finish.'},null);if(quick)document.getElementById('duesStep').textContent=error?.message||'The check could not finish.'}}document.getElementById('duesCheckBtn').onclick=()=>runDuesCheck(false);document.getElementById('duesFullBtn').onclick=()=>runDuesCheck(true);updates.onclick=showUpdatesPage;document.getElementById('backBtn').onclick=showHome;document.getElementById('updatesBackBtn').onclick=showHome;document.getElementById('homeLedgerCard').onclick=showMatching;document.getElementById('homeVectorCard').onclick=showMatching;document.getElementById('homeSetupBtn').onclick=showMatching;document.getElementById('connectionCheckBtn').onclick=()=>refreshVisible().catch(showError);document.getElementById('checkUpdatesBtn').onclick=async()=>{renderUpdate({...await window.kalikaAgent.getUpdateStatus(),state:'checking',message:'Checking for a newer Kalika Local Agent…'});try{renderUpdate(await window.kalikaAgent.checkForUpdates())}catch(error){renderUpdate({state:'failed',message:error?.message||'The update check failed. Please try again.'})}};
+      document.getElementById('menuLocalMatching').onclick=showMatching;document.getElementById('menuCustomerDues').onclick=showDues;document.getElementById('homeDuesCard').onclick=showDues;document.getElementById('duesBackBtn').onclick=showHome;async function runDuesCheck(full){const quick=!full&&lastDues.status==='ready';duesBusy=true;renderDues(lastDues,{phase:quick?'checking_changes':'checking_company'});try{const result=await window.kalikaAgent.prepareCustomerDues({full});duesBusy=false;renderDues(result,null)}catch(error){duesBusy=false;renderDues({...lastDues,status:quick?lastDues.status:'failed',lastError:error?.message||'The check could not finish.'},null);if(quick)document.getElementById('duesStep').textContent=error?.message||'The check could not finish.'}}document.getElementById('duesCheckBtn').onclick=()=>runDuesCheck(false);document.getElementById('duesFullBtn').onclick=()=>runDuesCheck(true);updates.onclick=showUpdatesPage;document.getElementById('backBtn').onclick=showHome;document.getElementById('updatesBackBtn').onclick=showHome;document.getElementById('homeLedgerCard').onclick=showMatching;document.getElementById('homeVectorCard').onclick=showMatching;document.getElementById('homeSetupBtn').onclick=showMatching;document.getElementById('connectionCheckBtn').onclick=()=>refreshVisible().catch(showError);document.getElementById('checkUpdatesBtn').onclick=async()=>{renderUpdate({...await window.kalikaAgent.getUpdateStatus(),state:'checking',message:'Checking for a newer Bhuleshwar Local Agent…'});try{renderUpdate(await window.kalikaAgent.checkForUpdates())}catch(error){renderUpdate({state:'failed',message:error?.message||'The update check failed. Please try again.'})}};
       async function refreshVisible(){
         const [status,connection]=await Promise.all([window.kalikaAgent.getStatus(),window.kalikaAgent.getConnectionStatus()]);renderConnection(connection);
         const datasets=Array.isArray(status.datasets)?status.datasets:[],companyName=connection?.companyName||String(connection?.title||'').replace(/^Connected to\s+/i,''),dataset=datasets.find((d)=>String(d?.identity?.companyName||'').toLowerCase()===String(companyName||'').toLowerCase())||datasets.find((d)=>d.status==='ready')||datasets[0];
@@ -686,7 +689,7 @@ function createWindow() {
         document.getElementById('homeTask').hidden=!isWorking;if(isWorking){const processed=Number(progress.processed||0),total=Number(progress.total||0),percent=total?Math.round(processed/total*100):0;document.getElementById('homeTaskText').textContent=friendlyPhase(progress.phase);document.getElementById('homeTaskPercent').textContent=total?percent+'%':'Working';document.querySelector('#homeTask .homeProgress i').style.width=percent+'%'}document.getElementById('updateVersion').textContent='Current version '+(status.agentVersion||'');if(!duesBusy)renderDues(status.receivables||{});
       }
       function friendlyPhase(phase){const value=String(phase||'').toLowerCase();if(value==='checking_changes')return 'Checking Tally for changes';if(value==='checking_company')return 'Checking the Tally company';if(value==='checking_customer_bills')return 'Checking customer bills';if(value==='checking_invoices_and_receipts')return 'Checking invoices and receipts';if(value==='checking_older_invoices')return 'Checking earlier-year invoices';if(/vector|embed|index/.test(value))return 'Preparing smart matching';if(/ledger|master|catalog/.test(value))return 'Reading ledgers from Tally';if(/voucher|bill/.test(value))return 'Reading vouchers from Tally';if(/document|pars/.test(value))return 'Reading document';return 'Updating Tally data'}
-      let duesBusy=false,lastDues={};function sinceText(value){if(!value)return '';const minutes=Math.round((Date.now()-Date.parse(value))/60000);return minutes<1?'just now':minutes<60?minutes+' min ago':new Date(value).toLocaleString()}function renderDues(data={},progress=null){lastDues=data||{};const st=lastDues.status||'loading',loading=st==='loading',busy=duesBusy||st==='preparing',counts=lastDues.counts||{};document.getElementById('duesCompany').textContent=lastDues.companyName?lastDues.companyName+(lastDues.financialYear?' · FY '+lastDues.financialYear:''):'Company open in Tally';document.getElementById('duesTitle').textContent=loading?'Loading customer dues…':busy?'Checking customer dues…':st==='ready'?'Customer dues are ready':st==='failed'?'The check did not finish':st==='no_company'?'Open a company in Tally':'Get customer dues ready';document.getElementById('duesDetail').textContent=loading?'Kalika Local Agent is starting.':busy?'You can keep working in Tally.':st==='ready'?(Number(counts.customersWithBills||0).toLocaleString()+' parties with open bills · checked '+sinceText(lastDues.checkedAt)):st==='failed'?(lastDues.lastError||'Please try again.'):st==='no_company'?'Open the company in Tally Prime, then come back here.':'Makes Payment Follow-ups and Cash Discounts open instantly. The first check takes a few minutes.';const tile=document.getElementById('duesTile');tile.className='updateTile'+(busy?' downloading':st==='failed'?' failed':'');tile.textContent=busy?'↻':st==='ready'?'✓':st==='failed'?'!':'₹';let percent=0,step='';if(progress){const total=Number(progress.total||0),done=Number(progress.processed||0);percent=Number.isFinite(progress.overall)?progress.overall:total?Math.round(done/total*100):5;step=(progress.waitingForMemory?'Waiting for free memory · ':'')+friendlyPhase(progress.phase)+(progress.phase==='checking_customer_bills'&&total?' · '+done.toLocaleString()+' of '+total.toLocaleString():'')+(progress.month?' · '+progress.month:'')}document.getElementById('duesProgress').className='updateProgress'+(busy?' show':'');document.getElementById('duesProgressBar').style.width=(busy?Math.max(5,percent):0)+'%';document.getElementById('duesStep').textContent=busy?step:'';const button=document.getElementById('duesCheckBtn');button.disabled=loading||busy||st==='no_company';button.textContent=busy?'Checking…':st==='ready'?'Check for changes':'Check customer dues';const fullLink=document.getElementById('duesFullBtn');fullLink.hidden=st!=='ready';fullLink.disabled=busy;const home=document.getElementById('homeDuesState');home.textContent=loading?'Loading…':busy?('Checking… '+(percent?percent+'%':'')):st==='ready'?'Ready':st==='failed'?'Needs another check':'Not checked yet';home.className=st==='ready'&&!busy?'ready':'';document.getElementById('homeDuesIcon').className='homeStatusIcon'+(st==='ready'&&!busy?' ready':'');document.getElementById('homeDuesIcon').textContent=st==='ready'&&!busy?'✓':'₹'}window.kalikaAgent.onProgress((progress={})=>{if(progress.operation==='receivables'){if(progress.phase==='complete'||progress.phase==='failed'){duesBusy=false;refreshVisible().catch(()=>{});return}duesBusy=true;renderDues({...lastDues,status:'preparing'},progress);return}const processed=Number(progress.processed||0),total=Number(progress.total||0),percent=total?Math.round(processed/total*100):0,label=friendlyPhase(progress.phase);document.getElementById('homeTask').hidden=false;document.getElementById('homeTaskText').textContent=label;document.getElementById('homeTaskPercent').textContent=total?percent+'%':'Working';document.querySelector('#homeTask .homeProgress i').style.width=(total?percent:8)+'%';document.getElementById('data-toast').textContent=total?label+' · '+percent+'%':label});
+      let duesBusy=false,lastDues={};function sinceText(value){if(!value)return '';const minutes=Math.round((Date.now()-Date.parse(value))/60000);return minutes<1?'just now':minutes<60?minutes+' min ago':new Date(value).toLocaleString()}function renderDues(data={},progress=null){lastDues=data||{};const st=lastDues.status||'loading',loading=st==='loading',busy=duesBusy||st==='preparing',counts=lastDues.counts||{};document.getElementById('duesCompany').textContent=lastDues.companyName?lastDues.companyName+(lastDues.financialYear?' · FY '+lastDues.financialYear:''):'Company open in Tally';document.getElementById('duesTitle').textContent=loading?'Loading customer dues…':busy?'Checking customer dues…':st==='ready'?'Customer dues are ready':st==='failed'?'The check did not finish':st==='no_company'?'Open a company in Tally':'Get customer dues ready';document.getElementById('duesDetail').textContent=loading?'Bhuleshwar Local Agent is starting.':busy?'You can keep working in Tally.':st==='ready'?(Number(counts.customersWithBills||0).toLocaleString()+' parties with open bills · checked '+sinceText(lastDues.checkedAt)):st==='failed'?(lastDues.lastError||'Please try again.'):st==='no_company'?'Open the company in Tally Prime, then come back here.':'Makes Payment Follow-ups and Cash Discounts open instantly. The first check takes a few minutes.';const tile=document.getElementById('duesTile');tile.className='updateTile'+(busy?' downloading':st==='failed'?' failed':'');tile.textContent=busy?'↻':st==='ready'?'✓':st==='failed'?'!':'₹';let percent=0,step='';if(progress){const total=Number(progress.total||0),done=Number(progress.processed||0);percent=Number.isFinite(progress.overall)?progress.overall:total?Math.round(done/total*100):5;step=(progress.waitingForMemory?'Waiting for free memory · ':'')+friendlyPhase(progress.phase)+(progress.phase==='checking_customer_bills'&&total?' · '+done.toLocaleString()+' of '+total.toLocaleString():'')+(progress.month?' · '+progress.month:'')}document.getElementById('duesProgress').className='updateProgress'+(busy?' show':'');document.getElementById('duesProgressBar').style.width=(busy?Math.max(5,percent):0)+'%';document.getElementById('duesStep').textContent=busy?step:'';const button=document.getElementById('duesCheckBtn');button.disabled=loading||busy||st==='no_company';button.textContent=busy?'Checking…':st==='ready'?'Check for changes':'Check customer dues';const fullLink=document.getElementById('duesFullBtn');fullLink.hidden=st!=='ready';fullLink.disabled=busy;const home=document.getElementById('homeDuesState');home.textContent=loading?'Loading…':busy?('Checking… '+(percent?percent+'%':'')):st==='ready'?'Ready':st==='failed'?'Needs another check':'Not checked yet';home.className=st==='ready'&&!busy?'ready':'';document.getElementById('homeDuesIcon').className='homeStatusIcon'+(st==='ready'&&!busy?' ready':'');document.getElementById('homeDuesIcon').textContent=st==='ready'&&!busy?'✓':'₹'}window.kalikaAgent.onProgress((progress={})=>{if(progress.operation==='receivables'){if(progress.phase==='complete'||progress.phase==='failed'){duesBusy=false;refreshVisible().catch(()=>{});return}duesBusy=true;renderDues({...lastDues,status:'preparing'},progress);return}const processed=Number(progress.processed||0),total=Number(progress.total||0),percent=total?Math.round(processed/total*100):0,label=friendlyPhase(progress.phase);document.getElementById('homeTask').hidden=false;document.getElementById('homeTaskText').textContent=label;document.getElementById('homeTaskPercent').textContent=total?percent+'%':'Working';document.querySelector('#homeTask .homeProgress i').style.width=(total?percent:8)+'%';document.getElementById('data-toast').textContent=total?label+' · '+percent+'%':label});
       // Poll only while the window is actually visible; the page is destroyed
       // when the window is closed, so a hidden agent does no UI work at all.
       refreshConnection().catch(showError);setInterval(()=>{if(!document.hidden)refreshVisible().catch(()=>{})},5000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refreshVisible().catch(()=>{})});loadAgent().then(refreshVisible).catch(showError);
@@ -737,6 +740,7 @@ function startApplication() {
     return;
   }
   app.setAsDefaultProtocolClient(PROTOCOL_NAME);
+  app.setAsDefaultProtocolClient("kalika-tally");
   // Login-item registration follows the saved "Start with Windows" preference
   // once the runner has loaded settings (see applyStartWithWindowsSetting).
   ipcMain.handle("agent:get-connection-status", () => lastStatus);
@@ -792,7 +796,7 @@ function startApplication() {
     const diagnostics = await runner?.exportAgentDiagnostics?.() || [];
     const result = await dialog.showSaveDialog(mainWindow, {
       title: "Export sanitized Local Agent diagnostics",
-      defaultPath: `kalika-local-agent-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
+      defaultPath: `bhuleshwar-local-agent-diagnostics-${new Date().toISOString().slice(0, 10)}.json`,
       filters: [{ name: "JSON", extensions: ["json"] }],
     });
     if (result.canceled || !result.filePath) return { saved: false };
@@ -802,13 +806,13 @@ function startApplication() {
   ipcMain.handle("agent:factory-reset", async () => {
     const answer = await dialog.showMessageBox(mainWindow, {
       type: "warning", buttons: ["Cancel", "Factory reset"], defaultId: 0, cancelId: 0,
-      title: "Factory reset Kalika Local Agent",
+      title: "Factory reset Bhuleshwar Local Agent",
       message: "Remove pairing, cache, managed attachments and local secrets?",
       detail: "This cannot be undone. Tally vouchers are not deleted.",
     });
     if (answer.response !== 1) return { reset: false };
     const localBase = path.resolve(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"));
-    const target = path.resolve(localBase, "Kalika", "LocalAgent");
+    const target = path.resolve(localBase, "Bhuleshwar", "LocalAgent");
     if (!target.startsWith(`${localBase}${path.sep}`) || path.basename(target) !== "LocalAgent") throw new Error("Factory reset target validation failed.");
     // The storage and vector workers hold file locks on Windows; wait for
     // them to exit before deleting their files.
@@ -824,7 +828,7 @@ function startApplication() {
       app.quit();
       return;
     }
-    const protocolArg = argv.find((entry) => entry.startsWith("kalika-tally://"));
+    const protocolArg = argv.find(isConnectorUrl);
     if (protocolArg) {
       handleProtocolUrl(protocolArg);
     }
@@ -846,14 +850,14 @@ function startApplication() {
       updatedOnThisLaunch = true;
       sendUpdateStatus({ state: "installed", percent: 100, availableVersion: app.getVersion(), message: completedUpdate.message });
     }
-    const protocolArg = process.argv.find((entry) => entry.startsWith("kalika-tally://")) || pendingProtocolUrl;
+    const protocolArg = process.argv.find(isConnectorUrl) || pendingProtocolUrl;
     if (protocolArg) {
       handleProtocolUrl(protocolArg);
     } else {
       startRunner().catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
         appendLog(errPath, message);
-        sendStatus({ title: "Waiting for connection", detail: "Open Kalika and click Connect.", state: "idle" });
+        sendStatus({ title: "Waiting for connection", detail: "Open Bhuleshwar and click Connect.", state: "idle" });
       });
     }
     if (app.isPackaged) {

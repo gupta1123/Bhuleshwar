@@ -579,7 +579,16 @@ export function prepareLiveTallyCatalogue(
   addCandidates(matching(/\b(cgst|central\s+tax)\b.*\btds\b|\btds\b.*\b(cgst|central\s+tax)\b/i), 12);
   addCandidates(matching(/\b(sgst|state\s+tax)\b.*\btds\b|\btds\b.*\b(sgst|state\s+tax)\b/i), 12);
   addCandidates(matching(/\b(igst|integrated\s+tax)\b.*\btds\b|\btds\b.*\b(igst|integrated\s+tax)\b/i), 12);
-  addCandidates(matching(/\b(freight|transport|goods\s+carriage)\b/i), 16);
+  // Transporter parties also contain "transport", so rank expense/tax ledgers
+  // (freight, inward, TDS) ahead of Sundry party ledgers before applying the cap.
+  addCandidates(
+    matching(/\b(freight|transport|goods\s+carriage)\b/i),
+    40,
+    (candidate) =>
+      Number(/\b(freight|inward|carriage)\b/i.test(candidate.name)) * 4 +
+      Number(/\btds\b/i.test(candidate.name)) * 4 +
+      Number(!/\bsundry\b/i.test(candidate.identity)) * 6
+  );
   addCandidates(matching(/\b(tcs|tax\s+collected)\b/i), 12);
   addCandidates(matching(/\bround[ -]?off\b|\broundoff\b/i), 12);
   addCandidates(

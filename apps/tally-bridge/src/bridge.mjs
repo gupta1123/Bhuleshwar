@@ -297,10 +297,16 @@ function writeConfig(config) {
   fs.renameSync(temporary, CONFIG_PATH);
 }
 
-function deleteConfig() {
-  if (fs.existsSync(CONFIG_PATH)) {
-    fs.rmSync(CONFIG_PATH, { force: true });
+function deleteConfig(onlyConnectionId) {
+  if (!fs.existsSync(CONFIG_PATH)) return;
+  if (onlyConnectionId) {
+    // A stale runner must not wipe the pairing a newer connection just wrote.
+    try {
+      const stored = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+      if (stored?.connectionId && stored.connectionId !== onlyConnectionId) return;
+    } catch {}
   }
+  fs.rmSync(CONFIG_PATH, { force: true });
 }
 
 function createMachineId() {
@@ -9125,7 +9131,8 @@ function createBridgeRunner(options = {}) {
           String(error?.message ?? "")
         )
       ) {
-        deleteConfig();
+        emitLog(options, "error", `Clearing saved pairing for connection ${config.connectionId} (HTTP ${error?.status ?? "n/a"}: ${message})`);
+        deleteConfig(config.connectionId);
         stop(error?.status === 426 ? "update required" : "revoked", error);
       }
     }

@@ -6,7 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import tls from "node:tls";
 import { fileURLToPath } from "node:url";
-import { pairBridge, createBridgeRunner, disconnectBridge } from "@autodealer/tally-bridge";
+import { pairBridge, createBridgeRunner, disconnectBridge, readConfig } from "@autodealer/tally-bridge";
 import { consumeSuccessfulUpdate, isNewerVersion, recordDownloadedUpdate } from "./update-state.mjs";
 
 // electron-updater publishes CommonJS. Importing autoUpdater as an ESM named
@@ -517,9 +517,25 @@ function cleanUpObsoleteLocalStorage() {
   } catch {}
 }
 
+let connectInFlight = null;
+
 async function handleConnectUrl(value) {
+  // Browsers can deliver the same link twice; a pairing code is single-use, so
+  // a repeat must never reach the API or disturb the live session.
+  if (connectInFlight) return connectInFlight;
+  connectInFlight = handleConnectUrlOnce(value).finally(() => { connectInFlight = null; });
+  return connectInFlight;
+}
+
+async function handleConnectUrlOnce(value) {
   try {
     const args = parseConnectUrl(value);
+    let current = null;
+    try { current = readConfig(); } catch {}
+    if (current?.connectionId && current.connectionId === args["connection-id"] && runner && !runner.stopped) {
+      showWindow();
+      return;
+    }
     if (
       !args["api-base"] ||
       !args["connection-id"] ||

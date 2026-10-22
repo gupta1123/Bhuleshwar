@@ -1,3 +1,4 @@
+import { resolveOwnerOrganization } from "@/lib/tally/owner-organization";
 import { withTeamAccess } from '@/lib/access/route-boundary';
 import {permittedConnections} from '@/lib/access/connection-scope';
 import {AccessError,requireAccessContext} from '@/lib/access/server';
@@ -336,11 +337,12 @@ async function POSTHandler(request: Request) {
       throw retirePendingError;
     }
 
+    const ownerOrganizationId = teamContext ? null : await resolveOwnerOrganization(supabase, user.id);
     const { data, error } = await supabase
       .from("tally_connections")
       .insert({
         owner_user_id: user.id,
-        ...(teamContext?{organization_id:teamContext.organizationId}:{}),
+        ...(teamContext?{organization_id:teamContext.organizationId}:ownerOrganizationId?{organization_id:ownerOrganizationId}:{}),
         display_name: normalizeDisplayName(body.displayName),
         status: "waiting_for_bridge",
         tally_url: normalizeTallyUrl(body.tallyUrl),

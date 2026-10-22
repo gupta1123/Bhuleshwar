@@ -546,10 +546,16 @@ async function handleConnectUrlOnce(value) {
     }
     showWindow();
     sendStatus({ title: "Pairing connector", detail: "Checking Tally and connecting to Bhuleshwar.", state: "running" });
+    appendLog(logPath, `Connect link received for ${args["connection-id"]}; pairing.`);
     await pairBridge(args);
+    let saved = null;
+    try { saved = readConfig(); } catch (error) { saved = { error: String(error?.message || error) }; }
+    appendLog(logPath, `Pairing finished; saved config: ${saved ? JSON.stringify({ connectionId: saved.connectionId, error: saved.error }) : "MISSING"}.`);
     sendStatus({ title: "Connector paired", detail: "Starting live sync.", state: "running" });
     await startRunner();
+    appendLog(logPath, "Runner started after pairing.");
   } catch (error) {
+    appendLog(errPath, `Connect handling failed: ${error instanceof Error ? error.stack || error.message : error}`);
     // A build installed before the single-instance lock may still be running
     // during an upgrade. Its loopback listener proves that another Local Agent
     // owns the browser handoff channel, so never show a raw EADDRINUSE failure

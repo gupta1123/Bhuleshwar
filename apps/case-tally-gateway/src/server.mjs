@@ -4,6 +4,9 @@ import { WebSocket, WebSocketServer } from "ws";
 
 const REQUEST_TIMEOUT_MS = 4 * 60_000;
 const AUTH_TIMEOUT_MS = 10_000;
+const CONNECTOR_REJOIN_WAIT_MS = 8_000;
+// A busy connector can answer a ping late; only drop it after repeated misses.
+const MAX_MISSED_PONGS = 3;
 const MAX_MESSAGE_BYTES = 30 * 1024 * 1024;
 const SUPPORTED_OPERATIONS = new Set([
   "company_check",
@@ -154,6 +157,16 @@ async function handleBrowserRequest(socket, message) {
     return;
   }
 
+  // The connector may be rejoining after a dropped socket; give it a moment
+  // before telling the browser it is offline.
+  const connectorDeadline = Date.now() + CONNECTOR_REJOIN_WAIT_MS;
+  while (
+    !(connectors.get(browserMeta.connectionId)?.readyState === WebSocket.OPEN) &&
+    Date.now() < connectorDeadline &&
+    socket.readyState === WebSocket.OPEN
+  ) {
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
   const connector = connectors.get(browserMeta.connectionId);
   const connectorMeta = connector && metadata.get(connector);
   if (!connector || connector.readyState !== WebSocket.OPEN ||
@@ -289,8 +302,13 @@ export function startCaseTallyGateway(options = {}) {
     for (const socket of server.clients) {
       const current = metadata.get(socket);
       if (current?.alive === false) {
-        socket.terminate();
-        continue;
+        current.missedPongs = (current.missedPongs || 0) + 1;
+        if (current.missedPongs >= MAX_MISSED_PONGS) {
+          socket.terminate();
+          continue;
+        }
+      } else if (current) {
+        current.missedPongs = 0;
       }
       if (current) current.alive = false;
       socket.ping();

@@ -295,6 +295,7 @@ function writeConfig(config) {
   const temporary = `${CONFIG_PATH}.${process.pid}.tmp`;
   fs.writeFileSync(temporary, `${JSON.stringify(stored, null, 2)}\n`, { mode: 0o600 });
   fs.renameSync(temporary, CONFIG_PATH);
+  console.log(`Config written to ${CONFIG_PATH}`);
 }
 
 function deleteConfig(onlyConnectionId) {
@@ -8261,6 +8262,7 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
   const pendingPurchaseReads = new Map();
   let readInFlight = false;
   let readRecoveryUntil = 0;
+  let sessionWasAuthenticated = false;
 
   const log = (level, message) => emitLog(options, level, message);
   const send = (payload) => {
@@ -8735,6 +8737,7 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
     }
     try {
       // Compressed when the gateway allows it: a scan result shrinks about 13x.
+      sessionWasAuthenticated = false;
       socket = new WebSocket(cashDiscountGatewayUrl(config), { perMessageDeflate: true });
       socket.addEventListener("open", () => {
         send({
@@ -8749,6 +8752,7 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
         try {
           const message = JSON.parse(String(event.data || "{}"));
           if (message.type === "authenticated") {
+            sessionWasAuthenticated = true;
             log("info", backoff.connected() ? "Cash Discount live channel reconnected." : "Cash Discount live channel connected.");
           } else if (message.type === "operation") {
             void handleOperation(message);
@@ -8766,8 +8770,23 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
       socket.addEventListener("error", () => {
         if (backoff.shouldLog()) log("error", "Cash Discount live channel is unavailable; retrying with backoff.");
       });
-      socket.addEventListener("close", () => {
+      socket.addEventListener("close", (event) => {
         for (const controller of activeReads.values()) controller.abort(new Error("Live channel disconnected."));
+        if (sessionWasAuthenticated && !stopped) {
+          // A healthy session was cut (proxy, network, gateway restart). Browser
+          // requests fail while no connector socket is open, so rejoin at once
+          // instead of waiting out the outage backoff.
+          log("info", `Cash Discount live channel closed (code ${event?.code ?? "n/a"}${event?.reason ? `: ${event.reason}` : ""}); reconnecting.`);
+          sessionWasAuthenticated = false;
+          if (!reconnectTimer) {
+            reconnectTimer = setTimeout(() => {
+              reconnectTimer = null;
+              connect();
+            }, 250);
+            reconnectTimer.unref?.();
+          }
+          return;
+        }
         scheduleReconnect();
       });
     } catch (error) {

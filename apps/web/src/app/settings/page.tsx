@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {TeamAccessPanel} from '@/components/settings/TeamAccessPanel';
+import { PaymentReminderSettings } from "@/components/settings/PaymentReminderSettings";
+import { CashDiscountCustomerScopeSettings } from "@/components/settings/CashDiscountCustomerScopeSettings";
 import {
   Check,
   CheckCircle2,
@@ -39,7 +41,7 @@ import {
 } from "@/lib/document-schema";
 import type { DocType, FieldKey } from "@/types/pipeline";
 
-type ActiveTab = "documents" | "groups" | "accounting" | "team";
+type ActiveTab = "documents" | "groups" | "accounting" | "cashDiscount" | "team" | "reminders";
 type BannerState = {
   tone: "success" | "error";
   text: string;
@@ -61,6 +63,9 @@ type PurchaseAccountingSettings = {
 type PurchaseValidationSeverity = "block" | "warn" | "off";
 type PurchaseValidationRuleKey =
   | "buyerGstinMissing"
+  | "companyGstinMissing"
+  | "companyGstinInvalid"
+  | "buyerCompanyGstinMismatch"
   | "supplierGstinMissing"
   | "supplierLedgerGstinMismatch"
   | "hsnMissing"
@@ -74,6 +79,9 @@ type PurchaseValidationPolicy = Record<PurchaseValidationRuleKey, PurchaseValida
 
 const DEFAULT_PURCHASE_VALIDATION_POLICY: PurchaseValidationPolicy = {
   buyerGstinMissing: "warn",
+  companyGstinMissing: "warn",
+  companyGstinInvalid: "warn",
+  buyerCompanyGstinMismatch: "block",
   supplierGstinMissing: "warn",
   supplierLedgerGstinMismatch: "block",
   hsnMissing: "warn",
@@ -90,6 +98,9 @@ const PURCHASE_VALIDATION_GROUPS = [
     title: "GST identity",
     rules: [
       ["buyerGstinMissing", "Buyer GSTIN missing", "Allows unregistered purchases."],
+      ["companyGstinMissing", "Company GSTIN missing", "Requires the connected Tally company to provide its GSTIN."],
+      ["companyGstinInvalid", "Company GSTIN invalid", "Rejects a malformed GSTIN from the connected Tally company."],
+      ["buyerCompanyGstinMismatch", "Buyer and company GSTIN differ", "Protects against posting under the wrong Tally company."],
       ["supplierGstinMissing", "Supplier GSTIN missing", "Allows unregistered suppliers."],
       ["supplierLedgerGstinMismatch", "Supplier and ledger GSTIN differ", "Protects against selecting the wrong supplier ledger."],
     ],
@@ -699,7 +710,7 @@ export default function SettingsPage() {
               </div>
             }
             actions={
-              activeTab !== "team" ? (
+              !["cashDiscount", "team", "reminders"].includes(activeTab) ? (
                 <div className="flex items-center gap-2">
                   <Button
                     className="h-8 rounded-lg border border-[#ded8d0] bg-[#fbfaf8] px-3 text-xs font-medium text-[#3d3530] shadow-sm transition hover:bg-[#ede6d9]"
@@ -782,12 +793,24 @@ export default function SettingsPage() {
             >
               Purchase accounting
             </button>
+            <button
+              className={`rounded-md px-3.5 py-1.5 text-xs font-semibold transition ${
+                activeTab === "cashDiscount"
+                  ? "bg-white text-[#111827] shadow-2xs"
+                  : "text-[#6b5d50] hover:text-[#111827]"
+              }`}
+              onClick={() => setActiveTab("cashDiscount")}
+              type="button"
+            >
+              Cash Discounts
+            </button>
             <button type="button" className={`rounded-md px-3.5 py-1.5 text-xs font-semibold transition ${activeTab==='team'?'bg-white text-[#111827] shadow-2xs':'text-[#6b5d50] hover:text-[#111827]'}`} onClick={() => setActiveTab('team')}>Team &amp; Access</button>
+            <button type="button" className={`rounded-md px-3.5 py-1.5 text-xs font-semibold transition ${activeTab==='reminders'?'bg-white text-[#111827] shadow-2xs':'text-[#6b5d50] hover:text-[#111827]'}`} onClick={() => setActiveTab('reminders')}>Payment reminders</button>
           </div>
 
           <div>
             <div className="flex flex-col gap-5 md:flex-row md:items-start">
-              {activeTab === "team" ? <TeamAccessPanel/> : activeTab === "documents" ? (
+              {activeTab === "cashDiscount" ? <CashDiscountCustomerScopeSettings /> : activeTab === "reminders" ? <PaymentReminderSettings /> : activeTab === "team" ? <TeamAccessPanel/> : activeTab === "documents" ? (
                 <>
                   <aside className="w-full shrink-0 rounded-xl border border-[#ded8d0] bg-white p-3 shadow-2xs md:w-[280px]">
                     <div className="relative mb-2.5">

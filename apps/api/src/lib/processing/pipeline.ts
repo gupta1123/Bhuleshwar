@@ -407,7 +407,7 @@ function getDocumentSpecificExtractionInstruction(docType: DocType) {
       return (
         "For E-Way Bill documents, vendorName is the From party name in Address Details after the first GSTIN, and buyerName is the To party name after the second GSTIN. " +
         "Do not use Dispatch From or Ship To address text as party names; those belong in dispatchFrom and shipTo. " +
-        "Extract Generated Date as documentDate, Valid Upto/Valid Until as validityDate, Tot. Tax'ble Amt or Taxable Amount as totalTaxableAmount and subtotal, Total Inv. Amt as totalAmount, CGST+SGST+IGST+Cess amounts or total minus taxable amount as taxAmount, and derive taxRate from taxAmount/subtotal when the percentage is not printed. " +
+        "Extract Generated Date or E-Way Bill Date as documentDate, Valid Upto/Valid Until as validityDate, Tot. Tax'ble Amt or Taxable Amount as totalTaxableAmount and subtotal, and Total Inv. Amt as totalAmount. Extract taxAmount only when CGST, SGST, IGST, Cess, or another explicit tax amount is printed; never derive GST by subtracting taxable value from total invoice value because freight, charges, or document totals may be included separately. Derive taxRate only from an explicit tax amount or printed tax rate. " +
         "Extract Transporter ID & Name into transporterName, Transporter Doc. No into lorryReceiptNumber, and the Part-B Vehicle/Trans number into vehicleNumber. " +
         "If Part-A shows Doc No, Document No, Invoice No, Tax Invoice No, or Delivery Challan No, extract that value as referenceInvoiceNumber unless it is the E-Way Bill No itself. "
       );
@@ -2421,11 +2421,9 @@ function extractEWayCommercialAmounts(text: string, fields: Partial<Record<Field
   const total =
     (blockTotal !== null && subtotal !== null && blockTotal >= subtotal ? blockTotal : null) ??
     (existingTotal !== null && (subtotal === null || existingTotal >= subtotal) ? existingTotal : null);
-  const taxAmount =
-    existingTax ??
-    (subtotal !== null && total !== null && total >= subtotal
-      ? Math.round((total - subtotal) * 100) / 100
-      : null);
+  // Do not infer E-way GST from total minus taxable value: the total can
+  // include freight and other charges that are not represented as tax.
+  const taxAmount = existingTax;
   const derivedSubtotal =
     subtotal ??
     (total !== null && taxAmount !== null && total >= taxAmount

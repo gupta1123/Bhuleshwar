@@ -931,6 +931,9 @@ function getFriendlyAnalysisStage(stage: string | null, status: "idle" | "proces
 function CaseDetailSkeleton() {
   const useRedesignedSkeleton = true;
   if (useRedesignedSkeleton) {
+    // Keep the loading rail aligned with the normal five-document packet
+    // layout. The real count is not available until case details load.
+    const skeletonDocumentCount = 5;
     return (
       <div className={styles.redesignPage} aria-label="Loading case details" aria-busy="true">
         {/* compactHeader — mirrors CaseDetailRedesign compactHeader */}
@@ -964,9 +967,9 @@ function CaseDetailSkeleton() {
           </div>
         </header>
 
-        {/* topDocumentStrip — 10-up grid, responsive scroll under 1280 */}
+        {/* Match the usual packet size while the case detail is loading. */}
         <section className={styles.topDocumentStrip} aria-hidden="true">
-          {Array.from({ length: 10 }).map((_, index) => (
+          {Array.from({ length: skeletonDocumentCount }).map((_, index) => (
             <div key={index} className={`${styles.topDocCard} ${index === 0 ? styles.topDocCardActive : ""} opacity-60`}>
               <div className={styles.topDocCardHeader}>
                 <Skeleton className="h-[18px] w-[18px] rounded-[4px] bg-[#eee7dd]" />

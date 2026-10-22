@@ -440,7 +440,7 @@ function getEWayBillExtractionInstruction(docType: DocType) {
   return (
     "For E-Way Bill documents, vendorName is the From party name in Address Details after the first GSTIN, and buyerName is the To party name after the second GSTIN. " +
     "Do not use Dispatch From or Ship To address text as party names; those belong in dispatchFrom and shipTo. " +
-    "Extract Generated Date as documentDate, Valid Upto/Valid Until as validityDate, Tot. Tax'ble Amt or Taxable Amount as totalTaxableAmount and subtotal, Total Inv. Amt as totalAmount, CGST+SGST+IGST+Cess amounts or total minus taxable amount as taxAmount, and derive taxRate from taxAmount/subtotal when the percentage is not printed. " +
+    "Extract Generated Date or E-Way Bill Date as documentDate, Valid Upto/Valid Until as validityDate, Tot. Tax'ble Amt or Taxable Amount as totalTaxableAmount and subtotal, and Total Inv. Amt as totalAmount. Extract taxAmount only when CGST, SGST, IGST, Cess, or another explicit tax amount is printed; never derive GST by subtracting taxable value from total invoice value because freight, charges, or document totals may be included separately. Derive taxRate only from an explicit tax amount or printed tax rate. " +
     "Extract Transporter ID & Name into transporterName, Transporter Doc. No into lorryReceiptNumber, and the Part-B Vehicle/Trans number into vehicleNumber. " +
     "If Part-A shows Doc No, Document No, Invoice No, Tax Invoice No, or Delivery Challan No, extract that value as referenceInvoiceNumber unless it is the E-Way Bill No itself. "
   );
@@ -1053,9 +1053,8 @@ function inferTopLevelTaxRate(fields: Partial<Record<FieldKey, string>>) {
   let taxAmount = normalizeEWayAmount(fields.taxAmount);
   const totalAmount = normalizeEWayAmount(fields.totalAmount);
 
-  if ((taxAmount === null || taxAmount <= 0) && taxableBase !== null && totalAmount !== null && totalAmount > taxableBase) {
-    taxAmount = totalAmount - taxableBase;
-  }
+  // E-way totals can include freight or other charges. Do not treat
+  // total-minus-taxable as GST unless an explicit tax amount was printed.
   if ((taxableBase === null || taxableBase <= 0) && taxAmount !== null && totalAmount !== null && totalAmount > taxAmount) {
     taxableBase = totalAmount - taxAmount;
   }

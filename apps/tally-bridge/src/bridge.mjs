@@ -2247,12 +2247,16 @@ function purchaseVoucherFinancialYearRange(value) {
   const normalized = normalizeTallyDate(value);
   const match = normalized.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return { dateFrom: value, dateTo: value };
+  // Duplicate check window: the voucher's month plus one month either side.
+  // A whole-year scan is too slow on large Tally companies.
   const year = Number(match[1]);
   const month = Number(match[2]);
-  const startYear = month >= 4 ? year : year - 1;
+  const pad = (n) => String(n).padStart(2, "0");
+  const from = new Date(Date.UTC(year, month - 2, 1));
+  const to = new Date(Date.UTC(year, month + 1, 0));
   return {
-    dateFrom: `${startYear}-04-01`,
-    dateTo: `${startYear + 1}-03-31`,
+    dateFrom: `${from.getUTCFullYear()}-${pad(from.getUTCMonth() + 1)}-01`,
+    dateTo: `${to.getUTCFullYear()}-${pad(to.getUTCMonth() + 1)}-${pad(to.getUTCDate())}`,
   };
 }
 
@@ -2298,7 +2302,7 @@ async function verifyPurchaseVoucherInTally(config, payload = {}, options = {}) 
       dateTo,
       formulae,
       filterNames,
-      timeoutMs: CASH_DISCOUNT_READ_MS,
+      timeoutMs: options.searchFinancialYear ? 90_000 : CASH_DISCOUNT_READ_MS,
     })
   ).filter((voucher) => {
     if (!/purchase/i.test(String(voucher.voucherType || ""))) return false;

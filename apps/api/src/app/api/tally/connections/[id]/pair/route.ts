@@ -1,3 +1,4 @@
+import { resolveOwnerOrganization } from "@/lib/tally/owner-organization";
 import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { jsonWithCors, optionsWithCors } from "@/lib/api/cors";
 import { isLocalDbMode } from "@/lib/local/mode";
@@ -201,12 +202,16 @@ export async function POST(
     const companyLoaded =
       tallyReachable === true && reportedCompanyLoaded === true && Boolean(companyName);
     const pairedAt = new Date().toISOString();
+    const connectionOrganizationId =
+      connection.organization_id ||
+      (await resolveOwnerOrganization(supabase, connection.owner_user_id)) ||
+      connection.owner_user_id;
 
     const { data: supersededData, error: supersededReadError } = await supabase
       .from("tally_connections")
       .select("id")
       .eq("owner_user_id", connection.owner_user_id)
-      .eq("organization_id", connection.organization_id || connection.owner_user_id)
+      .eq("organization_id", connectionOrganizationId)
       .eq("installation_id", bridgeMachineId)
       .is("revoked_at", null)
       .not("bridge_token_hash", "is", null)
@@ -264,7 +269,7 @@ export async function POST(
         bridge_machine_id: bridgeMachineId,
         bridge_machine_name: bridgeMachineName,
         installation_id: bridgeMachineId,
-        organization_id: connection.organization_id || connection.owner_user_id,
+        organization_id: connectionOrganizationId,
         agent_protocol_version: protocolVersion,
         agent_version: toNullableText(body.agentVersion) || bridgeVersion,
         agent_capabilities: agentCapabilities,
@@ -291,7 +296,7 @@ export async function POST(
 
     const restoredMappings = await restoreConnectionCompanyLinks({
       db: supabase,
-      organizationId: updatedConnection.organization_id || updatedConnection.owner_user_id,
+      organizationId: updatedConnection.organization_id || connectionOrganizationId,
       installationId: updatedConnection.installation_id!,
       connectionId: updatedConnection.id,
       now: pairedAt,
@@ -321,7 +326,7 @@ export async function POST(
       bridgeToken,
       agentIdentity: {
         protocolVersion,
-        organizationId: updatedConnection.organization_id || updatedConnection.owner_user_id,
+        organizationId: updatedConnection.organization_id || connectionOrganizationId,
         ownerUserId: updatedConnection.owner_user_id,
         connectionId: updatedConnection.id,
         installationId: updatedConnection.installation_id,

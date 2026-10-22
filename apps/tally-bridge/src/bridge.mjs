@@ -2462,7 +2462,7 @@ async function validatePurchasePayloadMasters(tallyUrl, companyName, payload) {
   const stockXml = await exportTallyCollection(tallyUrl, {
       collectionName: "Kalika Validate Purchase Stock",
       tallyType: "StockItem",
-      fetchFields: "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,HSNName,HSNDescription,GSTHSN,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,GSTDetails.*,GSTDetails.LIST.*,GSTHSNDetails.*,GSTHSNDetails.LIST.*,HSNDetails.*,HSNDetails.LIST.*",
+      fetchFields: "Name,Parent,GUID,BaseUnits,OriginalBaseUnits,AdditionalUnits,OriginalAdditionalUnits,GSTHSNCode,GSTHSNName,GSTHSNSACCode,GSTHSNSACName,HSNCode,HSNSACCode,HSNSACName,GSTOVRDNHSNCODE,HSNOVRDNCLASSIFICATION,HSN,HSNSAC,HSNCLASSIFICATION,HSNName,HSNDescription,GSTHSN,GSTTaxRate,RateOfTaxCalculation,GSTRATE,RateOfVAT,GSTDetails.*,GSTDetails.LIST.*,GSTHSNDetails.*,GSTHSNDetails.LIST.*,HSNDetails.*,HSNDetails.LIST.*",
       companyName,
       formulae: [{
         name: stockFilterName,
@@ -2540,13 +2540,15 @@ async function validatePurchasePayloadMasters(tallyUrl, companyName, payload) {
     const liveStock = liveStockByName.get(normalizeLooseName(item?.stockItemName));
     const selectedUnit = normalizeLooseName(item?.unit);
     const liveUnit = normalizeLooseName(liveStock?.unitName);
+    // Not overridable: Tally silently drops quantity and rate when the line
+    // unit is neither the item's base unit nor its alternate unit.
     if (
       selectedUnit &&
       liveUnit &&
       selectedUnit !== liveUnit &&
-      !purchaseValidationExceptionApproved(payload, "STOCK_ITEM_UNIT_MISMATCH", item?.lineId)
+      selectedUnit !== normalizeLooseName(liveStock?.alternateUnitName)
     ) {
-      throw new Error(`${liveStock.name} now uses ${liveStock.unitName} in Tally, not ${item.unit}. Refresh and review the item.`);
+      throw new Error(`${liveStock.name} uses ${liveStock.unitName} in Tally, but the line is in ${item.unit}. Tally would drop the quantity and rate. Change the line to ${liveStock.unitName} (convert quantity and rate) before posting.`);
     }
     const selectedHsn = String(item?.hsn || "").replace(/\D/g, "");
     const liveHsn = String(liveStock?.hsnCode || "").replace(/\D/g, "");
@@ -3745,6 +3747,7 @@ function toMaster(block, tagName) {
       "HSNDESCRIPTION"
     )),
     unitName: optionalMasterValue(getTagText(block, "BASEUNITS") || getTagText(block, "ORIGINALBASEUNITS")),
+    alternateUnitName: optionalMasterValue(getTagText(block, "ADDITIONALUNITS") || getTagText(block, "ORIGINALADDITIONALUNITS")),
     taxRate: optionalMasterValue(taxRate),
     closingBalance: closingBalance.amount,
     closingBalanceType: closingBalance.type,

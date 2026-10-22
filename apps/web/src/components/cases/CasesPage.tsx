@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   ChevronLeft,
@@ -137,11 +137,34 @@ const RECONCILIATION_OPTIONS = [
   { value: "issues", label: "Has Mismatches" },
 ];
 
+const TALLY_OPTIONS = [
+  { value: "all", label: "All Tally Status" },
+  { value: "posted", label: "Posted in Tally" },
+  { value: "not_posted", label: "Not Posted" },
+  { value: "check", label: "Needs Check" },
+];
+
 const ROWS_PER_PAGE_OPTIONS = [
+  { value: "5", label: "5" },
   { value: "10", label: "10" },
+  { value: "15", label: "15" },
   { value: "20", label: "20" },
+  { value: "30", label: "30" },
   { value: "50", label: "50" },
 ];
+
+// Rows that fit the window: each row is ~52px and the header, filters, table
+// head and pagination footer take ~300px. Snap down to a listed page size.
+const ROW_HEIGHT_PX = 52;
+const PAGE_CHROME_PX = 300;
+function getViewportPageSize() {
+  if (typeof window === "undefined") return 10;
+  // A narrow screen (phone, small tablet) scrolls long lists badly, so cap it.
+  const widthCap = window.innerWidth < 640 ? 10 : window.innerWidth < 1024 ? 15 : Infinity;
+  const fitting = Math.min(Math.floor((window.innerHeight - PAGE_CHROME_PX) / ROW_HEIGHT_PX), widthCap);
+  const sizes = ROWS_PER_PAGE_OPTIONS.map((option) => Number(option.value));
+  return [...sizes].reverse().find((size) => size <= fitting) ?? sizes[0];
+}
 
 export function CasesPage() {
   const router = useRouter();
@@ -158,10 +181,34 @@ export function CasesPage() {
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [selectedApproval, setSelectedApproval] = useState("all");
   const [selectedReconciliation, setSelectedReconciliation] = useState("all");
+  const [selectedTally, setSelectedTally] = useState("all");
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(getViewportPageSize);
+  // Follow the window size (rotating a tablet, resizing a laptop) until the
+  // reviewer picks a page size themselves.
+  const pageSizePickedRef = useRef(false);
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onResize = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        if (pageSizePickedRef.current) return;
+        const next = getViewportPageSize();
+        setPageSize((current) => {
+          if (current === next) return current;
+          setCurrentPage(1);
+          return next;
+        });
+      }, 300);
+    };
+    window.addEventListener("resize", onResize);
+    return () => {
+      clearTimeout(timer);
+      window.removeEventListener("resize", onResize);
+    };
+  }, []);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
   const [listRevision, setListRevision] = useState(0);
@@ -171,8 +218,8 @@ export function CasesPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const cacheKey = useMemo(
-    () => `${cacheEpoch}:${listRevision}:${snapshot?.member.user_id||'legacy'}:${snapshot?.organizationId||''}:${snapshot?.revision||0}:`+getCaseListCacheKey(debouncedSearchQuery, selectedApproval, selectedReconciliation, currentPage, pageSize),
-    [currentPage, debouncedSearchQuery, selectedApproval, selectedReconciliation, pageSize,cacheEpoch,listRevision,snapshot?.member.user_id,snapshot?.organizationId,snapshot?.revision]
+    () => `${cacheEpoch}:${listRevision}:${snapshot?.member.user_id||'legacy'}:${snapshot?.organizationId||''}:${snapshot?.revision||0}:`+getCaseListCacheKey(debouncedSearchQuery, selectedApproval, `${selectedReconciliation}:tally:${selectedTally}`, currentPage, pageSize),
+    [currentPage, debouncedSearchQuery, selectedApproval, selectedReconciliation, selectedTally, pageSize,cacheEpoch,listRevision,snapshot?.member.user_id,snapshot?.organizationId,snapshot?.revision]
   );
 
   useEffect(() => {
@@ -210,6 +257,7 @@ export function CasesPage() {
       query: debouncedSearchQuery,
       approvalFilter: selectedApproval as "all" | "approved" | "pending" | "rejected",
       reconciliationFilter: selectedReconciliation as "all" | "clean" | "issues",
+      tallyFilter: selectedTally as "all" | "posted" | "not_posted" | "check",
       signal: controller.signal,
     })
       .then((payload) => {
@@ -334,6 +382,17 @@ export function CasesPage() {
                   }}
                   options={RECONCILIATION_OPTIONS}
                   placeholder="All Reconciliation"
+                />
+
+                {/* Tally posting Filter */}
+                <SelectDropdown
+                  value={selectedTally}
+                  onChange={(value) => {
+                    setSelectedTally(value);
+                    setCurrentPage(1);
+                  }}
+                  options={TALLY_OPTIONS}
+                  placeholder="All Tally Status"
                 />
               </div>
             )}
@@ -529,6 +588,7 @@ export function CasesPage() {
                     size="sm"
                     value={String(pageSize)}
                     onChange={(val) => {
+                      pageSizePickedRef.current = true;
                       setPageSize(Number(val));
                       setCurrentPage(1);
                     }}

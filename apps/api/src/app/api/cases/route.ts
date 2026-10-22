@@ -64,6 +64,7 @@ type CaseListScope = "active" | "deleted";
 type CaseListStatusFilter = "all" | "pending" | "in_review" | "ongoing" | "completed" | "failed";
 type CaseListApprovalFilter = "all" | "approved" | "pending" | "rejected";
 type CaseListReconciliationFilter = "all" | "clean" | "issues";
+type CaseListTallyFilter = "all" | "posted" | "not_posted" | "check";
 type CaseListSortMode = "recent" | "oldest" | "name";
 type CaseListTiming = Partial<Record<"auth" | "caseQuery" | "serialize" | "total", number>>;
 type CaseListRow = {
@@ -110,6 +111,9 @@ function readCaseApprovalFilter(value: string | null): CaseListApprovalFilter {
   return value === "approved" || value === "pending" || value === "rejected" ? value : "all";
 }
 
+function readCaseTallyFilter(value: string | null): CaseListTallyFilter {
+  return value === "posted" || value === "not_posted" || value === "check" ? value : "all";
+}
 function readCaseReconciliationFilter(value: string | null): CaseListReconciliationFilter {
   return value === "clean" || value === "issues" ? value : "all";
 }
@@ -1087,7 +1091,38 @@ async function GETHandler(request: Request) {
     const statusFilter = readCaseStatusFilter(url.searchParams.get("status"));
     const approvalFilter = readCaseApprovalFilter(url.searchParams.get("approval"));
     const reconciliationFilter = readCaseReconciliationFilter(url.searchParams.get("reconciliation"));
+    const tallyFilter = readCaseTallyFilter(url.searchParams.get("tally"));
     const sortMode = readCaseSortMode(url.searchParams.get("sort"));
+    // Tally filter: posted = verified voucher, check = voucher exists but not verified, not_posted = neither.
+    let tallyPostedIds: string[] = [];
+    let tallyCheckIds: string[] = [];
+    if (tallyFilter !== "all") {
+      const { data: postingRows, error: postingError } = await supabase
+        .from("purchase_invoice_tally_postings")
+        .select("case_id, tally_voucher_number, verification_status")
+        .not("tally_voucher_number", "is", null);
+      if (postingError) {
+        console.error("Failed to load Tally postings for case filter", postingError);
+      }
+      const posted = new Set<string>();
+      const check = new Set<string>();
+      for (const row of postingRows ?? []) {
+        if (row.verification_status === "verified") posted.add(row.case_id);
+        else check.add(row.case_id);
+      }
+      for (const id of posted) check.delete(id);
+      tallyPostedIds = [...posted];
+      tallyCheckIds = [...check];
+    }
+    const applyTallyFilter = <T extends { in: (c: string, v: string[]) => T; not: (c: string, o: string, v: string) => T }>(q: T): T => {
+      if (tallyFilter === "posted") return q.in("id", tallyPostedIds.length ? tallyPostedIds : ["00000000-0000-0000-0000-000000000000"]);
+      if (tallyFilter === "check") return q.in("id", tallyCheckIds.length ? tallyCheckIds : ["00000000-0000-0000-0000-000000000000"]);
+      if (tallyFilter === "not_posted") {
+        const ids = [...tallyPostedIds, ...tallyCheckIds];
+        return ids.length ? q.not("id", "in", `(${ids.join(",")})`) : q;
+      }
+      return q;
+    };
     let cursor;
     try { cursor = readCaseCursor(url.searchParams.get('cursor'), scope, sortMode); }
     catch { return jsonWithCors(request, {error:'Invalid pagination cursor. Restart from the first page.'}, {status:400}); }
@@ -1144,6 +1179,7 @@ async function GETHandler(request: Request) {
       if (approvalFilter === "pending") query = query.not("status", "in", "(accepted,rejected)");
       if (reconciliationFilter === "clean") query = query.eq("mismatch_count", 0);
       if (reconciliationFilter === "issues") query = query.gt("mismatch_count", 0);
+      query = applyTallyFilter(query);
 
       if (searchQuery) {
         query = query.ilike("search_text", `%${escapeIlikePattern(searchQuery.toLowerCase())}%`);
@@ -1209,6 +1245,7 @@ async function GETHandler(request: Request) {
         if (approvalFilter === "pending") fallbackSearchQuery = fallbackSearchQuery.not("status", "in", "(accepted,rejected)");
         if (reconciliationFilter === "clean") fallbackSearchQuery = fallbackSearchQuery.eq("mismatch_count", 0);
         if (reconciliationFilter === "issues") fallbackSearchQuery = fallbackSearchQuery.gt("mismatch_count", 0);
+        fallbackSearchQuery = applyTallyFilter(fallbackSearchQuery);
 
         fallbackSearchQuery = fallbackSearchQuery.or(
           [

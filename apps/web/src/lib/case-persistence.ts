@@ -168,6 +168,7 @@ export type FetchCasesOptions = {
   statusFilter?: "all" | "pending" | "in_review" | "completed" | "failed";
   approvalFilter?: "all" | "approved" | "pending" | "rejected";
   reconciliationFilter?: "all" | "clean" | "issues";
+  tallyFilter?: "all" | "posted" | "not_posted" | "check";
   signal?: AbortSignal;
 };
 
@@ -608,6 +609,7 @@ export async function fetchCasePage({
   statusFilter,
   approvalFilter,
   reconciliationFilter,
+  tallyFilter,
   signal,
 }: FetchCasesOptions): Promise<RecentCasesResponse> {
   const query = new URLSearchParams();
@@ -629,6 +631,9 @@ export async function fetchCasePage({
   }
   if (reconciliationFilter && reconciliationFilter !== "all") {
     query.set("reconciliation", reconciliationFilter);
+  }
+  if (tallyFilter && tallyFilter !== "all") {
+    query.set("tally", tallyFilter);
   }
   if (sortMode && sortMode !== "recent") {
     query.set("sort", sortMode);

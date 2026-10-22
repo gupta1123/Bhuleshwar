@@ -856,6 +856,10 @@ export function TallyPurchasePostingPanel({
     void (async () => {
       const next = await load(false, null, true);
       if (cancelled) return;
+      // A voucher that is already created and verified in Tally needs no
+      // catalogue: skip the live masters and supplier lookups entirely. Refresh
+      // still reads Tally on demand.
+      if (next?.posting?.status === "created") return;
       if(approval.enabled&&(!canAccess(approval.snapshot,'purchases.prepare')||approval.workflow?.state!=='draft'))return;
       const connection = next?.connection;
       if (
@@ -1518,8 +1522,9 @@ export function TallyPurchasePostingPanel({
     [ledgerOptions]
   );
   const supplierLedgerLoading = matchingSupplierLedger || matchingIndexedSupplierLedger;
+  const postedInTally = payload?.posting?.status === "created";
   const masterValidationPending =
-    !liveMastersReady || refreshingMasters || supplierLedgerLoading || matchingLineMasters;
+    !postedInTally && (!liveMastersReady || refreshingMasters || supplierLedgerLoading || matchingLineMasters);
   const correctionBlockers = useMemo(
     () => masterValidationPending || ["created", "verification_required"].includes(payload?.posting?.status ?? "")
       ? []
@@ -2386,7 +2391,7 @@ export function TallyPurchasePostingPanel({
             <MasterCombobox
               {...masterContext}
               compact
-              disabled={locked || !liveMastersReady || supplierLedgerLoading}
+              disabled={locked || (!liveMastersReady && !postedInTally) || supplierLedgerLoading}
               emptyMessage="No ledger matched this search in the selected Tally company."
               id="field-supplier-ledger"
               issues={scopeIssues("invoice", ["SUPPLIER_LEDGER_REQUIRED", "SUPPLIER_LEDGER_GSTIN_MISMATCH"])}
@@ -2397,7 +2402,7 @@ export function TallyPurchasePostingPanel({
                 ...(supplierLedgerMatch?.ledgerName ? [supplierLedgerMatch.ledgerName] : []),
                 ...(supplierLedgerMatch?.candidateLedgerNames ?? []),
               ]}
-              syncing={!liveMastersReady || supplierLedgerLoading}
+              syncing={(!liveMastersReady && !postedInTally) || supplierLedgerLoading}
               value={review.supplierLedgerName}
             />
             {(() => {

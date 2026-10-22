@@ -1050,7 +1050,7 @@ function inferTaxModeFromGstins(fields: Partial<Record<FieldKey, string>>): GstT
 
 function inferTopLevelTaxRate(fields: Partial<Record<FieldKey, string>>) {
   let taxableBase = normalizeEWayAmount(fields.subtotal);
-  let taxAmount = normalizeEWayAmount(fields.taxAmount);
+  const taxAmount = normalizeEWayAmount(fields.taxAmount);
   const totalAmount = normalizeEWayAmount(fields.totalAmount);
 
   // E-way totals can include freight or other charges. Do not treat

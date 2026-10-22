@@ -8263,6 +8263,10 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
   let readInFlight = false;
   let readRecoveryUntil = 0;
   let sessionWasAuthenticated = false;
+  // Bumped whenever the socket closes. Work started on an earlier socket was
+  // aborted: it must not report a failure or leave state behind that would make
+  // the gateway's re-sent request on the new socket fail.
+  let channelEpoch = 0;
 
   const log = (level, message) => emitLog(options, level, message);
   const send = (payload) => {
@@ -8327,6 +8331,7 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
       send({ type: "operation_result", requestId, success: false, error: "A Tally read is already running. Wait for it to finish." });
       return;
     }
+    const epoch = channelEpoch;
     const controller = new AbortController();
     const deadlineAt = Math.min(Number(message.deadlineAt) || Infinity, Date.now() + ((isBankRead || isPurchaseRead) ? 180_000 : CASH_DISCOUNT_SCAN_MS));
     const purchaseReadState = purchaseReadKey
@@ -8335,6 +8340,7 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
     if (purchaseReadKey && purchaseReadState) pendingPurchaseReads.set(purchaseReadKey, purchaseReadState);
     if (isRead) { activeReads.set(requestId, controller); readInFlight = true; }
     const sendOperationResult = (payload) => {
+      if (epoch !== channelEpoch) return;
       const targetIds = purchaseReadState ? Array.from(purchaseReadState.requestIds) : [requestId];
       for (const targetRequestId of targetIds) {
         send({ ...payload, requestId: targetRequestId });
@@ -8697,7 +8703,7 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
       sendOperationResult({ type: "operation_result", success: true, companyName: message.companyName, data: responseData });
     } catch (error) {
       if (!benchmarkFinished) {
-        if (isRead) readRecoveryUntil = Date.now() + 30_000;
+        if (isRead && epoch === channelEpoch) readRecoveryUntil = Date.now() + 30_000;
         finishConnectorBenchmarkTrace(benchmark, { success: false, error });
         benchmarkFinished = true;
       }
@@ -8710,13 +8716,15 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
     } finally {
       if (!benchmarkFinished) finishConnectorBenchmarkTrace(benchmark, { success: false, error: "Operation ended before a result was produced." });
       if (deadlineTimer) clearTimeout(deadlineTimer);
-      if (purchaseReadState) {
-        for (const targetRequestId of purchaseReadState.requestIds) activeReads.delete(targetRequestId);
-      } else {
-        activeReads.delete(requestId);
+      if (epoch === channelEpoch) {
+        if (purchaseReadState) {
+          for (const targetRequestId of purchaseReadState.requestIds) activeReads.delete(targetRequestId);
+        } else {
+          activeReads.delete(requestId);
+        }
+        if (purchaseReadKey) pendingPurchaseReads.delete(purchaseReadKey);
+        if (isRead) readInFlight = false;
       }
-      if (purchaseReadKey) pendingPurchaseReads.delete(purchaseReadKey);
-      if (isRead) readInFlight = false;
     }
   };
 
@@ -8772,6 +8780,11 @@ function startCashDiscountLiveChannel(config, executeExclusive, options = {}) {
       });
       socket.addEventListener("close", (event) => {
         for (const controller of activeReads.values()) controller.abort(new Error("Live channel disconnected."));
+        channelEpoch += 1;
+        activeReads.clear();
+        pendingPurchaseReads.clear();
+        readInFlight = false;
+        readRecoveryUntil = 0;
         if (sessionWasAuthenticated && !stopped) {
           // A healthy session was cut (proxy, network, gateway restart). Browser
           // requests fail while no connector socket is open, so rejoin at once

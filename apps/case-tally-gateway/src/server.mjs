@@ -5,6 +5,18 @@ import { WebSocket, WebSocketServer } from "ws";
 const REQUEST_TIMEOUT_MS = 4 * 60_000;
 const AUTH_TIMEOUT_MS = 10_000;
 const CONNECTOR_REJOIN_WAIT_MS = 8_000;
+// Read-only operations are safe to send again if the connector's socket drops
+// mid-request and it rejoins within this window. Posting operations never are.
+const RESEND_AFTER_REJOIN_MS = 25_000;
+const RESENDABLE_OPERATIONS = new Set([
+  "company_check",
+  "ledger_masters",
+  "ledger_suggestions",
+  "test_purchase_document_folder",
+  "fetch_customer_open_bills",
+  "collections_query",
+  "collections_rows",
+]);
 // A busy connector can answer a ping late; only drop it after repeated misses.
 const MAX_MISSED_PONGS = 3;
 const MAX_MESSAGE_BYTES = 30 * 1024 * 1024;
@@ -41,6 +53,7 @@ function failPending(requestId, error) {
   const item = pending.get(requestId);
   if (!item) return;
   clearTimeout(item.timeout);
+  clearTimeout(item.resendTimer);
   pending.delete(requestId);
   send(item.browser, {
     type: "result",
@@ -111,6 +124,7 @@ async function authenticate(socket, message) {
   }
 
   send(socket, { type: "authenticated", role, connectionId });
+  if (role === "connector") resendHeldRequests(socket, connectionId, session.ownerUserId);
 }
 
 async function authorizeLiveOperation(browserMeta, message, connectorMeta) {
@@ -192,9 +206,7 @@ async function handleBrowserRequest(socket, message) {
     () => failPending(requestId, new Error("The live Tally request timed out.")),
     REQUEST_TIMEOUT_MS,
   );
-  pending.set(requestId, { browser: socket, connector, timeout });
-
-  send(connector, {
+  const operationMessage = {
     type: "operation",
     requestId,
     operation,
@@ -205,7 +217,47 @@ async function handleBrowserRequest(socket, message) {
     companyNames: Array.isArray(message.companyNames) ? message.companyNames : undefined,
     agentIdentity: authority,
     payload: message.payload && typeof message.payload === "object" ? message.payload : undefined,
+  };
+  pending.set(requestId, {
+    browser: socket,
+    connector,
+    connectionId: browserMeta.connectionId,
+    ownerUserId: browserMeta.ownerUserId,
+    timeout,
+    operationMessage,
+    resendable: RESENDABLE_OPERATIONS.has(operation),
+    resendTimer: null,
   });
+
+  send(connector, operationMessage);
+}
+
+// The connector's socket closed while it still owed results. Hold read-only
+// requests briefly for it to rejoin; fail everything else straight away.
+function holdOrFailPendingForConnector(socket) {
+  for (const [requestId, item] of pending) {
+    if (item.connector !== socket) continue;
+    if (!item.resendable) {
+      failPending(requestId, new Error("The Tally connector disconnected during the live request."));
+      continue;
+    }
+    item.connector = null;
+    item.resendTimer = setTimeout(
+      () => failPending(requestId, new Error("The Tally connector disconnected during the live request.")),
+      RESEND_AFTER_REJOIN_MS,
+    );
+  }
+}
+
+function resendHeldRequests(socket, connectionId, ownerUserId) {
+  for (const item of pending.values()) {
+    if (item.connector || !item.resendable) continue;
+    if (item.connectionId !== connectionId || item.ownerUserId !== ownerUserId) continue;
+    clearTimeout(item.resendTimer);
+    item.resendTimer = null;
+    item.connector = socket;
+    send(socket, { ...item.operationMessage, deadlineAt: Date.now() + 180_000 });
+  }
 }
 
 async function handleConnectorResult(socket, message) {
@@ -292,9 +344,9 @@ export function startCaseTallyGateway(options = {}) {
         connectors.delete(current.connectionId);
       }
       for (const [requestId, item] of pending) {
-        if (item.browser === socket) clearTimeout(item.timeout), pending.delete(requestId);
-        else if (item.connector === socket) failPending(requestId, new Error("The Tally connector disconnected during the live request."));
+        if (item.browser === socket) clearTimeout(item.timeout), clearTimeout(item.resendTimer), pending.delete(requestId);
       }
+      holdOrFailPendingForConnector(socket);
     });
   });
 

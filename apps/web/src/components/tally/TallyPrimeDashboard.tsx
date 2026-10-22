@@ -138,7 +138,7 @@ function getStatusTone(connection?: TallyConnection | null) {
 }
 
 const DEFAULT_BRIDGE_API_BASE_URL =
-  "https://autodealer-workflow-465859fe2891.herokuapp.com";
+  "https://bhuleshwar-workflow-f79848ed32b2.herokuapp.com";
 
 function getBridgeApiBaseUrl() {
   // In local development the connector runs on the same workstation as this

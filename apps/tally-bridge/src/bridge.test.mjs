@@ -1061,14 +1061,18 @@ test("Purchase vouchers do not invent Main Location when no godown is selected",
   assert.doesNotMatch(xml, /Main Location|Primary Batch|BATCHALLOCATIONS\.LIST|GODOWNNAME/);
 });
 
-test("Purchase duplicate checks cover the complete Indian financial year", () => {
+test("Purchase duplicate checks cover the voucher month and one month either side", () => {
   assert.deepEqual(purchaseVoucherFinancialYearRange("2026-08-21"), {
-    dateFrom: "2026-04-01",
-    dateTo: "2027-03-31",
+    dateFrom: "2026-07-01",
+    dateTo: "2026-09-30",
   });
-  assert.deepEqual(purchaseVoucherFinancialYearRange("2027-02-15"), {
-    dateFrom: "2026-04-01",
-    dateTo: "2027-03-31",
+  assert.deepEqual(purchaseVoucherFinancialYearRange("2027-01-15"), {
+    dateFrom: "2026-12-01",
+    dateTo: "2027-02-28",
+  });
+  assert.deepEqual(purchaseVoucherFinancialYearRange("2026-12-05"), {
+    dateFrom: "2026-11-01",
+    dateTo: "2027-01-31",
   });
 });
 

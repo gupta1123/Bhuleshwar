@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocket } from "ws";
 import { cashDiscountReadContext, checkReadBudget, readBoundedXml, createTallyScheduler, createCashDiscountResultCache,
   createConnectorBenchmarkTrace, finishConnectorBenchmarkTrace, markConnectorBenchmarkStage,
-  recordConnectorTallyRead, CASH_DISCOUNT_READ_MS, CASH_DISCOUNT_SCAN_MS,
+  recordConnectorTallyRead, CASH_DISCOUNT_READ_MS, decodeTallyBytes, encodeTallyBody, CASH_DISCOUNT_SCAN_MS,
   CASH_DISCOUNT_RESULT_BYTES } from "./cash-discount-runtime.mjs";
 import { createLocalAgentRuntime } from "./agent/runtime.mjs";
 import { openBillAmountIndexFromFields, openBillFromFields, openBillsByLedgerFromFields } from "./agent/receivable-fields.mjs";
@@ -3374,7 +3374,7 @@ async function invokeTallyXml(tallyUrl, xml) {
         headers: {
           "Content-Type": "text/xml",
         },
-        body: xml,
+        body: encodeTallyBody(xml),
         signal: controller.signal,
       }),
       new Promise((_, reject) => {
@@ -3387,7 +3387,7 @@ async function invokeTallyXml(tallyUrl, xml) {
       }),
     ]);
 
-    const text = await response.text();
+    const text = decodeTallyBytes(Buffer.from(await response.arrayBuffer()));
     return parseTallyImportResult(text, response.status);
   } finally {
     if (timeout) clearTimeout(timeout);
@@ -3432,11 +3432,11 @@ async function exportTallyXml(tallyUrl, xml, label = "Tally export", timeoutMs =
       headers: {
         "Content-Type": "text/xml",
       },
-      body: xml,
+      body: encodeTallyBody(xml),
       signal: readContext?.signal ? AbortSignal.any([controller.signal, readContext.signal]) : controller.signal,
     });
 
-    const text = readContext ? await readBoundedXml(response) : await response.text();
+    const text = readContext ? await readBoundedXml(response) : decodeTallyBytes(Buffer.from(await response.arrayBuffer()));
     benchmarkResponseBytes = Buffer.byteLength(text);
     if (readContext && (!/<ENVELOPE[\s>]/i.test(text) || !/<\/ENVELOPE>\s*$/i.test(text))) {
       throw new Error(`Tally returned incomplete XML for ${label}.`);

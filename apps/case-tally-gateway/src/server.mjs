@@ -189,7 +189,7 @@ async function handleBrowserRequest(socket, message) {
       type: "result",
       requestId,
       success: false,
-      error: "The Tally connector is not on the live channel. Restart it and refresh.",
+      error: "The live Tally connection is unavailable. Keep the Local Agent open; Bhuleshwar will reconnect automatically.",
     });
     return;
   }

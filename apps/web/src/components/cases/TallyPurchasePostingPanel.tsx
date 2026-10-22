@@ -1004,10 +1004,14 @@ export function TallyPurchasePostingPanel({
         try {
           await applyCachedOptions(cachedMasters);
         } catch {
-          // The live read below can recover an unusable saved preview.
+          setError("The saved Tally catalogue could not be opened. Refresh it from Tally.");
+          setNotice(null);
+          return;
         }
         if (cancelled) return;
-        await readFreshCatalogue();
+        // Like Kalika: opening a case shows the saved Local Agent catalogue only.
+        // A full live read of every master runs when the reviewer presses Refresh.
+        setNotice(null);
       } catch (refreshError) {
         if (cancelled) return;
         if (!cancelled) {

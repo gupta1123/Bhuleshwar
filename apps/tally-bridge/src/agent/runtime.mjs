@@ -58,7 +58,7 @@ function financialYearDates(value) {
 }
 
 function defaultAgentDirectory() {
-  return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Kalika", "LocalAgent");
+  return path.join(process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Bhuleshwar", "LocalAgent");
 }
 
 function ledgerLookupKey(value) {

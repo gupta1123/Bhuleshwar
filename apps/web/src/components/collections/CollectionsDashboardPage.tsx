@@ -289,7 +289,7 @@ type DashboardPayload = {
   };
   narrationAnalysis?: NarrationAnalysisRow[];
   notes?: string[];
-  // A paged dashboard (Kalika Local Agent 1.2.25+): the lists stay on the
+  // A paged dashboard (Bhuleshwar Local Agent 1.2.25+): the lists stay on the
   // connector and are read a page at a time; only the summary arrives here.
   paged?: boolean;
   dashboardId?: string;
@@ -1751,13 +1751,13 @@ export function CollectionsDashboardPage({
         {selectedCompany?.financialYear ? <span title="Selected financial year">FY {selectedCompany.financialYear}</span> : null}
         {lastScan && lastScan.scope === `${selectedConnectionId}|${selectedCompany?.companyName}|${selectedCompany?.financialYear || ''}` ?
           <span>· {lastScan.complete ? 'Checked' : 'Partial check'} {lastScan.at}</span> : null}
-        {dashboard?.cache?.source === 'prepared_customer_dues' ? <span title="Read from Kalika Local Agent, kept current from Tally">· From customer dues</span>
-          : dashboard?.cache?.source === 'live_tally' ? <span title="Customer dues are not ready for this company. Open Kalika Local Agent → Customer dues to make this page faster.">· Read live from Tally</span> : null}
+        {dashboard?.cache?.source === 'prepared_customer_dues' ? <span title="Read from Bhuleshwar Local Agent, kept current from Tally">· From customer dues</span>
+          : dashboard?.cache?.source === 'live_tally' ? <span title="Customer dues are not ready for this company. Open Bhuleshwar Local Agent → Customer dues to make this page faster.">· Read live from Tally</span> : null}
         {!isDedicatedFollowUpsPage && dashboard ? <details className="relative">
           <summary aria-label="About these figures" className="cursor-pointer rounded px-1 py-1 text-[#5a5046] focus-visible:outline focus-visible:outline-2">About</summary>
           <div className="absolute right-0 z-20 mt-2 w-72 max-w-[calc(100vw-3rem)] rounded-xl border border-[#e0d8cc] bg-white p-4 text-xs leading-relaxed shadow-lg">
             <p>{dashboard.cache?.source === 'prepared_customer_dues'
-              ? 'Figures come from customer dues in Kalika Local Agent, which follows changes in Tally about every minute.'
+              ? 'Figures come from customer dues in Bhuleshwar Local Agent, which follows changes in Tally about every minute.'
               : 'Figures were read from Tally at the time shown. Refresh to check again.'}</p>
             <p className="mt-2">Configured policy: 1.5% for 7 calendar days; 1% for 15 calendar days. Narration supplies the rates, not the day counts. Posting always rechecks the invoice.</p>
           </div>
@@ -1857,7 +1857,7 @@ export function CollectionsDashboardPage({
             <div>
               <h2 className="text-sm font-semibold text-red-900">{isDedicatedFollowUpsPage ? "Payment follow-up results are unavailable" : "Cash Discount results are unavailable"}</h2>
               <p className="mt-1 text-xs font-medium leading-relaxed text-red-800">
-                The latest check did not complete, so this page is not showing zero open bills or zero recovery. Make sure Kalika Local Agent is running and Tally is open, then try again.
+                The latest check did not complete, so this page is not showing zero open bills or zero recovery. Make sure Bhuleshwar Local Agent is running and Tally is open, then try again.
               </p>
               {message?.tone === "error" ? (
                 <p className="mt-1 text-xs leading-relaxed text-red-700">{message.text}</p>

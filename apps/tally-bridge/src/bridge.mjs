@@ -50,7 +50,7 @@ const CASH_DISCOUNT_VOUCHER_FIELDS =
 const LEGACY_CONFIG_DIR = path.join(os.homedir(), ".autodealer-tally-bridge");
 const CONFIG_DIR = path.join(
   process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
-  "Kalika",
+  "Bhuleshwar",
   "LocalAgent",
   "config"
 );
@@ -297,10 +297,16 @@ function writeConfig(config) {
   fs.renameSync(temporary, CONFIG_PATH);
 }
 
-function deleteConfig() {
-  if (fs.existsSync(CONFIG_PATH)) {
-    fs.rmSync(CONFIG_PATH, { force: true });
+function deleteConfig(onlyConnectionId) {
+  if (!fs.existsSync(CONFIG_PATH)) return;
+  if (onlyConnectionId) {
+    // A stale runner must not wipe the pairing a newer connection just wrote.
+    try {
+      const stored = JSON.parse(fs.readFileSync(CONFIG_PATH, "utf8"));
+      if (stored?.connectionId && stored.connectionId !== onlyConnectionId) return;
+    } catch {}
   }
+  fs.rmSync(CONFIG_PATH, { force: true });
 }
 
 function createMachineId() {
@@ -4253,7 +4259,7 @@ function voucherFromConfirmedDebitNotePayload(payload) {
 
 async function exportNativeDebitNotePdf(companyName, voucher, requestedParty, renderTallyPrintToPdf) {
   if (typeof renderTallyPrintToPdf !== "function") {
-    throw new Error("The desktop Kalika connector must be running to prepare the official Tally PDF.");
+    throw new Error("The desktop Bhuleshwar connector must be running to prepare the official Tally PDF.");
   }
   // Tally's VCH Print HTTP report returns an unbound, blank voucher shell
   // even when the requested MasterID is supplied. It cannot be used as a
@@ -9125,7 +9131,8 @@ function createBridgeRunner(options = {}) {
           String(error?.message ?? "")
         )
       ) {
-        deleteConfig();
+        emitLog(options, "error", `Clearing saved pairing for connection ${config.connectionId} (HTTP ${error?.status ?? "n/a"}: ${message})`);
+        deleteConfig(config.connectionId);
         stop(error?.status === 426 ? "update required" : "revoked", error);
       }
     }
@@ -9142,7 +9149,7 @@ function createBridgeRunner(options = {}) {
     async start() {
       await agentRuntime.start();
       await flushResultOutbox(config).catch((error) => emitLog(options, "error", `Result outbox replay deferred: ${error.message}`));
-      emitLog(options, "info", `Starting Kalika Local Agent ${AGENT_VERSION} for ${config.tallyUrl}`);
+      emitLog(options, "info", `Starting Bhuleshwar Local Agent ${AGENT_VERSION} for ${config.tallyUrl}`);
       emitLog(options, "info", `Sending heartbeat every ${intervalMs} ms.`);
       stopCommandWakeChannel = startCommandWakeChannel(config, executeExclusive, options);
       stopCashDiscountLiveChannel = startCashDiscountLiveChannel(config, executeExclusive, options);

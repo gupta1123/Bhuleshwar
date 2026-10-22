@@ -44,7 +44,7 @@ export function prepareLocalAgentDirectoryAcl(baseDirectory) {
   const root = path.resolve(baseDirectory);
   const expectedAgentRoot = path.resolve(
     process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || "", "AppData", "Local"),
-    "Kalika", "LocalAgent"
+    "Bhuleshwar", "LocalAgent"
   );
   if (process.platform !== "win32" || root !== expectedAgentRoot) return;
   fs.mkdirSync(root, { recursive: true, mode: 0o700 });

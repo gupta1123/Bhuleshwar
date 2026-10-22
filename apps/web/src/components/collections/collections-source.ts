@@ -1,6 +1,6 @@
 'use client';
 // The Collections page reads its lists a page at a time, from wherever the
-// dashboard is: held on the connector (a paged scan from Kalika Local Agent
+// dashboard is: held on the connector (a paged scan from Bhuleshwar Local Agent
 // 1.2.25 and later), or received whole (older connectors, read-only views).
 // Both answer with the same shared rules (@autodealer/shared collections-query),
 // so the page has one way of working.

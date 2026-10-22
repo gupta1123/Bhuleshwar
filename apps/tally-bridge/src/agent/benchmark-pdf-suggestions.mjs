@@ -44,7 +44,7 @@ if (process.versions.electron) {
   ({ readConfig } = await import("../bridge.mjs"));
 }
 const config = readConfig();
-if (!config) throw new Error("Kalika Local Agent is not paired/configured on this machine.");
+if (!config) throw new Error("Bhuleshwar Local Agent is not paired/configured on this machine.");
 const runtime = createLocalAgentRuntime({ config, safeStorage, onLog: () => {} });
 try {
   mark("runtime-created");

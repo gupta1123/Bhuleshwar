@@ -1,4 +1,4 @@
-# Kalika Local Agent installer
+# Bhuleshwar Local Agent installer
 
 This directory contains the `electron-builder` NSIS release for **Kalika Local
 Agent 1.0.0**. It replaces the legacy hand-copied Electron/Inno connector in
@@ -11,7 +11,7 @@ The installer is intentionally defensive:
 - removes the old connector install folder before copying new files
 - preserves the existing `%USERPROFILE%\.autodealer-tally-bridge\config.json` pairing during connector updates
 - installs one clean Electron runtime under `C:\Autodealer\tally-bridge`
-- registers the `kalika-tally://` protocol for Connect links
+- registers the `bhuleshwar-tally://` protocol for Connect links
 - starts the connector after install so the user can see its current status
 - includes the native Debit Note export and Purchase source-document TDLs and
   tries to copy both to the TallyPrime folder for easy one-time activation

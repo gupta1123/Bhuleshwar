@@ -1051,9 +1051,11 @@ function mappingTargetIsLive(
     return identities.includes(targetKey) || identities.includes(keySuffix);
   });
   if (exactIdentityMatches.length > 0) return exactIdentityMatches.length === 1;
-  // Legacy name-only mappings are safe only when the name is unique in the
-  // current company and master type. Never guess between duplicate ledgers.
-  return targetKey === targetName && candidates.filter((master) => normalizeKey(master.tally_name) === targetName).length === 1;
+  // The saved key can be in a different format from the live catalogue's key
+  // (e.g. a Tally GUID vs a local catalogue id). Fall back to the name, which is
+  // safe only when it is unique in the current company and master type. Never
+  // guess between duplicate ledgers.
+  return candidates.filter((master) => normalizeKey(master.tally_name) === targetName).length === 1;
 }
 
 function mappedName(

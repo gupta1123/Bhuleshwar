@@ -62,6 +62,7 @@ const SECTIONS = [
       ["sgst-tds", "SGST TDS 1%", "ledger"],
       ["igst-tds", "IGST TDS 2%", "ledger"],
       ["freight", "Freight inward", "ledger"],
+      ["transport-tds", "Transport TDS (goods transport)", "ledger"],
       ["round-off", "Round off", "ledger"],
     ],
   },

@@ -27,6 +27,11 @@ export type SavedCaseRecord = {
   mismatchCount: number;
   createdAt: string;
   deletedAt: string | null;
+  tallyPosting?: {
+    status: string;
+    voucherNumber: string | null;
+    verificationStatus: string | null;
+  } | null;
 };
 
 export type DuplicateCaseReference = {

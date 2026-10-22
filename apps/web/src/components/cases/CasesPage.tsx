@@ -401,6 +401,9 @@ export function CasesPage() {
                       <TableHead className="h-10 px-3 text-xs font-semibold text-[#3d3530]">
                         Reconciliation
                       </TableHead>
+                      <TableHead className="h-10 px-3 text-xs font-semibold text-[#3d3530]">
+                        Tally
+                      </TableHead>
                       <TableHead className="h-10 px-2.5 text-center text-xs font-semibold text-[#3d3530]">
                         Docs
                       </TableHead>
@@ -459,6 +462,23 @@ export function CasesPage() {
                               <span className="font-medium text-[#2d6a4f]">No issues</span>
                             ) : (
                               <span className="text-[#a89d91]">—</span>
+                            )}
+                          </TableCell>
+
+                          {/* Tally posting */}
+                          <TableCell className="px-3 py-2 text-xs font-normal whitespace-nowrap">
+                            {item.tallyPosting?.voucherNumber ? (
+                              item.tallyPosting.verificationStatus === "verified" ? (
+                                <span className="font-medium text-[#2d6a4f]">
+                                  Posted · #{item.tallyPosting.voucherNumber}
+                                </span>
+                              ) : (
+                                <span className="font-semibold text-[#8c1d18]" title="Created in Tally but the read-back check needs attention">
+                                  Check · #{item.tallyPosting.voucherNumber}
+                                </span>
+                              )
+                            ) : (
+                              <span className="text-[#a89d91]">Not posted</span>
                             )}
                           </TableCell>
 

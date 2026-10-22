@@ -1290,18 +1290,36 @@ async function GETHandler(request: Request) {
       );
     }
 
+    const tallyPostingsByCaseId = new Map<string, { status: string; voucherNumber: string | null; verificationStatus: string | null }>();
+    if (pageRows.length > 0) {
+      const { data: postingRows } = await supabase
+        .from("purchase_invoice_tally_postings")
+        .select("case_id, status, tally_voucher_number, verification_status, updated_at")
+        .in("case_id", pageRows.map((row) => row.id))
+        .order("updated_at", { ascending: false });
+      for (const posting of postingRows ?? []) {
+        if (tallyPostingsByCaseId.has(posting.case_id)) continue;
+        tallyPostingsByCaseId.set(posting.case_id, {
+          status: posting.status,
+          voucherNumber: posting.tally_voucher_number ?? null,
+          verificationStatus: posting.verification_status ?? null,
+        });
+      }
+    }
+
     const serializeStartedAt = nowMs();
     const body = {
-      cases: pageRows.map((row) =>
-        mapCaseRow(
+      cases: pageRows.map((row) => ({
+        ...mapCaseRow(
           row,
           documentsByCaseId.get(row.id) ?? [],
           shouldDeriveSummaryFromDocuments
             ? (mismatchCountsByCaseId.get(row.id) ?? 0)
             : undefined,
           fieldConfiguration
-        )
-      ),
+        ),
+        tallyPosting: tallyPostingsByCaseId.get(row.id) ?? null,
+      })),
       nextCursor,
       hasMore,
       page: page ?? undefined,

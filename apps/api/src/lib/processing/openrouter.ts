@@ -1,4 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
+import { imageDataBytes, isImageSizeError } from "./image-request-budget.ts";
 
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || "";
 const OPENAI_API_KEY = process.env.OPENAI_API_KEY || "";
@@ -186,6 +187,20 @@ export async function callOpenRouter(
 
   const testOverrides = aiTestContext.getStore();
   const messages = testOverrides ? applyTestPromptOverrides(requestMessages, testOverrides) : requestMessages;
+  // Validate the whole image payload, not just each page. Never log document content.
+  let imageBytes = 0;
+  let imageCount = 0;
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (part.type !== "image_url" || !part.image_url?.url?.startsWith("data:image/")) continue;
+      imageBytes += imageDataBytes(part.image_url.url);
+      imageCount++;
+    }
+  }
+  if (imageBytes > 15 * 1024 * 1024) {
+    throw new Error(`Packet image request exceeds the safe image budget (${imageCount} images, ${imageBytes} bytes).`);
+  }
   const callStartedAt = Date.now();
   const maxTokens = normalizeMaxTokens(options?.maxTokens ?? OPENROUTER_MAX_OUTPUT_TOKENS);
   const model = testOverrides?.model || options?.model || OPENROUTER_MODEL;
@@ -239,7 +254,7 @@ export async function callOpenRouter(
           error: errorText,
         });
 
-        if (!isRetryableStatus(response.status) || isHardQuotaError(errorText) || attempt === maxRetries) {
+        if (isImageSizeError(errorText) || !isRetryableStatus(response.status) || isHardQuotaError(errorText) || attempt === maxRetries) {
           throw new Error(errorText);
         }
 
@@ -286,7 +301,7 @@ export async function callOpenRouter(
         durationMs: Date.now() - requestStartedAt,
         error: lastError,
       });
-      if (attempt === maxRetries) {
+      if (isImageSizeError(error) || attempt === maxRetries) {
         recordTestTrace(testOverrides, messages, {
           model,
           durationMs: Date.now() - callStartedAt,

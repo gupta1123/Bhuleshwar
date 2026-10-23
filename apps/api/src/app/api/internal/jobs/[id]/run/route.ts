@@ -1,4 +1,5 @@
 import { jsonWithCors } from "@/lib/api/cors";
+import { isImageSizeError } from "@/lib/processing/image-request-budget";
 import {assertQueuedResource,QueuedAccessDenied} from '@/lib/access/queued-authority.mjs';
 import { resolveCaseDisplayNameWithAI } from "@/lib/case-naming";
 import { summarizeCase } from "@/lib/case-summary";
@@ -799,7 +800,8 @@ export async function POST(
       }
     }
 
-    const shouldRetry = job.attempt_count < job.max_attempts;
+    // A size error repeats identically on every attempt, so fail fast instead of retrying.
+    const shouldRetry = !isImageSizeError(error) && job.attempt_count < job.max_attempts;
     const nextRunAt = new Date(
       Date.now() + Math.min(60_000 * Math.pow(2, Math.max(0, job.attempt_count - 1)), 15 * 60_000)
     ).toISOString();

@@ -151,6 +151,14 @@ export type PurchaseEwayBill = {
   transportMode: string;
   vehicleNumber: string;
   distanceKm: string;
+  // Parties and transport reference for Tally's e-way bill screen.
+  consignorName: string;
+  consignorGstin: string;
+  consigneeName: string;
+  consigneeGstin: string;
+  transporterName: string;
+  // Lorry receipt number, shown as Doc/Lading/RR No.
+  documentNumber: string;
 };
 
 type PurchasePostingSourceLine = PurchasePostingReviewLine & {
@@ -945,7 +953,8 @@ function splitEwayAddress(address: string) {
 
 function emptyEwayBill(): PurchaseEwayBill {
   return { record: false, number: "", date: "", fromAddress: "", fromPlace: "", fromPincode: "", fromState: "",
-    toPlace: "", toPincode: "", toState: "", transportMode: "1 - Road", vehicleNumber: "", distanceKm: "" };
+    toPlace: "", toPincode: "", toState: "", transportMode: "1 - Road", vehicleNumber: "", distanceKm: "",
+    consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "" };
 }
 
 // The supplier's e-way bill page for this invoice: its number, date, dispatch
@@ -972,6 +981,9 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
     pageText.match(/\b(?:mode(?:\s+of\s+transport)?|transport\s+mode)[^a-z\n]{0,20}(road|rail|air|ship)\b/i)?.[1]?.toLowerCase() ??
     "road";
   const modeCode = { road: "1 - Road", rail: "2 - Rail", air: "3 - Air", ship: "4 - Ship" }[mode] ?? "1 - Road";
+  // Transporter and LR number come from the e-way bill, else from the packet's lorry receipt.
+  const lorryReceipt = documents.find((candidate) => /lorry\s*receipt/i.test(candidate.document_type));
+  const lorryFields = lorryReceipt ? fieldsOf(lorryReceipt) : {};
   return {
     record: true,
     number,
@@ -986,6 +998,12 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
     transportMode: modeCode,
     vehicleNumber: text(fields.vehicleNumber).replace(/\s+/g, "").toUpperCase(),
     distanceKm: distance,
+    consignorName: "",
+    consignorGstin: normalizeGstin(fields.supplierGstin),
+    consigneeName: "",
+    consigneeGstin: normalizeGstin(fields.buyerGstin),
+    transporterName: text(fields.transporterName || lorryFields.transporterName),
+    documentNumber: text(fields.lorryReceiptNumber || lorryFields.lorryReceiptNumber),
   };
 }
 
@@ -2428,7 +2446,16 @@ export function preparePurchasePosting(params: {
     // Reference only: the connector records these with e-way bill
     // applicability left at No, as the client books purchases.
     ...(review.ewayBill?.record && /^\d{12}$/.test(review.ewayBill.number) && isValidIsoDate(review.ewayBill.date)
-      ? { ewayBill: { ...review.ewayBill, vehicleNumber: review.ewayBill.vehicleNumber || review.vehicleNumber } }
+      ? {
+        ewayBill: {
+          ...review.ewayBill,
+          vehicleNumber: review.ewayBill.vehicleNumber || review.vehicleNumber,
+          consignorName: review.ewayBill.consignorName || review.supplierName,
+          consignorGstin: review.ewayBill.consignorGstin || normalizeGstin(review.supplierGstin),
+          consigneeName: review.ewayBill.consigneeName || review.buyerName,
+          consigneeGstin: review.ewayBill.consigneeGstin || normalizeGstin(review.buyerGstin),
+        },
+      }
       : {}),
     taxMode: calculation.taxMode,
     items: review.lines.map((line) => {

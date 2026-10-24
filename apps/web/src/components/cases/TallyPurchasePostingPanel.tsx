@@ -2243,14 +2243,7 @@ export function TallyPurchasePostingPanel({
     Number(calculation?.freightAmount || 0)
       ? { ledger: review.freightLedgerName || "Freight inward", rate: review.freightGstRate, amount: calculation?.freightAmount }
       : null,
-    calculation?.taxMode === "cgst_sgst"
-      ? { ledger: review.cgstLedgerName || "Input CGST", rate: String(Number(calculation.gstRate || 0) / 2), amount: calculation.cgstAmount }
-      : calculation?.taxMode === "igst"
-        ? { ledger: review.igstLedgerName || "Input IGST", rate: calculation.gstRate, amount: calculation.igstAmount }
-        : null,
-    calculation?.taxMode === "cgst_sgst"
-      ? { ledger: review.sgstLedgerName || "Input SGST", rate: String(Number(calculation.gstRate || 0) / 2), amount: calculation.sgstAmount }
-      : null,
+    // TDS lines sit above the GST lines (client request); GST then TCS and round-off.
     purchaseGoodsTdsActive
       ? { ledger: review.tds194qLedgerName || "Purchase TDS", rate: review.tds194qRate, amount: calculation?.tds194qAmount, credit: true }
       : null,
@@ -2265,6 +2258,14 @@ export function TallyPurchasePostingPanel({
       : null,
     igstTdsActive
       ? { ledger: review.igstTdsLedgerName || "IGST TDS", rate: calculation?.gstTdsRate, amount: calculation?.igstTdsAmount, credit: true }
+      : null,
+    calculation?.taxMode === "cgst_sgst"
+      ? { ledger: review.cgstLedgerName || "Input CGST", rate: String(Number(calculation.gstRate || 0) / 2), amount: calculation.cgstAmount }
+      : calculation?.taxMode === "igst"
+        ? { ledger: review.igstLedgerName || "Input IGST", rate: calculation.gstRate, amount: calculation.igstAmount }
+        : null,
+    calculation?.taxMode === "cgst_sgst"
+      ? { ledger: review.sgstLedgerName || "Input SGST", rate: String(Number(calculation.gstRate || 0) / 2), amount: calculation.sgstAmount }
       : null,
     review.tcsReceivable
       ? { ledger: review.tcsLedgerName || "TCS Receivable", amount: String(liveTcsAmount) }

@@ -1665,7 +1665,8 @@ test("the case's e-way bill page is read for the voucher and only sent when vali
     { ...result.review.ewayBill, fromAddress: undefined },
     { record: true, number: "262264097358", date: "2026-08-12", fromAddress: undefined, fromPlace: "NAGPUR", fromPincode: "440016",
       fromState: "Maharashtra", toPlace: "JALNA", toPincode: "431203", toState: "Maharashtra", transportMode: "1 - Road",
-      vehicleNumber: "MH21X7266", distanceKm: "437" }
+      vehicleNumber: "MH21X7266", distanceKm: "437",
+      consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "" }
   );
   assert.equal(result.tallyPayload.ewayBill.number, "262264097358");
 

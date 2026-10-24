@@ -1424,6 +1424,7 @@ function buildPurchaseEwayBillXml(ewayBill) {
   const toPincode = consignee.pincode || ewayBill.toPincode || "";
   const toState = consignee.state || ewayBill.toState || "";
   const distance = /^\d{1,4}$/.test(String(ewayBill.distanceKm || "")) ? ` ${ewayBill.distanceKm}` : "";
+  const toName = consignee.name || ewayBill.consigneeName || "";
   return [
     "<ISEWAYBILLAPPLICABLE>No</ISEWAYBILLAPPLICABLE>",
     "<OVRDNEWAYBILLAPPLICABILITY>No</OVRDNEWAYBILLAPPLICABILITY>",
@@ -1439,9 +1440,17 @@ function buildPurchaseEwayBillXml(ewayBill) {
     ewayBill.fromPincode ? `<CONSIGNORPINCODE>${value(ewayBill.fromPincode)}</CONSIGNORPINCODE>` : "",
     toPlace ? `<CONSIGNEEPLACE>${value(toPlace)}</CONSIGNEEPLACE>` : "",
     ewayBill.fromState ? `<SHIPPEDFROMSTATE>${value(ewayBill.fromState)}</SHIPPEDFROMSTATE>` : "",
+    ewayBill.consignorName ? `<CONSIGNORNAME>${value(ewayBill.consignorName)}</CONSIGNORNAME>` : "",
+    ewayBill.consignorGstin ? `<CONSIGNORGSTIN>${value(ewayBill.consignorGstin)}</CONSIGNORGSTIN>` : "",
+    ewayBill.fromState ? `<CONSIGNORSTATENAME>${value(ewayBill.fromState)}</CONSIGNORSTATENAME>` : "",
+    toName ? `<CONSIGNEENAME>${value(toName)}</CONSIGNEENAME>` : "",
+    ewayBill.consigneeGstin ? `<CONSIGNEEGSTIN>${value(ewayBill.consigneeGstin)}</CONSIGNEEGSTIN>` : "",
+    toState ? `<CONSIGNEESTATENAME>${value(toState)}</CONSIGNEESTATENAME>` : "",
     toState ? `<SHIPPEDTOSTATE>${value(toState)}</SHIPPEDTOSTATE>` : "",
     "<TRANSPORTDETAILS.LIST>",
     `<TRANSPORTMODE>${value(ewayBill.transportMode || "1 - Road")}</TRANSPORTMODE>`,
+    ewayBill.transporterName ? `<TRANSPORTERNAME>${value(ewayBill.transporterName)}</TRANSPORTERNAME>` : "",
+    ewayBill.documentNumber ? `<DOCUMENTNUMBER>${value(ewayBill.documentNumber)}</DOCUMENTNUMBER>` : "",
     ewayBill.vehicleNumber ? `<VEHICLENUMBER>${value(ewayBill.vehicleNumber)}</VEHICLENUMBER>` : "",
     distance ? `<DISTANCE>${distance}</DISTANCE>` : "",
     "</TRANSPORTDETAILS.LIST>",
@@ -1551,18 +1560,23 @@ function buildPurchaseVoucherXml(payload, fallbackCompanyName) {
     );
   }
 
+  // Ledger order on the voucher: freight, then TDS deductions, then GST and TCS
+  // (the client wants TDS above the GST lines), then round-off.
+  const freightLedgerEntries = [];
+  const taxLedgerEntries = [];
   for (const ledger of debitCharges) {
     if (!ledger) continue;
     const name = String(ledger.name || "").trim();
     const amount = toSignedMoney(ledger.amount, "purchase charge amount", { allowZero: true });
     if (!name || amount === 0) continue;
-    ledgerEntries.push(buildLedgerEntryXml({
+    (ledger.kind === "freight" ? freightLedgerEntries : taxLedgerEntries).push(buildLedgerEntryXml({
       ledgerName: name,
       amount: Math.abs(amount).toFixed(2),
       isDebit: amount > 0,
       listTag: "LEDGERENTRIES.LIST",
     }));
   }
+  ledgerEntries.push(...freightLedgerEntries);
 
   for (const deduction of deductionEntries) {
     const name = String(deduction?.name || "").trim();
@@ -1580,7 +1594,9 @@ function buildPurchaseVoucherXml(payload, fallbackCompanyName) {
     }
   }
 
-  // Match the review preview: item lines, GST/charges, deductions and
+  ledgerEntries.push(...taxLedgerEntries);
+
+  // Match the review preview: item lines, freight, deductions, GST and
   // round-off. The supplier party entry is emitted separately and first.
   const roundOff = ledgers.roundOff;
   if (roundOff) {
@@ -2682,7 +2698,7 @@ async function postPurchaseVoucher(tallyUrl, payload, companyName, options = {})
   if (payload?.ewayBill) {
     const companyAddress = await readCompanyAddress(tallyUrl, companyName).catch(() => null);
     if (companyAddress) {
-      postingPayload = { ...numberedPayload, ewayBill: { ...payload.ewayBill, consignee: companyAddress } };
+      postingPayload = { ...numberedPayload, ewayBill: { ...payload.ewayBill, consignee: { ...companyAddress, name: companyName } } };
     }
   }
   let xml = buildPurchaseVoucherXml(postingPayload, companyName);

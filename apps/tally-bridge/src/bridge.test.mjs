@@ -960,9 +960,14 @@ test("Purchase vouchers use Tally's item-invoice envelope and allocation tags", 
     xml,
     /<BASICRATEOFINVOICETAX\.LIST TYPE="Number"><BASICRATEOFINVOICETAX>-1\.00<\/BASICRATEOFINVOICETAX><\/BASICRATEOFINVOICETAX\.LIST><ROUNDTYPE\/><LEDGERNAME>CGST TDS PAYABLE 1%<\/LEDGERNAME>/
   );
+  // TDS lines sit above the GST lines (client request).
   assert.ok(
-    xml.indexOf("<LEDGERNAME>Input ITC SGST 9%</LEDGERNAME>") <
-      xml.indexOf("<LEDGERNAME>TDS Payable @ 0.10% (194Q)</LEDGERNAME>")
+    xml.indexOf("<LEDGERNAME>SGST TDS PAYABLE 1%</LEDGERNAME>") <
+      xml.indexOf("<LEDGERNAME>Input ITC CGST 9%</LEDGERNAME>")
+  );
+  assert.ok(
+    xml.indexOf("<LEDGERNAME>TDS Payable @ 0.10% (194Q)</LEDGERNAME>") <
+      xml.indexOf("<LEDGERNAME>Input ITC CGST 9%</LEDGERNAME>")
   );
   assert.ok(
     xml.indexOf("<LEDGERNAME>SGST TDS PAYABLE 1%</LEDGERNAME>") <
@@ -1376,6 +1381,14 @@ test("purchase vouchers record the supplier e-way bill as reference, like the cl
   assert.match(xml, /<CONSIGNEEADDRESS>C-7 &amp; 8, Addl\. M\.I\.D\.C\. Area, Jalna<\/CONSIGNEEADDRESS>/);
   assert.match(xml, /<CONSIGNORPLACE>NAGPUR<\/CONSIGNORPLACE><CONSIGNORPINCODE>440016<\/CONSIGNORPINCODE><CONSIGNEEPLACE>JALNA<\/CONSIGNEEPLACE>/);
   assert.match(xml, /<TRANSPORTDETAILS\.LIST><TRANSPORTMODE>1 - Road<\/TRANSPORTMODE><VEHICLENUMBER>MH21X7266<\/VEHICLENUMBER><DISTANCE> 437<\/DISTANCE><\/TRANSPORTDETAILS\.LIST>/);
+  // Parties and transport reference fill Tally's e-way bill screen.
+  const withParties = buildPurchaseVoucherXml({ ...payload, ewayBill: { ...payload.ewayBill,
+    consignorName: "Bhawana Steel Traders", consignorGstin: "27AAKCS5521M1ZP", consigneeGstin: "27AAFCS4417K1ZQ",
+    transporterName: "Patil Roadlines", documentNumber: "LR/7731",
+    consignee: { ...payload.ewayBill.consignee, name: "Kalika Steel Alloys Pvt Ltd" } } }, payload.companyName);
+  assert.match(withParties, /<CONSIGNORNAME>Bhawana Steel Traders<\/CONSIGNORNAME><CONSIGNORGSTIN>27AAKCS5521M1ZP<\/CONSIGNORGSTIN><CONSIGNORSTATENAME>Maharashtra<\/CONSIGNORSTATENAME>/);
+  assert.match(withParties, /<CONSIGNEENAME>Kalika Steel Alloys Pvt Ltd<\/CONSIGNEENAME><CONSIGNEEGSTIN>27AAFCS4417K1ZQ<\/CONSIGNEEGSTIN><CONSIGNEESTATENAME>Maharashtra<\/CONSIGNEESTATENAME>/);
+  assert.match(withParties, /<TRANSPORTERNAME>Patil Roadlines<\/TRANSPORTERNAME><DOCUMENTNUMBER>LR\/7731<\/DOCUMENTNUMBER><VEHICLENUMBER>MH21X7266/);
   // No e-way bill, or an invalid number: the voucher is exactly as before.
   assert.doesNotMatch(buildPurchaseVoucherXml({ ...payload, ewayBill: undefined }, payload.companyName), /EWAYBILL/);
   assert.doesNotMatch(buildPurchaseVoucherXml({ ...payload, ewayBill: { ...payload.ewayBill, number: "12345" } }, payload.companyName), /EWAYBILL/);

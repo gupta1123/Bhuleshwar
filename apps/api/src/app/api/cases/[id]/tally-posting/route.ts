@@ -290,7 +290,7 @@ function asSavedReview(value: unknown): Partial<PurchasePostingReview> | null {
     const eway = input.ewayBill as Record<string, unknown>;
     const clean: Record<string, unknown> = {};
     if (typeof eway.record === "boolean") clean.record = eway.record;
-    for (const key of ["number", "date", "fromAddress", "fromPlace", "fromPincode", "fromState", "toPlace", "toPincode", "toState", "transportMode", "vehicleNumber", "distanceKm"] as const) {
+    for (const key of ["number", "date", "fromAddress", "fromPlace", "fromPincode", "fromState", "toPlace", "toPincode", "toState", "transportMode", "vehicleNumber", "distanceKm", "consignorName", "consignorGstin", "consigneeName", "consigneeGstin", "transporterName", "documentNumber"] as const) {
       if (typeof eway[key] === "string") {
         const value = eway[key].trim().slice(0, key === "fromAddress" ? 300 : 80);
         clean[key] = key === "date" ? normalizePurchasePostingDate(value) : value;

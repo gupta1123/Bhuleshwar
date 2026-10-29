@@ -183,7 +183,7 @@ function buildConnectorConnectUrl(
     tallyUrl: connection.tallyUrl || DEFAULT_TALLY_URL,
   });
 
-  return `kalika-tally://connect?${params.toString()}`;
+  return `bhuleshwar-tally://connect?${params.toString()}`;
 }
 
 function normalizeTallyUrlInput(value: string) {

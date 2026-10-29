@@ -762,7 +762,6 @@ function startApplication() {
     return;
   }
   app.setAsDefaultProtocolClient(PROTOCOL_NAME);
-  app.setAsDefaultProtocolClient("kalika-tally");
   // Login-item registration follows the saved "Start with Windows" preference
   // once the runner has loaded settings (see applyStartWithWindowsSetting).
   ipcMain.handle("agent:get-connection-status", () => lastStatus);

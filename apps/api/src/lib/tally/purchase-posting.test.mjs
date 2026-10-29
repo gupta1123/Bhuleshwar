@@ -151,6 +151,8 @@ function prepare(document, options = {}) {
       ? options.savedReview
       : {
           sourceReferenceApproved: true,
+          // GST TDS is off by default; these fixtures model the reviewer ticking it.
+          applyGstTds: true,
           applyTds194q: Boolean(document.extracted_fields.tds194qAmount) &&
             options.accountingSettings?.purchaseGoodsTdsEnabled !== false,
           tds194qRounding: "paise",
@@ -673,6 +675,23 @@ test("qualifying Maharashtra MS Scrap automatically deducts 1% CGST and 1% SGST 
     entry.kind === "cgst_tds" && entry.taxableBasis === "300000.00" && entry.amount === "3000.00"
   ));
   assert.equal(result.blockers.length, 0);
+});
+
+test("GST TDS is off by default even for qualifying MS Scrap until the reviewer ticks it", () => {
+  const document = invoiceDocument({
+    totalAmount: "354000.00",
+    taxAmount: "54000.00",
+    tdsAmount: "",
+    lines: [{ description: "MS Scrap", hsnSac: "72044900", quantity: "10", unit: "MT", rate: "30000.00", taxableAmount: "300000.00", taxAmount: "54000.00" }],
+  });
+  delete document.extracted_fields.cgstTdsAmount;
+  delete document.extracted_fields.sgstTdsAmount;
+  const result = prepare(document, {
+    savedReview: { sourceReferenceApproved: true },
+    accountingSettings: { purchaseGoodsTdsEnabled: false, transporterTdsEnabled: false, gstTdsEnabled: true },
+  });
+  assert.equal(result.review.applyGstTds, false);
+  assert.ok(!result.tallyPayload.withholdings.some((entry) => /gst_tds|cgst_tds|sgst_tds|igst_tds/.test(entry.kind)));
 });
 
 test("qualifying interstate MS Scrap automatically deducts 2% IGST TDS", () => {
@@ -1426,7 +1445,7 @@ test("linked E-Way date enables automatic intrastate GST TDS for qualifying scra
     documents: [invoice, eway],
     masters: completeMasters,
     mappings: [],
-    savedReview: { sourceReferenceApproved: true },
+    savedReview: { sourceReferenceApproved: true, applyGstTds: true },
     caseStatus: "accepted",
     connectionReady: true,
     masterDataReady: true,
@@ -1476,6 +1495,7 @@ test("supplier invoice total stays separate from the post-TDS payable", () => {
   const result = prepare(document, {
     savedReview: {
       sourceReferenceApproved: true,
+      applyGstTds: true,
       applyTds194q: true,
       tds194qRate: "0.1",
       tds194qRounding: "nearest_rupee",

@@ -1416,7 +1416,8 @@ function buildDefaultReview(
     tds194qRounding: "nearest_rupee",
     // Pre-ticked when the invoice has freight; the reviewer can untick it.
     applyTransportTds: invoiceHasTransportTds || hasPositiveInvoiceAmount(source.invoiceFreightAmount),
-    applyGstTds: invoiceHasGstTds || qualifiesForAutomaticScrapGstTds,
+    // Off by default, even for scrap; it is only pre-ticked when the invoice itself shows GST TDS.
+    applyGstTds: invoiceHasGstTds,
     transportTdsLedgerName:
       mappedRoleName(masters, mappings, "tds_ledger", ["transport", "goods_transport"], ["ledger", "tax_ledger"]) ||
       exactMasterName(masters, "Tds on Goods Transport", ["ledger", "tax_ledger"]) ||

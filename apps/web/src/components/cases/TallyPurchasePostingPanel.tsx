@@ -2482,6 +2482,12 @@ export function TallyPurchasePostingPanel({
                   ["From", [review.ewayBill.fromPlace, review.ewayBill.fromPincode].filter(Boolean).join(" ") || "—", false],
                   ["Vehicle", review.ewayBill.vehicleNumber || review.vehicleNumber || "—", false],
                   ["Distance", review.ewayBill.distanceKm ? `${review.ewayBill.distanceKm} km · ${review.ewayBill.transportMode.replace(/^\d+\s*-\s*/, "")}` : "—", false],
+                  ["Consignor", review.ewayBill.consignorName || "—", false],
+                  ["Consignee", review.ewayBill.consigneeName || "—", false],
+                  ["Transporter", review.ewayBill.transporterName || "—", false],
+                  ["Transporter ID", review.ewayBill.transporterId || "—", false],
+                  ["LR no. / date", [review.ewayBill.documentNumber, review.ewayBill.documentDate ? formatShortDate(review.ewayBill.documentDate) : ""].filter(Boolean).join(" · ") || "—", false],
+                  ["Vehicle type", review.ewayBill.vehicleType || "—", false],
                 ] as const).map(([label, value, strong]) => (
                   <div key={label}>
                     <div className="text-[8px] font-semibold uppercase tracking-[0.12em] text-slate-400">{label}</div>
@@ -2503,6 +2509,19 @@ export function TallyPurchasePostingPanel({
                     ["vehicleNumber", "Vehicle", "text"],
                     ["distanceKm", "Distance (km)", "text"],
                     ["transportMode", "Mode", "text"],
+                    ["consignorName", "Consignor name", "text"],
+                    ["consignorGstin", "Consignor GSTIN", "text"],
+                    ["fromAddress", "From address", "text"],
+                    ["consigneeName", "Consignee name", "text"],
+                    ["consigneeGstin", "Consignee GSTIN", "text"],
+                    ["toPlace", "To place", "text"],
+                    ["toPincode", "To PIN", "text"],
+                    ["toState", "To state", "text"],
+                    ["transporterName", "Transporter name", "text"],
+                    ["transporterId", "Transporter ID", "text"],
+                    ["documentNumber", "LR / document no.", "text"],
+                    ["documentDate", "LR / document date", "date"],
+                    ["vehicleType", "Vehicle type", "text"],
                   ] as const).map(([key, label, type]) => (
                     <Field
                       compact
@@ -2511,7 +2530,7 @@ export function TallyPurchasePostingPanel({
                       label={label}
                       onChange={(value) => updateReview("ewayBill", { ...review.ewayBill!, [key]: value })}
                       type={type}
-                      value={review.ewayBill![key]}
+                      value={review.ewayBill![key] ?? ""}
                     />
                   ))}
                 </div>

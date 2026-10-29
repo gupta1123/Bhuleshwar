@@ -42,6 +42,15 @@ export type TallyPostingEwayBill = {
   transportMode: string;
   vehicleNumber: string;
   distanceKm: string;
+  consignorName: string;
+  consignorGstin: string;
+  consigneeName: string;
+  consigneeGstin: string;
+  transporterName: string;
+  transporterId: string;
+  documentNumber: string;
+  documentDate: string;
+  vehicleType: string;
 };
 
 export type TallyPostingReview = {

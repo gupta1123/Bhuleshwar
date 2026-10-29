@@ -1391,7 +1391,9 @@ test("purchase vouchers record the supplier e-way bill as reference, like the cl
   assert.match(withParties, /<TRANSPORTERNAME>Patil Roadlines<\/TRANSPORTERNAME><DOCUMENTNUMBER>LR\/7731<\/DOCUMENTNUMBER><VEHICLENUMBER>MH21X7266/);
   const withTransport = buildPurchaseVoucherXml({ ...payload, ewayBill: { ...payload.ewayBill, transporterName: "Kedar Transport Co", documentNumber: "LR/4417",
     documentDate: "2026-10-25", transporterId: "27AAAPK3321F1ZB", vehicleType: "Regular" } }, payload.companyName);
-  assert.doesNotMatch(withTransport, /<TRANSPORTERID>|<VEHICLETYPE>|<DOCUMENTDATE>/);
+  assert.match(withTransport, /<TRANSPORTERNAME>Kedar Transport Co<\/TRANSPORTERNAME><TRANSPORTERID>27AAAPK3321F1ZB<\/TRANSPORTERID><DOCUMENTNUMBER>LR\/4417<\/DOCUMENTNUMBER>/);
+  assert.match(withTransport, /<DOCUMENTDATE>20261025<\/DOCUMENTDATE>/);
+  assert.match(withTransport, /<VEHICLETYPE>Regular<\/VEHICLETYPE>/);
   // No e-way bill, or an invalid number: the voucher is exactly as before.
   assert.doesNotMatch(buildPurchaseVoucherXml({ ...payload, ewayBill: undefined }, payload.companyName), /EWAYBILL/);
   assert.doesNotMatch(buildPurchaseVoucherXml({ ...payload, ewayBill: { ...payload.ewayBill, number: "12345" } }, payload.companyName), /EWAYBILL/);

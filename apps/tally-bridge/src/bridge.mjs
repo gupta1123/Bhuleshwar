@@ -1450,9 +1450,11 @@ function buildPurchaseEwayBillXml(ewayBill) {
     "<TRANSPORTDETAILS.LIST>",
     `<TRANSPORTMODE>${value(ewayBill.transportMode || "1 - Road")}</TRANSPORTMODE>`,
     ewayBill.transporterName ? `<TRANSPORTERNAME>${value(ewayBill.transporterName)}</TRANSPORTERNAME>` : "",
-    // Transporter ID, vehicle type and LR date are held back: vouchers carrying them vanished from Tally after import.
+    ewayBill.transporterId ? `<TRANSPORTERID>${value(ewayBill.transporterId)}</TRANSPORTERID>` : "",
     ewayBill.documentNumber ? `<DOCUMENTNUMBER>${value(ewayBill.documentNumber)}</DOCUMENTNUMBER>` : "",
     ewayBill.vehicleNumber ? `<VEHICLENUMBER>${value(ewayBill.vehicleNumber)}</VEHICLENUMBER>` : "",
+    /^\d{4}-\d{2}-\d{2}/.test(String(ewayBill.documentDate || "")) ? `<DOCUMENTDATE>${toIsoLikeDate(ewayBill.documentDate)}</DOCUMENTDATE>` : "",
+    ewayBill.vehicleType ? `<VEHICLETYPE>${value(ewayBill.vehicleType)}</VEHICLETYPE>` : "",
     distance ? `<DISTANCE>${distance}</DISTANCE>` : "",
     "</TRANSPORTDETAILS.LIST>",
     "</EWAYBILLDETAILS.LIST>",

@@ -1678,6 +1678,28 @@ test("the case's e-way bill page is read for the voucher and only sent when vali
   assert.equal(off.tallyPayload.ewayBill, undefined);
 });
 
+test("e-way addresses fall back to the page's From/To text and blank saved values never override", () => {
+  const invoice = invoiceDocument();
+  const eway = {
+    id: "eway-2", document_type: "E-Way Bill", source_file_name: "invoice.pdf", source_hint: "invoice.pdf", title: "E-Way Bill",
+    extracted_fields: { eWayBillNumber: "261012771905", vehicleNumber: "MH31CQ5508", supplierGstin: "27AAKCS5521M1ZP", buyerGstin: "27AAFCS4417K1ZQ" },
+    markdown: "E-Way Bill No. 261012771905 From GSTIN 27AAKCS5521M1ZP From Shree Metals & Alloys, MIDC Hingna, Nagpur - 440016 To GSTIN 27AAFCS4417K1ZQ To Solution Nyx, Plot 14, MIDC Bhosari, Pune - 411026 Document No. SMA/26-27/1180 Vehicle No. MH31CQ5508",
+  };
+  const result = preparePurchasePosting({
+    documents: [invoice, eway], masters: completeMasters, mappings: [],
+    savedReview: { sourceReferenceApproved: true, ewayBill: { fromPlace: "", toPincode: "" } },
+    caseStatus: "accepted", connectionReady: true, companyName: "Test Company",
+    companyGstin: invoice.extracted_fields.buyerGstin, sourceDocumentReference: "https://app.example/x",
+    duplicateExists: false, accountingSettings: { purchaseGoodsTdsEnabled: true, transporterTdsEnabled: true, gstTdsEnabled: true },
+  });
+  const eb = result.review.ewayBill;
+  assert.equal(eb.fromPlace, "Nagpur");
+  assert.equal(eb.fromPincode, "440016");
+  assert.equal(eb.fromState, "Maharashtra");
+  assert.equal(eb.toPincode, "411026");
+  assert.equal(eb.toState, "Maharashtra");
+});
+
 test("a missing godown blocks with a suggestion only when the company has several godowns", () => {
   const document = invoiceDocument({
     totalAmount: "2360.00",

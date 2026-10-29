@@ -941,6 +941,21 @@ function stateInText(value: string) {
   return STATE_NAMES.find((state) => compact.includes(state.toLowerCase().replace(/[^a-z]/g, ""))) ?? "";
 }
 
+// First two digits of a GSTIN -> state name, for e-way bills whose address text names no state.
+const GST_STATE_BY_CODE: Record<string, string> = {
+  "01": "Jammu and Kashmir", "02": "Himachal Pradesh", "03": "Punjab", "04": "Chandigarh", "05": "Uttarakhand",
+  "06": "Haryana", "07": "Delhi", "08": "Rajasthan", "09": "Uttar Pradesh", "10": "Bihar", "11": "Sikkim",
+  "12": "Arunachal Pradesh", "13": "Nagaland", "14": "Manipur", "15": "Mizoram", "16": "Tripura",
+  "17": "Meghalaya", "18": "Assam", "19": "West Bengal", "20": "Jharkhand", "21": "Odisha", "22": "Chhattisgarh",
+  "23": "Madhya Pradesh", "24": "Gujarat", "26": "Dadra and Nagar Haveli and Daman and Diu", "27": "Maharashtra",
+  "29": "Karnataka", "30": "Goa", "31": "Lakshadweep", "32": "Kerala", "33": "Tamil Nadu", "34": "Puducherry",
+  "35": "Andaman and Nicobar Islands", "36": "Telangana", "37": "Andhra Pradesh", "38": "Ladakh",
+};
+
+function stateNameFromGstin(value: unknown) {
+  return GST_STATE_BY_CODE[normalizeGstin(value).slice(0, 2)] ?? "";
+}
+
 // "PLOT NO 22, MIDC AREA HINGNA ROAD, NAGPUR, NAGPUR,MAHARASHTRA-440016"
 // -> place NAGPUR, PIN 440016, state Maharashtra.
 function splitEwayAddress(address: string) {
@@ -971,8 +986,16 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
   const number = text(fields.eWayBillNumber || fields.ewayBillNumber).replace(/\D/g, "") ||
     (pageText.match(/e-?way\s*bill\s*no\.?\s*:?\s*([\d ]{12,16})/i)?.[1] ?? "").replace(/\D/g, "");
   if (!number) return null;
-  const from = splitEwayAddress(text(fields.dispatchFrom));
-  const to = splitEwayAddress(text(fields.shipTo));
+  // Fall back to the page's From / To addresses when they were not extracted as
+  // dispatch/ship-to fields. The visible text can be one run-on line, so each
+  // address ends at the next heading.
+  const pageFromAddress = pageText.match(/\bFrom\s+(?!GSTIN\b)(.{8,200}?)\s+To\s+(?:GSTIN\b|\S)/i)?.[1]?.trim() ?? "";
+  const pageToAddress =
+    pageText.match(/\bTo\s+(?!GSTIN\b)(.{8,200}?)\s+(?:Document\s+No|Vehicle|Valid|Transport|Item|Mode)\b/i)?.[1]?.trim() ?? "";
+  const dispatchFrom = text(fields.dispatchFrom) || pageFromAddress;
+  const shipTo = text(fields.shipTo) || pageToAddress;
+  const from = splitEwayAddress(dispatchFrom);
+  const to = splitEwayAddress(shipTo);
   const distance =
     text(fields.distanceKm || fields.distance || fields.approxDistance).match(/\b(\d{1,4})\b/)?.[1] ??
     pageText.match(/\b(?:approx(?:imate)?\.?\s*)?distance(?:\s*\(\s*in\s*km\s*\))?[^\d\n]{0,20}(\d{1,4})(?:\s*km)?\b/i)?.[1] ??
@@ -988,13 +1011,13 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
     record: true,
     number,
     date: parseDate(text(fields.documentDate).split(/\s+/)[0]) || "",
-    fromAddress: text(fields.dispatchFrom),
-    fromPlace: from.place,
+    fromAddress: dispatchFrom,
+    fromPlace: from.place || text(lorryFields.routeFrom),
     fromPincode: from.pincode,
-    fromState: from.state || stateInText(text(fields.dispatchFrom)),
+    fromState: from.state || stateInText(dispatchFrom) || stateNameFromGstin(fields.supplierGstin),
     toPlace: to.place,
     toPincode: to.pincode,
-    toState: to.state || stateInText(text(fields.shipTo)),
+    toState: to.state || stateInText(shipTo) || stateNameFromGstin(fields.buyerGstin),
     transportMode: modeCode,
     vehicleNumber: text(fields.vehicleNumber).replace(/\s+/g, "").toUpperCase(),
     distanceKm: distance,
@@ -1415,7 +1438,11 @@ function buildDefaultReview(
     ...(saved ?? {}),
     // Reviewer edits override the extracted e-way bill field by field.
     ewayBill: baseReview.ewayBill || saved?.ewayBill
-      ? { ...(baseReview.ewayBill ?? emptyEwayBill()), ...(saved?.ewayBill ?? {}) }
+      ? {
+        ...(baseReview.ewayBill ?? emptyEwayBill()),
+        // An older save holds blanks for fields extracted since; blanks never override.
+        ...Object.fromEntries(Object.entries(saved?.ewayBill ?? {}).filter(([, value]) => value !== "")),
+      }
       : null,
     lines,
     invoiceDate: parseDate(saved?.invoiceDate) || baseReview.invoiceDate,

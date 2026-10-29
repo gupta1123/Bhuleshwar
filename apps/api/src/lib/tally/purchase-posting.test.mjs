@@ -1666,7 +1666,8 @@ test("the case's e-way bill page is read for the voucher and only sent when vali
     { record: true, number: "262264097358", date: "2026-08-12", fromAddress: undefined, fromPlace: "NAGPUR", fromPincode: "440016",
       fromState: "Maharashtra", toPlace: "JALNA", toPincode: "431203", toState: "Maharashtra", transportMode: "1 - Road",
       vehicleNumber: "MH21X7266", distanceKm: "437",
-      consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "" }
+      consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "",
+      documentDate: "", transporterId: "", vehicleType: "" }
   );
   assert.equal(result.tallyPayload.ewayBill.number, "262264097358");
 
@@ -1698,6 +1699,28 @@ test("e-way addresses fall back to the page's From/To text and blank saved value
   assert.equal(eb.fromState, "Maharashtra");
   assert.equal(eb.toPincode, "411026");
   assert.equal(eb.toState, "Maharashtra");
+});
+
+test("the e-way page's generated date, transporter ID, vehicle type and LR date are read", () => {
+  const invoice = invoiceDocument();
+  const eway = {
+    id: "eway-3", document_type: "E-Way Bill", source_file_name: "invoice.pdf", source_hint: "invoice.pdf", title: "E-Way Bill",
+    extracted_fields: { eWayBillNumber: "261026550731", vehicleNumber: "MH31DK4821" },
+    markdown: "E-Way Bill No. 261026550731 Generated 26-Oct-2026 Supply type Outward - Supply Document type Tax Invoice Document No. VIR/26-27/0642 Document date 24-Oct-2026 From GSTIN 27AAEFV7421L1ZT From Vidarbha Iron Resources, MIDC Hingna, Nagpur - 440016 To GSTIN 27AAFCS4417K1ZQ To Solution Nyx, Plot 14, MIDC Bhosari, Pune - 411026 Mode of transport Road Distance 815 km Transporter Name Kedar Transport Co Transporter ID 27AAAPK3321F1ZB Transport Doc No. LR/4417 Transport Doc Date 25-Oct-2026 Vehicle No. MH31DK4821 Vehicle Type Regular Valid until 29-Oct-2026",
+  };
+  const result = preparePurchasePosting({
+    documents: [invoice, eway], masters: completeMasters, mappings: [], savedReview: { sourceReferenceApproved: true },
+    caseStatus: "accepted", connectionReady: true, companyName: "Test Company",
+    companyGstin: invoice.extracted_fields.buyerGstin, sourceDocumentReference: "https://app.example/x",
+    duplicateExists: false, accountingSettings: { purchaseGoodsTdsEnabled: true, transporterTdsEnabled: true, gstTdsEnabled: true },
+  });
+  const eb = result.review.ewayBill;
+  assert.equal(eb.date, "2026-10-26");
+  assert.equal(eb.documentDate, "2026-10-25");
+  assert.equal(eb.transporterId, "27AAAPK3321F1ZB");
+  assert.equal(eb.vehicleType, "Regular");
+  assert.equal(eb.distanceKm, "815");
+  assert.equal(result.tallyPayload.ewayBill.number, "261026550731");
 });
 
 test("a missing godown blocks with a suggestion only when the company has several godowns", () => {

@@ -159,6 +159,9 @@ export type PurchaseEwayBill = {
   transporterName: string;
   // Lorry receipt number, shown as Doc/Lading/RR No.
   documentNumber: string;
+  documentDate: string;
+  transporterId: string;
+  vehicleType: string;
 };
 
 type PurchasePostingSourceLine = PurchasePostingReviewLine & {
@@ -969,7 +972,7 @@ function splitEwayAddress(address: string) {
 function emptyEwayBill(): PurchaseEwayBill {
   return { record: false, number: "", date: "", fromAddress: "", fromPlace: "", fromPincode: "", fromState: "",
     toPlace: "", toPincode: "", toState: "", transportMode: "1 - Road", vehicleNumber: "", distanceKm: "",
-    consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "" };
+    consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "", documentDate: "", transporterId: "", vehicleType: "" };
 }
 
 // The supplier's e-way bill page for this invoice: its number, date, dispatch
@@ -1004,13 +1007,20 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
     pageText.match(/\b(?:mode(?:\s+of\s+transport)?|transport\s+mode)[^a-z\n]{0,20}(road|rail|air|ship)\b/i)?.[1]?.toLowerCase() ??
     "road";
   const modeCode = { road: "1 - Road", rail: "2 - Rail", air: "3 - Air", ship: "4 - Ship" }[mode] ?? "1 - Road";
+  const dateToken = String.raw`(\d{1,2}[-/. ](?:[A-Za-z]{3,9}|\d{1,2})[-/. ]\d{2,4})`;
+  const pageDate = (label: string) => parseDate(pageText.match(new RegExp(label + String.raw`\s*:?\s*` + dateToken, "i"))?.[1] ?? "");
+  const vehicleTypeText = pageText.match(/\bVehicle\s*Type\s*:?\s*(Over\s*Dimensional(?:\s*Cargo)?|ODC|Regular)\b/i)?.[1] ?? "";
   // Transporter and LR number come from the e-way bill, else from the packet's lorry receipt.
   const lorryReceipt = documents.find((candidate) => /lorry\s*receipt/i.test(candidate.document_type));
   const lorryFields = lorryReceipt ? fieldsOf(lorryReceipt) : {};
   return {
     record: true,
     number,
-    date: parseDate(text(fields.documentDate).split(/\s+/)[0]) || "",
+    date:
+      parseDate(text(fields.documentDate).split(/\s+/)[0]) ||
+      pageDate(String.raw`Generated(?:\s+on)?`) ||
+      pageDate(String.raw`E-?way\s*bill\s*date`) ||
+      pageDate(String.raw`Document\s*date`),
     fromAddress: dispatchFrom,
     fromPlace: from.place || text(lorryFields.routeFrom),
     fromPincode: from.pincode,
@@ -1027,6 +1037,9 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
     consigneeGstin: normalizeGstin(fields.buyerGstin),
     transporterName: text(fields.transporterName || lorryFields.transporterName),
     documentNumber: text(fields.lorryReceiptNumber || lorryFields.lorryReceiptNumber),
+    documentDate: pageDate(String.raw`Transport\s*Doc(?:ument)?\s*Date`),
+    transporterId: normalizeGstin(fields.transporterId) || normalizeGstin(pageText.match(/\bTransporter\s*ID\s*:?\s*([0-9A-Z]{15})\b/i)?.[1]),
+    vehicleType: /^(over|odc)/i.test(vehicleTypeText) ? "Over Dimensional Cargo" : vehicleTypeText ? "Regular" : "",
   };
 }
 

@@ -1743,6 +1743,32 @@ test("the e-way page's generated date, transporter ID, vehicle type and LR date 
   assert.equal(result.tallyPayload.ewayBill.number, "261026550731");
 });
 
+test("Party Details are filled from the weighment slip, lorry receipt and purchase order", () => {
+  const invoice = invoiceDocument();
+  const doc = (id, type, extracted_fields) => ({ id, document_type: type, source_file_name: "invoice.pdf", source_hint: "invoice.pdf", title: type, extracted_fields, markdown: "" });
+  const result = preparePurchasePosting({
+    documents: [
+      invoice,
+      doc("w1", "Weighment Slip", { weighmentNumber: "WS-90114", vehicleNumber: "MH31DK4821" }),
+      doc("l1", "Lorry Receipt", { transporterName: "Kedar Transport Co", routeTo: "Pune", lorryReceiptNumber: "LR/4417", documentDate: "2026-10-25" }),
+      doc("p1", "Purchase Order", { poNumber: "BPO/26-27/0221", paymentTerms: "30 days from invoice", freightTerms: "Freight paid by buyer" }),
+    ],
+    masters: completeMasters, mappings: [], savedReview: { sourceReferenceApproved: true },
+    caseStatus: "accepted", connectionReady: true, companyName: "Test Company",
+    companyGstin: invoice.extracted_fields.buyerGstin, sourceDocumentReference: "https://app.example/x",
+    duplicateExists: false, accountingSettings: { purchaseGoodsTdsEnabled: true, transporterTdsEnabled: true, gstTdsEnabled: false },
+  });
+  const party = result.tallyPayload.partyDetails;
+  assert.equal(party.receiptDocNo, "WS-90114");
+  assert.equal(party.dispatchedThrough, "Kedar Transport Co");
+  assert.equal(party.destination, "Pune");
+  assert.equal(party.lrNumber, "LR/4417");
+  assert.equal(party.lrDate, "2026-10-25");
+  assert.equal(party.paymentTerms, "30 days from invoice");
+  assert.equal(party.otherReferences, "BPO/26-27/0221");
+  assert.equal(party.termsOfDelivery, "Freight paid by buyer");
+});
+
 test("the GST portal's e-way layout gives the distance from the [60Kms] validity note", () => {
   const invoice = invoiceDocument();
   const eway = {

@@ -1394,6 +1394,12 @@ test("purchase vouchers record the supplier e-way bill as reference, like the cl
   assert.match(withTransport, /<TRANSPORTERNAME>Kedar Transport Co<\/TRANSPORTERNAME><TRANSPORTERID>27AAAPK3321F1ZB<\/TRANSPORTERID><DOCUMENTNUMBER>LR\/4417<\/DOCUMENTNUMBER>/);
   assert.match(withTransport, /<DOCUMENTDATE>20261025<\/DOCUMENTDATE>/);
   assert.match(withTransport, /<VEHICLETYPE>Regular<\/VEHICLETYPE>/);
+  const withParty = buildPurchaseVoucherXml({ ...payload, partyDetails: { receiptDocNo: "WS-90114", dispatchedThrough: "Kedar Transport Co", destination: "Pune",
+    lrNumber: "LR/4417", lrDate: "2026-10-25", motorVehicleNo: "MH31DK4821", paymentTerms: "30 days from invoice", otherReferences: "BPO/26-27/0221", termsOfDelivery: "To-Pay" } }, payload.companyName);
+  assert.match(withParty, /<BASICSHIPDOCUMENTNO>WS-90114<\/BASICSHIPDOCUMENTNO><BASICSHIPPEDBY>Kedar Transport Co<\/BASICSHIPPEDBY><BASICFINALDESTINATION>Pune<\/BASICFINALDESTINATION>/);
+  assert.match(withParty, /<BILLOFLADINGNO>LR\/4417<\/BILLOFLADINGNO><BILLOFLADINGDATE>20261025<\/BILLOFLADINGDATE><BASICSHIPVESSELNO>MH31DK4821<\/BASICSHIPVESSELNO>/);
+  assert.match(withParty, /<BASICDUEDATEOFPYMT>30 days from invoice<\/BASICDUEDATEOFPYMT><BASICORDERREF>BPO\/26-27\/0221<\/BASICORDERREF><BASICORDERTERMS>To-Pay<\/BASICORDERTERMS>/);
+  assert.doesNotMatch(buildPurchaseVoucherXml(payload, payload.companyName), /BASICSHIPPEDBY|BILLOFLADING/);
   // No e-way bill, or an invalid number: the voucher is exactly as before.
   assert.doesNotMatch(buildPurchaseVoucherXml({ ...payload, ewayBill: undefined }, payload.companyName), /EWAYBILL/);
   assert.doesNotMatch(buildPurchaseVoucherXml({ ...payload, ewayBill: { ...payload.ewayBill, number: "12345" } }, payload.companyName), /EWAYBILL/);

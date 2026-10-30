@@ -975,6 +975,47 @@ function emptyEwayBill(): PurchaseEwayBill {
     consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "", documentDate: "", transporterId: "", vehicleType: "" };
 }
 
+// Tally's "Party Details" screen (Receipt Details and Order Details) on the
+// purchase voucher, filled from the packet's weighment slip, lorry receipt and
+// purchase order. Empty values are dropped so nothing is overwritten with blanks.
+export type PurchasePartyDetails = {
+  receiptDocNo?: string;
+  dispatchedThrough?: string;
+  destination?: string;
+  lrNumber?: string;
+  lrDate?: string;
+  motorVehicleNo?: string;
+  paymentTerms?: string;
+  otherReferences?: string;
+  termsOfDelivery?: string;
+};
+
+function packetPartyDetails(
+  documents: PurchasePostingDocumentInput[],
+  context: { vehicleNumber: string; ewayBill: PurchaseEwayBill | null; invoiceFields: Record<string, unknown> }
+): PurchasePartyDetails | null {
+  const first = (pattern: RegExp) => {
+    const document = documents.find((candidate) => pattern.test(candidate.document_type));
+    return document ? fieldsOf(document) : {};
+  };
+  const weighment = first(/weigh(?:ment|bridge)/i);
+  const lorry = first(/lorry\s*receipt/i);
+  const order = first(/purchase\s*order/i);
+  const details: PurchasePartyDetails = {
+    receiptDocNo: text(weighment.weighmentNumber),
+    dispatchedThrough: text(lorry.transporterName) || context.ewayBill?.transporterName || "",
+    destination: text(lorry.routeTo) || context.ewayBill?.toPlace || "",
+    lrNumber: text(lorry.lorryReceiptNumber),
+    lrDate: parseDate(text(lorry.documentDate).split(/\s+/)[0]),
+    motorVehicleNo: context.vehicleNumber || context.ewayBill?.vehicleNumber || "",
+    paymentTerms: text(order.paymentTerms),
+    otherReferences: text(order.poNumber) || text(context.invoiceFields.referencePoNumber),
+    termsOfDelivery: text(order.freightTerms),
+  };
+  const filled = Object.fromEntries(Object.entries(details).filter(([, value]) => value));
+  return Object.keys(filled).length ? (filled as PurchasePartyDetails) : null;
+}
+
 // The supplier's e-way bill page for this invoice: its number, date, dispatch
 // place and transport details, recorded on the purchase voucher as reference.
 function packetEwayBill(invoiceFields: Record<string, unknown>, documents: PurchasePostingDocumentInput[]): PurchaseEwayBill | null {
@@ -2472,6 +2513,11 @@ export function preparePurchasePosting(params: {
     blockers.push(issue("DUPLICATE_INVOICE", "Possible duplicate invoice", "This supplier invoice has already been approved or sent to the selected Tally company.", "invoice"));
   }
 
+  const partyDetails = packetPartyDetails(params.documents, {
+    vehicleNumber: review.vehicleNumber,
+    ewayBill: review.ewayBill,
+    invoiceFields: fieldsOf(invoice),
+  });
   const tallyPayload = {
     companyName: params.companyName,
     voucherType: "Purchase",
@@ -2487,6 +2533,7 @@ export function preparePurchasePosting(params: {
     supplierGstin: review.supplierGstin,
     buyerGstin: review.buyerGstin,
     vehicleNumber: review.vehicleNumber,
+    ...(partyDetails ? { partyDetails } : {}),
     // Reference only: the connector records these with e-way bill
     // applicability left at No, as the client books purchases.
     ...(review.ewayBill?.record && /^\d{12}$/.test(review.ewayBill.number) && isValidIsoDate(review.ewayBill.date)

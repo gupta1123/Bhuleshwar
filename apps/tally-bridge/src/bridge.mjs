@@ -1490,6 +1490,25 @@ async function readCompanyAddress(tallyUrl, companyName) {
   return result;
 }
 
+// Tally's Party Details screen: Receipt Details and Order Details on the purchase voucher.
+function buildPurchasePartyDetailsXml(details) {
+  if (!details || typeof details !== "object") return "";
+  const clean = (input) => escapeXml(String(input ?? "").replace(/\s+/g, " ").trim());
+  const tag = (name, input) => (String(input ?? "").trim() ? `<${name}>${clean(input)}</${name}>` : "");
+  const lrDate = /^\d{4}-\d{2}-\d{2}/.test(String(details.lrDate || "")) ? toIsoLikeDate(details.lrDate) : "";
+  return [
+    tag("BASICSHIPDOCUMENTNO", details.receiptDocNo),
+    tag("BASICSHIPPEDBY", details.dispatchedThrough),
+    tag("BASICFINALDESTINATION", details.destination),
+    tag("BILLOFLADINGNO", details.lrNumber),
+    lrDate ? `<BILLOFLADINGDATE>${lrDate}</BILLOFLADINGDATE>` : "",
+    tag("BASICSHIPVESSELNO", details.motorVehicleNo),
+    tag("BASICDUEDATEOFPYMT", details.paymentTerms),
+    tag("BASICORDERREF", details.otherReferences),
+    tag("BASICORDERTERMS", details.termsOfDelivery),
+  ].join("");
+}
+
 function buildPurchaseVoucherXml(payload, fallbackCompanyName) {
   const companyName = String(payload?.companyName || fallbackCompanyName || "").trim();
   const voucherDate = toIsoLikeDate(payload?.voucherDate || payload?.supplierInvoiceDate);
@@ -1657,6 +1676,7 @@ function buildPurchaseVoucherXml(payload, fallbackCompanyName) {
     "<ISINVOICE>Yes</ISINVOICE>",
     "<ISOPTIONAL>No</ISOPTIONAL>",
     "<DIFFACTUALQTY>No</DIFFACTUALQTY>",
+    buildPurchasePartyDetailsXml(payload?.partyDetails),
     `<NARRATION>${escapeXml(narration)}</NARRATION>`,
     buildPurchaseEwayBillXml(payload?.ewayBill),
     // Tally's canonical Invoice Voucher XML puts the party allocation before

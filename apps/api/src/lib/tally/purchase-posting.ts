@@ -1002,6 +1002,8 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
   const distance =
     text(fields.distanceKm || fields.distance || fields.approxDistance).match(/\b(\d{1,4})\b/)?.[1] ??
     pageText.match(/\b(?:approx(?:imate)?\.?\s*)?distance(?:\s*\(\s*in\s*km\s*\))?[^\d\n]{0,20}(\d{1,4})(?:\s*km)?\b/i)?.[1] ??
+    // The GST portal prints the distance beside the validity, as "Valid From: ... [60Kms]".
+    pageText.match(/\[\s*(\d{1,4})\s*Kms?\s*\]/i)?.[1] ??
     "";
   const mode =
     pageText.match(/\b(?:mode(?:\s+of\s+transport)?|transport\s+mode)[^a-z\n]{0,20}(road|rail|air|ship)\b/i)?.[1]?.toLowerCase() ??
@@ -1039,7 +1041,8 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
     documentNumber: text(fields.lorryReceiptNumber || lorryFields.lorryReceiptNumber),
     documentDate: pageDate(String.raw`Transport\s*Doc(?:ument)?\s*Date`),
     transporterId: normalizeGstin(fields.transporterId) || normalizeGstin(pageText.match(/\bTransporter\s*ID\s*:?\s*([0-9A-Z]{15})\b/i)?.[1]),
-    vehicleType: /^(over|odc)/i.test(vehicleTypeText) ? "Over Dimensional Cargo" : vehicleTypeText ? "Regular" : "",
+    // The portal does not print a vehicle type; Tally's default for a road vehicle is Regular.
+    vehicleType: /^(over|odc)/i.test(vehicleTypeText) ? "Over Dimensional Cargo" : vehicleTypeText || fields.vehicleNumber ? "Regular" : "",
   };
 }
 

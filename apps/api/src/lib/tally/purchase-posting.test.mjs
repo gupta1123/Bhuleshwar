@@ -1687,7 +1687,7 @@ test("the case's e-way bill page is read for the voucher and only sent when vali
       fromState: "Maharashtra", toPlace: "JALNA", toPincode: "431203", toState: "Maharashtra", transportMode: "1 - Road",
       vehicleNumber: "MH21X7266", distanceKm: "437",
       consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "",
-      documentDate: "", transporterId: "", vehicleType: "" }
+      documentDate: "", transporterId: "", vehicleType: "Regular" }
   );
   assert.equal(result.tallyPayload.ewayBill.number, "262264097358");
 
@@ -1741,6 +1741,23 @@ test("the e-way page's generated date, transporter ID, vehicle type and LR date 
   assert.equal(eb.vehicleType, "Regular");
   assert.equal(eb.distanceKm, "815");
   assert.equal(result.tallyPayload.ewayBill.number, "261026550731");
+});
+
+test("the GST portal's e-way layout gives the distance from the [60Kms] validity note", () => {
+  const invoice = invoiceDocument();
+  const eway = {
+    id: "eway-4", document_type: "E-Way Bill", source_file_name: "invoice.pdf", source_hint: "invoice.pdf", title: "E-Way Bill",
+    extracted_fields: { eWayBillNumber: "390981366817", vehicleNumber: "MH14AT4751", transporterName: "Shree Ganesh Roadlines" },
+    markdown: "e-Way Bill E-Way Bill No: 3909 8136 6817 E-Way Bill Date: 26/10/2026 02:12 PM Valid From: 26/10/2026 02:12 PM [60Kms] Valid Until: 27/10/2026 Place of Dispatch Bhosari, Maharashtra-411026 Place of Delivery Pune, Maharashtra-411045 Transporter Shree Ganesh Roadlines Mode Road Vehicle / Trans Doc No & Dt. MH14AT4751",
+  };
+  const result = preparePurchasePosting({
+    documents: [invoice, eway], masters: completeMasters, mappings: [], savedReview: { sourceReferenceApproved: true },
+    caseStatus: "accepted", connectionReady: true, companyName: "Test Company",
+    companyGstin: invoice.extracted_fields.buyerGstin, sourceDocumentReference: "https://app.example/x",
+    duplicateExists: false, accountingSettings: { purchaseGoodsTdsEnabled: true, transporterTdsEnabled: true, gstTdsEnabled: false },
+  });
+  assert.equal(result.review.ewayBill.distanceKm, "60");
+  assert.equal(result.review.ewayBill.vehicleType, "Regular");
 });
 
 test("a missing godown blocks with a suggestion only when the company has several godowns", () => {

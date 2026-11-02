@@ -6,6 +6,7 @@ export function pagePermissions(path: string): string[] {
   if (/^\/tally-prime(?:\/|$)/.test(pathname)) return ['connections.manage'];
   if (/^\/workspace(?:\/|$)/.test(pathname)) return ['purchases.prepare'];
   if (/^\/cases(?:\/|$)/.test(pathname)) return ['purchases.view'];
+  if (/^\/gst(?:\/|$)/.test(pathname)) return ['purchases.view'];
   if (/^\/recycle-bin(?:\/|$)/.test(pathname)) return ['purchases.recycle'];
   if (/^\/bank-statements(?:\/|$)/.test(pathname)) return ['bank.view'];
   if (/^\/collections\/follow-ups(?:\/|$)/.test(pathname)) return ['followups.view'];

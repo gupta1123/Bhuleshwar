@@ -14,6 +14,7 @@ import {
   Settings,
   ChevronLeft,
   PlugZap,
+  Scale,
 } from "lucide-react";
 
 import styles from "./DashboardSidebar.module.css";
@@ -50,6 +51,13 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
     items: [
       { href: "/workspace", label: "Add Case", icon: FileStack },
       { href: "/cases", label: "All Cases", icon: FolderOpen },
+    ],
+  },
+  {
+    id: "gst",
+    title: "GST",
+    items: [
+      { href: "/gst", label: "GST Reconciliation", icon: Scale },
     ],
   },
   {

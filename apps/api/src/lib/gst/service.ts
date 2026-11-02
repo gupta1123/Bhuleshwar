@@ -21,7 +21,7 @@ export function sandboxClientFromEnv() {
   return createSandboxClient({ baseUrl: SANDBOX_BASE_URL, apiKey: SANDBOX_API_KEY, apiSecret: SANDBOX_API_SECRET, apiVersion: SANDBOX_API_VERSION });
 }
 
-async function loadConnection(db: Db, scope: GstScope) {
+export async function loadConnection(db: Db, scope: GstScope) {
   const { data, error } = await db.from('gst_connections').select('*')
     .eq('organization_id', scope.organizationId).eq('company_key', scope.companyKey)
     .order('updated_at', { ascending: false }).limit(1).maybeSingle();
@@ -29,7 +29,7 @@ async function loadConnection(db: Db, scope: GstScope) {
   return data;
 }
 
-async function loadPolicy(db: Db, scope: GstScope): Promise<PullPolicy> {
+export async function loadPolicy(db: Db, scope: GstScope): Promise<PullPolicy> {
   const { data } = await db.from('gst_recon_settings').select('daily_call_cap,min_refresh_minutes')
     .eq('organization_id', scope.organizationId).eq('company_key', scope.companyKey).maybeSingle();
   return data ? { dailyCap: data.daily_call_cap, minRefreshMinutes: data.min_refresh_minutes } : DEFAULT_PULL_POLICY;
@@ -107,7 +107,7 @@ export async function pullGstReturn(scope: GstScope, input: { returnType: GstRet
 }
 
 // One shared Sandbox token for every client, cached so OTP calls do not re-authenticate.
-async function platformToken(db: Db) {
+export async function platformToken(db: Db) {
   const client = sandboxClientFromEnv();
   const { data } = await db.from('gst_platform_tokens').select('access_token_enc,expires_at').eq('id', 1).maybeSingle();
   if (data && Date.parse(data.expires_at) - Date.now() > 10 * 60_000) return decryptSecret(data.access_token_enc);

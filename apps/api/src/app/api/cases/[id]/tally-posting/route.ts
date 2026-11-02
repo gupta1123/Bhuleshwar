@@ -1,6 +1,7 @@
 import { withTeamAccess } from '@/lib/access/route-boundary';
 import { requireResourceAccess } from '@/lib/access/resources';
 import { AccessError } from '@/lib/access/server';
+import { readCompanyMappings } from "@/lib/tally/company-mappings";
 import {accessFailureResponse} from '@/lib/access/failures';
 import { listAccessPredicate } from '@/lib/access/list-scope';
 import { purchaseFinancialDigest } from '@/lib/access/purchase-digest';
@@ -620,15 +621,7 @@ async function loadContext(
     connectionPredicate = ids.length ? `id.in.(${ids.map(id => JSON.stringify(id)).join(',')})` : 'id.is.null';
   }
   const loadMappings = options.loadMappings !== false;
-  const earlyMappingsResultPromise = loadMappings && requestedConnectionId && requestedCompanyName
-    ? supabase
-        .from("tally_mapping_settings")
-        .select("mapping_type, source_key, target_master_type, target_master_key, target_master_name, status")
-        .eq("connection_id", requestedConnectionId)
-        .ilike("company_name", requestedCompanyName)
-        .eq("status", "active")
-    : Promise.resolve({ data: [], error: null });
-  const [caseResult, purchaseAccountingSettings, documentsResult, filesResult, connectionsResult, postingResult, earlyMappingsResult] = await Promise.all([
+  const [caseResult, purchaseAccountingSettings, documentsResult, filesResult, connectionsResult, postingResult] = await Promise.all([
     supabase
       .from("packet_cases")
       .select("id, status, owner_user_id")
@@ -662,7 +655,6 @@ async function loadContext(
       .eq("case_id", caseId)
       .or(team ? 'id.not.is.null' : `owner_user_id.eq.${JSON.stringify(ownerUserId)}`)
       .maybeSingle(),
-    earlyMappingsResultPromise,
   ]);
 
   if (caseResult.error) throw caseResult.error;
@@ -671,7 +663,6 @@ async function loadContext(
   if (filesResult.error) throw filesResult.error;
   if (connectionsResult.error) throw connectionsResult.error;
   if (postingResult.error) throw postingResult.error;
-  if (earlyMappingsResult.error) throw earlyMappingsResult.error;
 
   const caseRow = caseResult.data;
   const documents = (documentsResult.data ?? []) as PurchasePostingDocumentInput[];
@@ -786,21 +777,13 @@ async function loadContext(
     }
 
     if (loadMappings) {
-      const canUseEarlyMappings =
-        connection.id === requestedConnectionId &&
-        normalizeCompanyName(companyName) === normalizeCompanyName(requestedCompanyName);
-      if (canUseEarlyMappings) {
-        mappings = (earlyMappingsResult.data ?? []) as PurchasePostingMappingInput[];
-      } else {
-        const mappingsResult = await supabase
-          .from("tally_mapping_settings")
-          .select("mapping_type, source_key, target_master_type, target_master_key, target_master_name, status")
-          .eq("connection_id", connection.id)
-          .ilike("company_name", companyName)
-          .eq("status", "active");
-        if (mappingsResult.error) throw mappingsResult.error;
-        mappings = (mappingsResult.data ?? []) as PurchasePostingMappingInput[];
-      }
+      // Saved choices belong to the company, not to one connector pairing: a re-pair
+      // creates a new connection and must not lose them.
+      const mappingScope = team && team.scope.company_id
+        ? { organizationId: team.access.organizationId, companyId: team.scope.company_id } : undefined;
+      mappings = (await readCompanyMappings(supabase, {
+        connectionId: connection.id, companyName, ownerUserId, scope: mappingScope,
+      })) as PurchasePostingMappingInput[];
     }
   }
 

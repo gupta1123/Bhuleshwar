@@ -1474,7 +1474,7 @@ export default function SettingsPage() {
                       Accounting integrity checks—balanced totals, valid dates, and required posting ledgers—always block and cannot be disabled.
                     </p>
                   </section>
-                  <PurchasePostingDefaultsSettings />
+                  <PurchasePostingDefaultsSettings deductions={purchaseAccountingSettings} />
                 </main>
               ) : null}
             </div>

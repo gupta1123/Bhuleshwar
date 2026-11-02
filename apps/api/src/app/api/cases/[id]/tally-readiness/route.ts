@@ -1,3 +1,4 @@
+import { readCompanyMappings } from "@/lib/tally/company-mappings";
 import { withTeamAccess } from '@/lib/access/route-boundary';
 import { jsonWithCors, optionsWithCors } from "@/lib/api/cors";
 import { requireRequestUser } from "@/lib/api/request-auth";
@@ -214,15 +215,10 @@ async function GETHandler(
       });
     }
 
-    const { data: mappingsData, error: mappingsError } = await supabase
-      .from("tally_mapping_settings")
-      .select("*")
-      .eq("connection_id", connection.id)
-      .eq("owner_user_id", user.id)
-      .eq("company_name", connection.last_company_name ?? "Unknown company")
-      .eq("status", "active");
-
-    if (mappingsError) throw mappingsError;
+    // Company-wide: saved choices survive a connector re-pair.
+    const mappingsData = await readCompanyMappings(supabase, {
+      connectionId: connection.id, companyName: connection.last_company_name ?? "Unknown company", ownerUserId: user.id,
+    });
 
     const documents = (documentsData ?? []) as PacketDocumentRow[];
     const lineItems = collectLineItems(documents);

@@ -81,7 +81,7 @@ test("month ranges cover the whole month, leap years included", () => {
   assert.throws(() => monthRange("2026-13"));
 });
 
-test("the fetcher asks Tally for masters first and the Day Book for the month, one request at a time", async () => {
+test("the fetcher asks Tally for masters first and the voucher list, one request at a time", async () => {
   const seen = [];
   const exportXml = async (xml, label) => {
     seen.push([label, /SVFROMDATE>(\d+)/.exec(xml)?.[1] ?? "", /SVTODATE>(\d+)/.exec(xml)?.[1] ?? "", /SVCURRENTCOMPANY>([^<]*)/.exec(xml)?.[1]]);
@@ -92,7 +92,7 @@ test("the fetcher asks Tally for masters first and the Day Book for the month, o
   };
   const result = await fetchPurchaseRegister({ exportXml, company: "Nyx & Co", period: "2026-09" });
   assert.equal(result.vouchers.length, 1);
-  assert.deepEqual(seen.map((s) => s[0]), ["GST register ledgers", "GST register groups", "GST register voucher types", "GST register day book"]);
-  assert.deepEqual(seen[3].slice(1), ["20260901", "20260930", "Nyx &amp; Co"]);
+  assert.deepEqual(seen.map((s) => s[0]), ["GST register ledgers", "GST register groups", "GST register voucher types", "GST register vouchers"]);
+  assert.equal(seen[3][3], "Nyx &amp; Co");
   await assert.rejects(fetchPurchaseRegister({ exportXml, company: "", period: "2026-09" }), /requires a Tally company/);
 });

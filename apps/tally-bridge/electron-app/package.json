@@ -1,7 +1,7 @@
 {
   "name": "bhuleshwar-local-agent",
   "productName": "Bhuleshwar Local Agent",
-  "version": "1.2.43",
+  "version": "1.2.44",
   "description": "Secure local workflow agent connecting Bhuleshwar to Tally Prime.",
   "author": "Bhuleshwar",
   "private": true,

@@ -24,6 +24,7 @@ import { startDetachedDocument } from "./agent/detached-document.mjs";
 import { assertBankDocumentScope } from './agent/bank-document-scope.mjs';
 import { buildTargetedMastersXml } from "./targeted-masters.mjs";
 import { readScopedOpenBills } from "./open-bill-discovery.mjs";
+import { fetchPurchaseRegister } from "./purchase-register.mjs";
 import { AGENT_CAPABILITIES, AGENT_PROTOCOL_VERSION, AGENT_VERSION, jobClassForCommand } from "./agent/protocol.mjs";
 
 const BRIDGE_VERSION = AGENT_VERSION;
@@ -7553,6 +7554,24 @@ async function runCommand(config, command, options = {}) {
         ? `Command ${command.id} completed: ledger created.`
         : `Command ${command.id} failed: ${outcome.error || "Tally returned an error."}`
     );
+    return;
+  }
+
+  if (command.commandType === "fetch_purchase_register") {
+    try {
+      const tallyUrl = normalizeTallyUrl(command.payload?.tallyUrl || config.tallyUrl);
+      const result = await fetchPurchaseRegister({
+        company: command.payload?.companyName,
+        period: command.payload?.period,
+        exportXml: (xml, label) => exportTallyXml(tallyUrl, xml, label),
+      });
+      await sendCommandResult(config, command, { success: true, result });
+      console.log(`Command ${command.id} completed: read ${result.vouchers.length} purchase voucher(s) for ${result.period}.`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error ?? "Purchase register read failed.");
+      await sendCommandResult(config, command, { success: false, result: {}, error: message });
+      console.log(`Command ${command.id} failed: ${message}`);
+    }
     return;
   }
 

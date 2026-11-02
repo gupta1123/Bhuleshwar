@@ -1,4 +1,4 @@
-export const AGENT_VERSION = "1.2.42";
+export const AGENT_VERSION = "1.2.43";
 export const AGENT_PROTOCOL_VERSION = 1;
 export const LOCAL_SCHEMA_VERSION = 3;
 export const TDL_REPORT_VERSION = 1;
@@ -28,6 +28,7 @@ export const AGENT_CAPABILITIES = Object.freeze([
   "bank-voucher-batch-v1",
   "bank-reference-preflight-v1",
   "document-cli-v1",
+  "purchase-register-read-v1",
 ]);
 
 export const JOB_CLASSES = Object.freeze({
@@ -63,6 +64,7 @@ const INTERACTIVE_COMMANDS = new Set([
   "fetch_bank_ledgers",
   "fetch_purchase_masters",
   "fetch_customer_open_bills",
+  "fetch_purchase_register",
   "verify_bank_transaction",
   "export_debit_note_pdf",
   "agent_query_open_bills",

@@ -145,6 +145,7 @@ const TALLY_OPTIONS = [
 ];
 
 const ROWS_PER_PAGE_OPTIONS = [
+  { value: "auto", label: "Auto" },
   { value: "5", label: "5" },
   { value: "10", label: "10" },
   { value: "15", label: "15" },
@@ -156,14 +157,14 @@ const ROWS_PER_PAGE_OPTIONS = [
 // Rows that fit the window: each row is ~52px and the header, filters, table
 // head and pagination footer take ~300px. Snap down to a listed page size.
 const ROW_HEIGHT_PX = 52;
-const PAGE_CHROME_PX = 300;
+const PAGE_CHROME_PX = 240;
 function getViewportPageSize() {
   if (typeof window === "undefined") return 10;
   // A narrow screen (phone, small tablet) scrolls long lists badly, so cap it.
   const widthCap = window.innerWidth < 640 ? 10 : window.innerWidth < 1024 ? 15 : Infinity;
   const fitting = Math.min(Math.floor((window.innerHeight - PAGE_CHROME_PX) / ROW_HEIGHT_PX), widthCap);
-  const sizes = ROWS_PER_PAGE_OPTIONS.map((option) => Number(option.value));
-  return [...sizes].reverse().find((size) => size <= fitting) ?? sizes[0];
+  // Exact fit (not rounded down to a listed size), within sane bounds.
+  return Math.min(50, Math.max(5, fitting));
 }
 
 export function CasesPage() {
@@ -182,10 +183,23 @@ export function CasesPage() {
   const [selectedApproval, setSelectedApproval] = useState("all");
   const [selectedReconciliation, setSelectedReconciliation] = useState("all");
   const [selectedTally, setSelectedTally] = useState("all");
+  // Dashboard counters open the register already filtered (e.g. /cases?approval=pending&tally=not_posted).
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const approval = params.get("approval");
+    const tally = params.get("tally");
+    const reconciliation = params.get("reconciliation");
+    if (approval && APPROVAL_OPTIONS.some((option) => option.value === approval)) setSelectedApproval(approval);
+    if (tally && TALLY_OPTIONS.some((option) => option.value === tally)) setSelectedTally(tally);
+    if (reconciliation && RECONCILIATION_OPTIONS.some((option) => option.value === reconciliation)) setSelectedReconciliation(reconciliation);
+  }, []);
 
   // Pagination
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(getViewportPageSize);
+  // "Auto" fits as many rows as the screen holds; a fixed number overrides it.
+  const [rowsMode, setRowsMode] = useState("auto");
+  const [autoPageSize, setAutoPageSize] = useState(getViewportPageSize);
+  const pageSize = rowsMode === "auto" ? autoPageSize : Number(rowsMode);
   // Follow the window size (rotating a tablet, resizing a laptop) until the
   // reviewer picks a page size themselves.
   const pageSizePickedRef = useRef(false);
@@ -196,7 +210,7 @@ export function CasesPage() {
       timer = setTimeout(() => {
         if (pageSizePickedRef.current) return;
         const next = getViewportPageSize();
-        setPageSize((current) => {
+        setAutoPageSize((current) => {
           if (current === next) return current;
           setCurrentPage(1);
           return next;
@@ -319,7 +333,7 @@ export function CasesPage() {
 
           {/* ── Fixed/Sticky Reusable PageHeader (Compact SaaS style) ── */}
           <PageHeader
-            title="Cases"
+            title="Case Register"
             subtitle="Track and manage all cases"
             badge={
               <div className="flex items-center gap-1.5 rounded-lg border border-[#e6ded2] bg-[#fbfaf8] px-2.5 py-1 text-xs font-medium text-[#5b4b3d] shadow-sm">
@@ -349,7 +363,7 @@ export function CasesPage() {
             }
           >
             {showFilters && (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 md:grid-cols-4">
                 {/* Customer / Case Search */}
                 <div className="flex h-9 items-center gap-2 rounded-lg border border-[#ded8d0] bg-[#fbfaf8] px-3 text-xs shadow-sm focus-within:border-[#b9aa99] focus-within:bg-white transition">
                   <Search className="h-3.5 w-3.5 text-[#8a7f72]" />
@@ -586,15 +600,17 @@ export function CasesPage() {
                   <span>Rows per page:</span>
                   <SelectDropdown
                     size="sm"
-                    value={String(pageSize)}
+                    value={rowsMode}
                     onChange={(val) => {
-                      pageSizePickedRef.current = true;
-                      setPageSize(Number(val));
+                      pageSizePickedRef.current = val !== "auto";
+                      if (val === "auto") setAutoPageSize(getViewportPageSize());
+                      setRowsMode(val);
                       setCurrentPage(1);
                     }}
                     options={ROWS_PER_PAGE_OPTIONS}
-                    className="w-16"
+                    className="w-20"
                   />
+                  {rowsMode === "auto" && <span>({pageSize} fit your screen)</span>}
                 </div>
 
                 {/* Page Navigation */}

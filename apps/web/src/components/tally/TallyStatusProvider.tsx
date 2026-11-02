@@ -18,10 +18,32 @@ function selectedScope(): IndicatorScope {
   } catch { return { connectionId }; }
 }
 
+const CACHE_KEY = 'bhuleshwar.tallyIndicator.v1';
+function readCachedIndicator(): typeof INITIAL_TALLY_INDICATOR | null {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(CACHE_KEY) || 'null');
+    if (raw && Date.now() - raw.at < 120000 && raw.value?.status &&
+      raw.value.status !== 'checking' && raw.value.status !== 'unavailable') return raw.value;
+  } catch {}
+  return null;
+}
+
 export function TallyStatusProvider({children}: {children: React.ReactNode}) {
   const [value, setValue] = useState(INITIAL_TALLY_INDICATOR);
   const pathname = usePathname();
   const publicPage = /^\/(?:auth|login|signin|signup)(?:\/|$)/.test(pathname);
+  // Show the last known status instantly while the first server check runs.
+  useEffect(() => {
+    if (publicPage) return;
+    const cached = readCachedIndicator();
+    if (cached) setValue(previous => previous.status === 'checking' ? cached : previous);
+  }, [publicPage]);
+  useEffect(() => {
+    try {
+      if (value.status !== 'checking' && value.status !== 'unavailable')
+        sessionStorage.setItem(CACHE_KEY, JSON.stringify({ at: Date.now(), value }));
+    } catch {}
+  }, [value]);
   useEffect(() => {
     if (publicPage) { setValue(INITIAL_TALLY_INDICATOR); return; }
     let alive = true, generation = 0, pending = false, received = 0, lastRefresh = -Infinity, invalidatedAt = -Infinity, observedAt = -Infinity;

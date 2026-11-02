@@ -298,7 +298,7 @@ async function getResponseError(response: Response) {
 
 export default function SettingsPage() {
   const [activeTab, setActiveTab] = useState<ActiveTab>("documents");
-  useEffect(()=>{const tab=new URLSearchParams(window.location.search).get('tab');if(tab==='team')setActiveTab(tab);},[]);
+  // Team & Access and Payment reminders tabs are hidden for now (no ?tab=team deep link either).
   const [selectedDocType, setSelectedDocType] = useState<string>(AVAILABLE_DOC_TYPES[0] ?? "");
   const [docTypeEnabled, setDocTypeEnabled] = useState<DocTypeEnabledState>(() =>
     createDefaultDocTypeState()
@@ -792,8 +792,6 @@ export default function SettingsPage() {
             >
               Purchase accounting
             </button>
-            <button type="button" className={`rounded-md px-3.5 py-1.5 text-xs font-semibold transition ${activeTab==='team'?'bg-white text-[#111827] shadow-2xs':'text-[#6b5d50] hover:text-[#111827]'}`} onClick={() => setActiveTab('team')}>Team &amp; Access</button>
-            <button type="button" className={`rounded-md px-3.5 py-1.5 text-xs font-semibold transition ${activeTab==='reminders'?'bg-white text-[#111827] shadow-2xs':'text-[#6b5d50] hover:text-[#111827]'}`} onClick={() => setActiveTab('reminders')}>Payment reminders</button>
           </div>
 
           <div>

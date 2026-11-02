@@ -59,8 +59,8 @@ export function PurchaseDocumentFolderSettings({ connectionId, companyName, comp
 
   return <section className="rounded-[10px] border border-[#e8e5de] bg-white px-6 py-5">
     <h3 className="text-sm font-bold text-[#111827]">Purchase invoice folder</h3>
-    <p className="mt-1 text-xs text-[#8a7f72]">Save PDFs to a shared LAN folder before posting. All Tally users should be able to open this location.</p>
-    <label className="mt-4 block text-xs font-medium text-[#5b4b3d]">Shared folder path
+    <p className="mt-1 text-xs text-[#8a7f72]">Save PDFs to a folder before posting. Use a shared network folder if several PCs open these vouchers; a folder on this PC (for example C:\\BhuleshwarInvoices) is created automatically on the PC running the Local Agent, and works for Tally on that PC only.</p>
+    <label className="mt-4 block text-xs font-medium text-[#5b4b3d]">Folder path
       <input className="mt-1 h-10 w-full rounded-lg border border-[#ddd7cc] px-3" value={folderPath}
         placeholder={'\\\\AccountsServer\\Invoices\\Bhuleshwar'} disabled={Boolean(busy) || !loaded}
         onChange={event => { setFolderPath(event.target.value); setNotice(null); }} />

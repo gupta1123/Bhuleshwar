@@ -24,7 +24,43 @@ import {
 
 const DEFAULT_TALLY_URL = "http://localhost:9000";
 // Revocations that mean "paused by the user"; Reconnect resumes these.
-const RESUMABLE_REVOKE_REASONS = ["Disconnected by user.", "Disconnected by connector."];
+const RESUMABLE_REVOKE_REASONS = [
+  "Disconnected by user.",
+  "Disconnected by connector.",
+  "Disconnected from another device by user.",
+];
+// The only way a PC's connection is retired for good.
+const REMOVED_REVOKE_REASON = "Removed by user.";
+
+// The newest connection for the same connector installation (PC) as `connectionId`, preferring
+// one that is not retired, so Reconnect never forks a PC into a second connection.
+async function latestConnectionForSamePc(
+  supabase: ReturnType<typeof createSupabaseAdminClient>,
+  ownerUserId: string,
+  scopeFilter: string,
+  connectionId: string
+) {
+  const { data: selected, error } = await supabase
+    .from("tally_connections")
+    .select("id, installation_id")
+    .eq("id", connectionId)
+    .eq("owner_user_id", ownerUserId)
+    .or(scopeFilter)
+    .maybeSingle();
+  if (error) throw error;
+  if (!selected?.installation_id) return selected?.id ?? connectionId;
+  const { data: samePc, error: samePcError } = await supabase
+    .from("tally_connections")
+    .select("id, revoked_at, revoked_reason, updated_at")
+    .eq("owner_user_id", ownerUserId)
+    .or(scopeFilter)
+    .eq("installation_id", selected.installation_id)
+    .order("updated_at", { ascending: false })
+    .limit(20);
+  if (samePcError) throw samePcError;
+  const candidates = (samePc ?? []).filter((row) => row.revoked_reason !== REMOVED_REVOKE_REASON);
+  return (candidates.find((row) => !row.revoked_at) ?? candidates[0])?.id ?? selected.id;
+}
 
 function normalizeTallyUrl(value: unknown) {
   if (typeof value !== "string" || value.trim().length === 0) {
@@ -83,7 +119,8 @@ function pickRelevantConnections(rows: TallyConnectionRow[]) {
     .filter(
       (row) =>
         Boolean(row.installation_id) &&
-        !row.revoked_at &&
+        (!row.revoked_at || RESUMABLE_REVOKE_REASONS.includes(row.revoked_reason ?? '')) &&
+        (!row.revoked_at || !rows.some(other=>!other.revoked_at&&other.installation_id===row.installation_id)) &&
         (Boolean(row.bridge_token_hash) || row.status === "waiting_for_bridge")
     )
     .map(serializeTallyConnectionStatus);
@@ -124,7 +161,7 @@ async function GETHandler(request: Request) {
       if(canAccess(access,'connections.manage')&&access.member.all_companies) {
         const result=await createSupabaseAdminClient().from('tally_connections').select(TALLY_CONNECTION_SELECT)
           .eq('organization_id',access.organizationId).eq('owner_user_id',access.member.user_id)
-          .is('revoked_at',null).order('updated_at',{ascending:false}).limit(50);
+          .or(`revoked_at.is.null,revoked_reason.in.(${RESUMABLE_REVOKE_REASONS.map(reason=>JSON.stringify(reason)).join(',')})`).order('updated_at',{ascending:false}).limit(50);
         if(result.error)throw result.error;
         rows=(result.data||[]) as unknown as TallyConnectionRow[];
       } else {
@@ -151,7 +188,7 @@ async function GETHandler(request: Request) {
       .from("tally_connections")
       .select(TALLY_CONNECTION_SELECT)
       .eq("owner_user_id", user.id)
-      .is("revoked_at", null)
+      .or(`revoked_at.is.null,revoked_reason.in.(${RESUMABLE_REVOKE_REASONS.map(reason=>JSON.stringify(reason)).join(',')})`)
       .order("updated_at", { ascending: false });
 
     if (error) {
@@ -163,6 +200,7 @@ async function GETHandler(request: Request) {
     const expiredPendingIds = rows
       .filter(
         (row) =>
+          !row.revoked_at &&
           !row.bridge_token_hash &&
           (!row.pairing_code_expires_at ||
             new Date(row.pairing_code_expires_at).getTime() <= now.getTime())
@@ -237,13 +275,15 @@ async function POSTHandler(request: Request) {
         ? body.reuseConnectionId.trim()
         : null;
 
-    // Disconnect is a pause: reconnecting resumes the same connection, so its
-    // mappings, folder setting and posting history stay attached. Only a
-    // connection the user (or its connector) disconnected is resumed; ones
-    // superseded, expired or disconnected from another session stay retired.
+    // One connection per PC. Reconnect re-pairs the PC's existing connection (the newest one
+    // for the same connector installation), even while that connection is merely offline, so
+    // its mappings, folder setting and posting history stay attached. Without a reuse id (a new
+    // computer) a disconnected connection is still resumed when no connector is live.
     const scopeFilter = teamContext ? `organization_id.eq.${JSON.stringify(teamContext.organizationId)}` : 'id.not.is.null';
-    let resumeId = reuseConnectionId;
-    if (!resumeId) {
+    let resumeId = reuseConnectionId
+      ? await latestConnectionForSamePc(supabase, user.id, scopeFilter, reuseConnectionId)
+      : null;
+    if (!reuseConnectionId) {
       const { data: live, error: liveError } = await supabase
         .from("tally_connections")
         .select("id")
@@ -276,12 +316,16 @@ async function POSTHandler(request: Request) {
         .eq("id", resumeId)
         .eq("owner_user_id", user.id)
         .or(scopeFilter)
-        .is("bridge_token_hash", null)
         .maybeSingle();
       if (existingError) throw existingError;
       const existing = existingData as unknown as TallyConnectionRow | null;
+      // A connection is resumed unless the PC was deliberately removed. Its connector login (if
+      // any) stays valid until the new pairing replaces it, so an offline connector that comes
+      // back first simply carries on.
       const resumable = existing && (
-        !existing.revoked_at || RESUMABLE_REVOKE_REASONS.includes(existing.revoked_reason ?? "")
+        reuseConnectionId
+          ? existing.revoked_reason !== REMOVED_REVOKE_REASON
+          : !existing.revoked_at || RESUMABLE_REVOKE_REASONS.includes(existing.revoked_reason ?? "")
       );
       if (existing && resumable) {
         const { data: resumed, error: resumeError } = await supabase

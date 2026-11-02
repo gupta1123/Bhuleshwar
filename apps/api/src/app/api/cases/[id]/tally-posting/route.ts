@@ -1290,6 +1290,72 @@ async function POSTHandler(request: Request, contextParam: { params: Promise<{ i
         },
       }, prepared, { includeMasterOptions: false }));
     }
+    if (body.action === "reset_for_repost") {
+      // The voucher was deleted in Tally (or never really existed), so this posting must forget it
+      // and go back to a draft. Never allowed while a command is in flight.
+      if (body.confirmDeletedInTally !== true) {
+        return jsonWithCors(request, { error: "Confirm that the voucher was deleted in Tally before resetting." }, { status: 400 });
+      }
+      const requestedConnectionId = typeof body.connectionId === "string" ? body.connectionId : null;
+      const requestedCompanyName = typeof body.companyName === "string" ? body.companyName : null;
+      const initial = await loadContext(request, id, user.id, requestedConnectionId, requestedCompanyName);
+      const context = initial.posting?.connection_id && initial.connection?.id !== initial.posting.connection_id
+        ? await loadContext(request, id, user.id, initial.posting.connection_id, requestedCompanyName)
+        : initial;
+      if (!context.posting) {
+        return jsonWithCors(request, { error: "There is no Tally posting to reset for this case." }, { status: 409 });
+      }
+      if (["approved", "queued", "creating"].includes(context.posting.status)) {
+        return jsonWithCors(request, { error: "A Tally command is still running for this case. Wait for it to finish, then try again." }, { status: 409 });
+      }
+      if (process.env.TEAM_ACCESS_ENFORCEMENT === "true") {
+        await requireResourceAccess(request, "case", id, "purchases.post");
+      }
+      const resetAt = new Date().toISOString();
+      const previous = {
+        status: context.posting.status,
+        voucherNumber: context.posting.tally_voucher_number ?? null,
+        verificationStatus: context.posting.verification_status ?? null,
+      };
+      const reset = await context.supabase
+        .from("purchase_invoice_tally_postings")
+        .update({
+          status: "draft",
+          command_id: null,
+          idempotency_key: null,
+          approved_payload_hash: null,
+          approved_at: null,
+          queued_at: null,
+          tally_voucher_number: null,
+          tally_master_id: null,
+          tally_guid: null,
+          tally_created_at: null,
+          verified_at: null,
+          verification_status: null,
+          last_error: null,
+          updated_at: resetAt,
+        })
+        .eq("id", context.posting.id)
+        .eq("owner_user_id", user.id)
+        .select("*")
+        .maybeSingle();
+      if (reset.error) throw reset.error;
+      if (!reset.data) {
+        return jsonWithCors(request, { error: "Could not reset this posting." }, { status: 409 });
+      }
+      if (context.connection) {
+        await context.supabase.from("tally_connection_events").insert({
+          connection_id: context.connection.id,
+          owner_user_id: context.connection.owner_user_id,
+          event_type: "posting_reset",
+          message: "Purchase voucher posting reset after the voucher was deleted in Tally.",
+          payload: { caseId: id, previous },
+        });
+      }
+      const fresh = await loadContext(request, id, user.id, requestedConnectionId, requestedCompanyName);
+      const { prepared } = await prepareContext(fresh, user.id, asSavedReview(fresh.posting?.review_patch), { checkDuplicate: false });
+      return jsonWithCors(request, responseBody(fresh, prepared, { includeMasterOptions: false }));
+    }
     if (body.action === "prepare_live_context") {
       const requestedConnectionId = typeof body.connectionId === "string" ? body.connectionId : null;
       const requestedCompanyName = typeof body.companyName === "string" ? body.companyName : null;

@@ -5,10 +5,13 @@ export function validatePurchaseDocumentFolder(value: unknown): string {
   if (typeof value !== 'string') throw new Error('Enter a shared folder path.');
   const folder = value.trim().replace(/\\+$/, '');
   if (!folder) return '';
-  if (folder.length > 500 || !/^\\\\[^\\]+\\[^\\]+/.test(folder) ||
-      /^\\\\[?.]\\/.test(folder) || /[<>:"|?*\/\x00-\x1f]/.test(folder) ||
+  const isUnc = /^\\\\[^\\]+\\[^\\]+/.test(folder);
+  const isLocal = /^[A-Za-z]:\\[^\\]/.test(folder);
+  const rest = isLocal ? folder.slice(2) : folder;
+  if (folder.length > 500 || (!isUnc && !isLocal) ||
+      /^\\\\[?.]\\/.test(folder) || /[<>:"|?*\/\x00-\x1f]/.test(rest) ||
       folder.split('\\').some(part => /[. ]$/.test(part))) {
-    throw new Error('Use a shared Windows folder such as \\\\AccountsServer\\Invoices\\Kalika.');
+    throw new Error('Use a network folder like \\\\AccountsServer\\Invoices\\Bhuleshwar, or a folder on this PC like C:\\BhuleshwarInvoices.');
   }
   return path.win32.normalize(folder);
 }

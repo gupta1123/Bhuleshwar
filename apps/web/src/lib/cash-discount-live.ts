@@ -218,7 +218,11 @@ function createSession(params: {
         pending.cleanup();
         session.pending.delete(requestId);
         if (message.success === true) pending.resolve(message.data);
-        else pending.reject(new Error(message.error || "The live Tally request failed."));
+        else {
+          const failure = message.error || "The live Tally request failed.";
+          // Connector briefly off the channel (it is rejoining): a transport problem, so retry.
+          pending.reject(/live Tally connection is unavailable/i.test(failure) ? new LiveChannelError(failure) : new Error(failure));
+        }
       } else if (message.type === "error") {
         endSession(session, new LiveChannelError(message.error || "The live Cash Discount channel failed."));
       }

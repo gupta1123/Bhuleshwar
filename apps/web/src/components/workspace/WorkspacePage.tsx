@@ -1438,7 +1438,7 @@ export function WorkspacePage() {
       <div className="min-h-full bg-[#f7f4ef] px-4 py-5 text-[#111827] sm:px-6 lg:px-8">
         <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-6">
           <PageHeader
-            title="Add Case"
+            title="Upload & Verify"
             subtitle="Upload or scan documents for one case"
             badge={
               <div className="flex items-center gap-1.5 rounded-lg border border-[#e6ded2] bg-[#fbfaf8] px-2.5 py-1 text-xs font-medium text-[#5b4b3d] shadow-sm">
@@ -1616,7 +1616,7 @@ export function WorkspacePage() {
       <div className="min-h-full bg-[#f7f4ef] px-4 py-5 text-[#111827] sm:px-6 lg:px-8">
         <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-6">
           <PageHeader
-            title="Add Case"
+            title="Upload & Verify"
             subtitle="Review uploaded documents and analyze"
             badge={
               <div className="flex items-center gap-1.5 rounded-lg border border-[#e6ded2] bg-[#fbfaf8] px-2.5 py-1 text-xs font-medium text-[#5b4b3d] shadow-sm">

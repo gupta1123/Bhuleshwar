@@ -882,6 +882,26 @@ export async function verifyExistingTallyPurchaseVoucher(
   return readResponse(response, "Failed to verify the existing Purchase voucher.");
 }
 
+// The voucher was deleted in Tally: forget it and make the case postable again.
+export async function resetTallyPurchasePostingForRepost(
+  caseId: string,
+  connectionId?: string | null,
+  companyName?: string | null
+) {
+  const response = await apiFetch(`/api/cases/${caseId}/tally-posting`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      action: "reset_for_repost",
+      confirmDeletedInTally: true,
+      connectionId,
+      companyName,
+      compactResponse: true,
+    }),
+  });
+  return readResponse(response, "Failed to reset the Tally posting.");
+}
+
 export async function prepareTallyPurchasePostingFromLive(
   caseId: string,
   connectionId: string,

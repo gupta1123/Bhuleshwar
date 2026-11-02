@@ -5,7 +5,6 @@ import { createSupabaseAdminClient } from "@/lib/supabase/admin";
 import { isLocalDbMode, LOCAL_USER_ID } from "@/lib/local/mode";
 import { disconnectLocalTallyConnection } from "@/lib/local/tally-store";
 import {
-  hashSecret,
   serializeTallyConnectionStatus,
   TALLY_CONNECTION_SELECT,
   type TallyConnectionRow,
@@ -51,13 +50,6 @@ async function POSTHandler(
 
     const { id } = await context.params;
     const controlToken = getControlToken(request);
-    if (!controlToken) {
-      return jsonWithCors(
-        request,
-        { error: "This browser does not control the selected Tally connection." },
-        { status: 403 }
-      );
-    }
 
     if (localMode) {
       const connection = await disconnectLocalTallyConnection(id, user.id, controlToken);
@@ -74,49 +66,14 @@ async function POSTHandler(
     }
 
     const supabase = createSupabaseAdminClient();
-    const { data: existingData, error: existingError } = await supabase
-      .from("tally_connections")
-      .select(TALLY_CONNECTION_SELECT)
-      .eq("id", id)
-      .eq("owner_user_id", user.id)
-      .is("revoked_at", null)
-      .maybeSingle();
-
-    if (existingError) throw existingError;
-    if (!existingData) {
-      return jsonWithCors(request, { error: "Tally connection not found" }, { status: 404 });
-    }
-    const existing = existingData as unknown as TallyConnectionRow;
-    if (
-      !existing.control_token_hash ||
-      hashSecret(controlToken) !== existing.control_token_hash
-    ) {
-      await supabase.from("tally_connection_events").insert({
-        connection_id: existing.id,
-        owner_user_id: user.id,
-        event_type: "disconnect_rejected",
-        message: "A different browser attempted to disconnect this Tally connection.",
-        payload: {
-          origin: request.headers.get("origin"),
-          referer: request.headers.get("referer"),
-          userAgent: request.headers.get("user-agent")?.slice(0, 500) ?? null,
-          forwardedFor: request.headers.get("x-forwarded-for")?.slice(0, 200) ?? null,
-        },
-      });
-      return jsonWithCors(
-        request,
-        { error: "This browser cannot disconnect that Tally connection." },
-        { status: 403 }
-      );
-    }
-
+    // Any signed-in user allowed to manage connections may disconnect it; which browser created
+    // the connection no longer matters. Reconnect resumes this same connection.
     const disconnectedAt = new Date().toISOString();
     const { data, error } = await supabase
       .from("tally_connections")
       .update(disconnectedUpdatePayload(disconnectedAt))
       .eq("id", id)
       .eq("owner_user_id", user.id)
-      .eq("control_token_hash", existing.control_token_hash)
       .is("revoked_at", null)
       .select(TALLY_CONNECTION_SELECT)
       .maybeSingle();

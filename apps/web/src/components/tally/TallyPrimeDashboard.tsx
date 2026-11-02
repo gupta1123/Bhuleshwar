@@ -46,6 +46,7 @@ type TallyConnection = {
   lastCompanyLoaded: boolean | null;
   lastCompanyName: string | null;
   lastError: string | null;
+  revokedAt?: string | null;
   bridgeConnected?: boolean;
   tallyReachable?: boolean;
   companyLoaded?: boolean;
@@ -342,8 +343,9 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
       (!expectedMachineId ||
         !selectedConnection?.bridgeMachineId ||
         expectedMachineId === selectedConnection.bridgeMachineId));
-  const selectedCompany = connectionBelongsToThisBrowser
-    ? (companies.find(
+  // Status always comes from the server (same as the sidebar); the browser token
+  // only decides whether we show a small "managed elsewhere" note.
+  const selectedCompany = (companies.find(
         (company) =>
           company.connectionId === selectedConnection?.id &&
           (company.isActive ||
@@ -351,14 +353,13 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
               String(selectedConnection?.lastCompanyName ?? "")
                 .trim()
                 .toLowerCase()),
-      ) ?? null)
-    : null;
-  const statusTone = connectionBelongsToThisBrowser
-    ? getStatusTone(selectedConnection)
-    : "error";
-  const connectorActive =
-    connectionBelongsToThisBrowser &&
-    Boolean(selectedConnection?.bridgeConnected);
+      ) ?? null);
+  const statusTone = getStatusTone(selectedConnection);
+  const connectorActive = Boolean(selectedConnection?.bridgeConnected);
+  // Disconnect is a pause: the same connection (settings, mappings, history) resumes later.
+  const connectorPaused = Boolean(
+    selectedConnection?.revokedAt && /disconnected|paused/i.test(selectedConnection.lastError || ""),
+  );
   const selectedActiveConnectionId = selectedConnection?.bridgeConnected
     ? (selectedConnection?.id ?? "")
     : "";
@@ -366,15 +367,10 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
     (connection) =>
       connection.bridgeConnected && connection.id !== selectedActiveConnectionId,
   ).length;
-  const tallyReachable =
-    connectionBelongsToThisBrowser &&
-    selectedConnection?.tallyReachable === true;
-  const companyLoaded =
-    connectionBelongsToThisBrowser &&
-    selectedConnection?.companyLoaded === true;
-  const companyDetail = !connectionBelongsToThisBrowser
-    ? "This connection is managed from another browser or computer. Click Reconnect to use this computer instead."
-    : selectedConnection?.lastCompanyName ||
+  const tallyReachable = selectedConnection?.tallyReachable === true;
+  const companyLoaded = selectedConnection?.companyLoaded === true;
+  const companyDetail =
+    selectedConnection?.lastCompanyName ||
       selectedCompany?.companyName ||
       (selectedConnection?.companyLoaded
         ? "Company loaded"
@@ -596,22 +592,9 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
     try {
       setDisconnecting(true);
       setMessage(null);
-      const controlToken = window.localStorage.getItem(
-        `${CONNECTION_CONTROL_STORAGE_PREFIX}${selectedConnection.id}`,
-      );
-      if (!controlToken) {
-        throw new Error(
-          "This connection was created in another browser. Reconnect from this browser to manage it.",
-        );
-      }
       const response = await apiFetch(
         `/api/tally/connections/${selectedConnection.id}/disconnect`,
-        {
-          method: "POST",
-          headers: {
-            "x-tally-control-token": controlToken,
-          },
-        },
+        { method: "POST" },
       );
       if (!response.ok) {
         throw new Error(await readError(response));
@@ -635,7 +618,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
       );
       setMessage({
         tone: "success",
-        text: "Connector disconnected.",
+        text: "Connection paused. Click Resume to continue with the same connection.",
       });
     } catch (error) {
       setMessage({
@@ -977,12 +960,11 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
                       }
                       variant="outline"
                     >
-                      {connectionBelongsToThisBrowser
-                        ? getStatusLabel(selectedConnection)
-                        : "Reconnect required"}
+                      {connectorPaused ? "Paused" : getStatusLabel(selectedConnection)}
                     </Badge>
                   </div>
                   <div className="mt-1 max-w-3xl text-xs font-medium text-[#8a7f72]">
+                    {!connectionBelongsToThisBrowser ? "Paired from another browser — status shown is live from the server. " : ""}
                     {selectedCompany?.financialYear
                       ? formatCompanyOptionLabel(selectedCompany)
                       : companyDetail}
@@ -1003,7 +985,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
                       ) : (
                         <PlugZap className="h-3.5 w-3.5 mr-1.5" />
                       )}
-                      Reconnect
+                      {connectorPaused ? "Resume connection" : "Reconnect"}
                     </Button>
                   ) : (
                     <Popover>
@@ -1012,7 +994,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
                       </PopoverTrigger>
                       <PopoverContent align="end" className="w-64 rounded-xl border-[#e5ddd0] p-2 shadow-xl">
                         <p className="px-2 pb-1 pt-1 text-[11px] font-semibold text-[#8a7f72]">Connection</p>
-                        <button className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50" disabled={disconnecting} onClick={() => setConfirmAction("disconnect")} type="button"><PlugZap className="h-3.5 w-3.5" />Disconnect…</button>
+                        <button className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-amber-800 hover:bg-amber-50 disabled:opacity-50" disabled={disconnecting} onClick={() => setConfirmAction("disconnect")} type="button"><PlugZap className="h-3.5 w-3.5" />Pause connection…</button>
                         {otherActiveConnectionCount > 0 ? <button className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-xs font-medium text-rose-700 hover:bg-rose-50 disabled:opacity-50" disabled={disconnectingOthers} onClick={() => setConfirmAction("disconnect_others")} type="button"><PlugZap className="h-3.5 w-3.5" />Disconnect other sessions…</button> : null}
                         <div className="mt-1 border-t border-slate-100 px-2 pt-2 text-[11px] leading-4 text-[#8a7f72]">Last heartbeat {formatTime(selectedConnection.lastHeartbeatAt)}</div>
                       </PopoverContent>
@@ -1041,11 +1023,9 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
             />
             <StatusCard
               detail={
-                connectionBelongsToThisBrowser
-                  ? selectedConnection.lastCompanyName ||
-                    selectedConnection.lastError ||
-                    companyDetail
-                  : companyDetail
+                selectedConnection.lastCompanyName ||
+                selectedConnection.lastError ||
+                companyDetail
               }
               ok={companyLoaded}
               title="Company"
@@ -1088,11 +1068,11 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
         </div>
       )}
       <CaseConfirmDialog
-        confirmLabel={confirmAction === "disconnect_others" ? "Disconnect others" : "Disconnect"}
+        confirmLabel={confirmAction === "disconnect_others" ? "Disconnect others" : "Pause connection"}
         description={
           confirmAction === "disconnect_others"
             ? `${otherActiveConnectionCount} other active connector session${otherActiveConnectionCount === 1 ? "" : "s"} will stop and must reconnect from their own computer.`
-            : "Bhuleshwar workflows that use Tally will stop. You will need to click Reconnect and approve the Local Agent again."
+            : "Bhuleshwar workflows that use Tally will pause. Click Resume connection and approve the Local Agent to continue. Settings, mappings and history are kept, and no new connection is created."
         }
         footnote={null}
         loading={disconnecting || disconnectingOthers}
@@ -1104,7 +1084,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
         }}
         onOpenChange={(open) => { if (!open) setConfirmAction(null); }}
         open={confirmAction !== null}
-        title={confirmAction === "disconnect_others" ? "Disconnect other sessions?" : "Disconnect Tally?"}
+        title={confirmAction === "disconnect_others" ? "Disconnect other sessions?" : "Pause Tally connection?"}
       />
     </div>
   );

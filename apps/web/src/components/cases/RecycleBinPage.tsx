@@ -37,7 +37,18 @@ type PendingAction =
   | { type: "restore"; item: SavedCaseRecord }
   | null;
 
+// Rows that fit the window: ~52px per row; header, filters, table head and footer take ~300px.
+const AUTO_ROW_HEIGHT_PX = 52;
+const AUTO_PAGE_CHROME_PX = 240;
+function getAutoPageSize() {
+  if (typeof window === "undefined") return 10;
+  const widthCap = window.innerWidth < 640 ? 10 : window.innerWidth < 1024 ? 15 : 100;
+  const rows = Math.floor((window.innerHeight - AUTO_PAGE_CHROME_PX) / AUTO_ROW_HEIGHT_PX);
+  return Math.min(widthCap, Math.max(5, rows));
+}
+
 const ROWS_PER_PAGE_OPTIONS = [
+  { value: "auto", label: "Auto" },
   { value: "10", label: "10" },
   { value: "25", label: "25" },
   { value: "50", label: "50" },
@@ -114,7 +125,24 @@ export function RecycleBinPage() {
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [pageSize, setPageSize] = useState(25);
+  const [rowsMode, setRowsMode] = useState("auto");
+  const [autoPageSize, setAutoPageSize] = useState(getAutoPageSize);
+  const pageSize = rowsMode === "auto" ? autoPageSize : Number(rowsMode);
+  // Follow the window size (resize, rotate) while on Auto.
+  useEffect(() => {
+    if (rowsMode !== "auto") return;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const apply = () => setAutoPageSize((current) => {
+      const next = getAutoPageSize();
+      if (current === next) return current;
+      setCurrentPage(1);
+      return next;
+    });
+    apply();
+    const onResize = () => { clearTimeout(timer); timer = setTimeout(apply, 300); };
+    window.addEventListener("resize", onResize);
+    return () => { clearTimeout(timer); window.removeEventListener("resize", onResize); };
+  }, [rowsMode]);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
@@ -404,14 +432,15 @@ export function RecycleBinPage() {
                   <span>Rows per page:</span>
                   <SelectDropdown
                     size="sm"
-                    value={String(pageSize)}
+                    value={rowsMode}
                     onChange={(val) => {
-                      setPageSize(Number(val));
+                      setRowsMode(val);
                       setCurrentPage(1);
                     }}
                     options={ROWS_PER_PAGE_OPTIONS}
-                    className="w-16"
+                    className="w-20"
                   />
+                  {rowsMode === "auto" && <span>({pageSize} fit your screen)</span>}
                 </div>
 
                 {/* Page Navigation */}

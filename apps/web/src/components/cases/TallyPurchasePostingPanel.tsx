@@ -56,6 +56,7 @@ import {
   saveTallyPurchasePosting,
   selectTallyPurchaseInvoice,
   verifyExistingTallyPurchaseVoucher,
+  resetTallyPurchasePostingForRepost,
   waitForTallyCommand,
   type TallyMasterOption,
   type TallyPostingIssue,
@@ -782,6 +783,7 @@ export function TallyPurchasePostingPanel({
   const [selectingInvoiceId, setSelectingInvoiceId] = useState<string | null>(null);
   const [approvingPacket, setApprovingPacket] = useState(false);
   const [queueing, setQueueing] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
   const [refreshingMasters, setRefreshingMasters] = useState(false);
   const [liveMastersReady, setLiveMastersReady] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -1835,6 +1837,29 @@ export function TallyPurchasePostingPanel({
     }
   }
 
+  async function handleResetForRepost() {
+    if (!payload?.posting || queueing) return;
+    try {
+      setQueueing(true);
+      setError(null);
+      setNotice("Resetting this case so it can be posted again…");
+      const next = await resetTallyPurchasePostingForRepost(
+        caseId,
+        payload.posting.connectionId,
+        payload.posting.companyName
+      );
+      const hydrated = withLiveMasterOptions(next);
+      setPayload(hydrated);
+      setReview(hydrated.review);
+      setResetConfirm(false);
+      setNotice("Reset. Review the voucher and approve it again.");
+    } catch (resetError) {
+      setError(resetError instanceof Error ? resetError.message : "Could not reset the Tally posting.");
+    } finally {
+      setQueueing(false);
+    }
+  }
+
   async function handleVerifyExisting() {
     if (!payload?.posting || payload.posting.status !== "verification_required" || queueing) return;
     try {
@@ -2339,6 +2364,30 @@ export function TallyPurchasePostingPanel({
               Verify in Tally
             </Button>
           </div>
+        </section>
+      ) : null}
+
+      {payload.posting && !(["approved", "queued", "creating"].includes(payload.posting.status)) &&
+      (payload.posting.status === "verification_required" || payload.posting.tallyVoucherNumber || /may already contain this voucher/i.test(error ?? "")) ? (
+        <section className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-4 py-3 text-xs text-slate-700">
+          <span>
+            Deleted this voucher in Tally? Reset the case to post it again.
+            {resetConfirm ? <strong className="ml-1 text-rose-700">This clears the saved Tally voucher link for this case. Only continue if the voucher no longer exists in Tally.</strong> : null}
+          </span>
+          <span className="flex items-center gap-2">
+            {resetConfirm ? (
+              <Button disabled={queueing} onClick={() => setResetConfirm(false)} size="sm" variant="outline">Cancel</Button>
+            ) : null}
+            <Button
+              disabled={queueing}
+              onClick={() => (resetConfirm ? void handleResetForRepost() : setResetConfirm(true))}
+              size="sm"
+              variant={resetConfirm ? "default" : "outline"}
+            >
+              {queueing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+              {resetConfirm ? "Yes, it is deleted in Tally — reset" : "Voucher deleted in Tally — reset"}
+            </Button>
+          </span>
         </section>
       ) : null}
 

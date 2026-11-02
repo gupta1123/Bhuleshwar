@@ -1,0 +1,516 @@
+{
+  "gstin": "27AABCS1429B1ZX",
+  "rtnprd": "112024",
+  "gendt": "14-11-2024",
+  "docdata": {
+    "b2b": [
+      {
+        "ctin": "27AAFCR1234A1ZP",
+        "trdnm": "RATHI METAL WORKS PVT LTD",
+        "inv": [
+          {
+            "inum": "RMW/25-26/0101",
+            "idt": "26-11-2024",
+            "val": 955800,
+            "pos": "27",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 810000,
+                "camt": 72900,
+                "samt": 72900,
+                "iamt": 0,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "24AACCG5678B1Z4",
+        "trdnm": "GUJARAT STEEL TRADERS",
+        "inv": [
+          {
+            "inum": "GST-2526-0101",
+            "idt": "05-11-2024",
+            "val": 567580,
+            "pos": "24",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 481000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 86580,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "29AABCK9012C1Z8",
+        "trdnm": "KAVERI TOOLS & SPARES",
+        "inv": [
+          {
+            "inum": "KTS/25-26/0101",
+            "idt": "06-11-2024",
+            "val": 635040,
+            "pos": "29",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 12,
+                "txval": 567000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 68040,
+                "csamt": 0
+              }
+            ]
+          },
+          {
+            "inum": "KTS/25-26/0102",
+            "idt": "13-11-2024",
+            "val": 430080,
+            "pos": "29",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 12,
+                "txval": 384000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 46080,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "07AADCN3456D1Z2",
+        "trdnm": "NORTHERN HARDWARE CO",
+        "inv": [
+          {
+            "inum": "NHC0101",
+            "idt": "21-11-2024",
+            "val": 982940,
+            "pos": "07",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 833000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 149940,
+                "csamt": 0
+              }
+            ]
+          },
+          {
+            "inum": "NHC0102",
+            "idt": "05-11-2024",
+            "val": 1045480,
+            "pos": "07",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 886000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 159480,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "33AAECM7890E1Z6",
+        "trdnm": "MADRAS PACKAGING LLP",
+        "inv": [
+          {
+            "inum": "MPL/25-26/0101",
+            "idt": "27-11-2024",
+            "val": 716800,
+            "pos": "33",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 12,
+                "txval": 640000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 76800,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "36AAFCG2345F1Z1",
+        "trdnm": "GOLKONDA POLYMERS",
+        "inv": [
+          {
+            "inum": "GKP-2526-0101",
+            "idt": "05-11-2024",
+            "val": 610060,
+            "pos": "36",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 517000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 93060,
+                "csamt": 0
+              }
+            ]
+          },
+          {
+            "inum": "GKP-2526-0102",
+            "idt": "03-11-2024",
+            "val": 240720,
+            "pos": "36",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 204000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 36720,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "19AAGCP6789G1Z5",
+        "trdnm": "BENGAL PAINTS & CHEMICALS",
+        "inv": [
+          {
+            "inum": "BPC/25-26/0101",
+            "idt": "24-11-2024",
+            "val": 470820,
+            "pos": "19",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 399000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 71820,
+                "csamt": 0
+              }
+            ]
+          },
+          {
+            "inum": "BPC/25-26/0102",
+            "idt": "23-11-2024",
+            "val": 417720,
+            "pos": "19",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 354000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 63720,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "09AAHCQ1234H1Z9",
+        "trdnm": "KANPUR ENGINEERING WORKS",
+        "inv": [
+          {
+            "inum": "KEW0101",
+            "idt": "06-11-2024",
+            "val": 113280,
+            "pos": "09",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 96000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 17280,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "27AAICR5678J1Z3",
+        "trdnm": "PUNE PRECISION CASTINGS",
+        "inv": [
+          {
+            "inum": "PPC/25-26/0101",
+            "idt": "07-11-2024",
+            "val": 897980,
+            "pos": "27",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 761000,
+                "camt": 68490,
+                "samt": 68490,
+                "iamt": 0,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "24AAJCS9012K1Z7",
+        "trdnm": "SURAT TEXTILE MILLS",
+        "inv": [
+          {
+            "inum": "STM-2526-0101",
+            "idt": "09-11-2024",
+            "val": 663600,
+            "pos": "24",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 5,
+                "txval": 632000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 31600,
+                "csamt": 0
+              }
+            ]
+          },
+          {
+            "inum": "STM-2526-0102",
+            "idt": "23-11-2024",
+            "val": 648900,
+            "pos": "24",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 5,
+                "txval": 618000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 30900,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "29AAKCT3456L1Z1",
+        "trdnm": "BENGALURU ELECTRICALS",
+        "inv": [
+          {
+            "inum": "BEL/25-26/0101",
+            "idt": "27-11-2024",
+            "val": 982940,
+            "pos": "29",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 833000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 149940,
+                "csamt": 0
+              }
+            ]
+          },
+          {
+            "inum": "BEL/25-26/0102",
+            "idt": "16-11-2024",
+            "val": 80240,
+            "pos": "29",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 68000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 12240,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "27AALCU7890M1Z6",
+        "trdnm": "MUMBAI FASTENERS PVT LTD",
+        "inv": [
+          {
+            "inum": "mfp0101",
+            "idt": "13-11-2024",
+            "val": 264320,
+            "pos": "27",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 224000,
+                "camt": 20160,
+                "samt": 20160,
+                "iamt": 0,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "07AAMCV2345N1Z2",
+        "trdnm": "DELHI PAPER MART",
+        "inv": [
+          {
+            "inum": "DPM/25-26/0101",
+            "idt": "03-11-2024",
+            "val": 407680,
+            "pos": "07",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 12,
+                "txval": 364000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 43680,
+                "csamt": 0
+              }
+            ]
+          },
+          {
+            "inum": "DPM/25-26/0102",
+            "idt": "07-11-2024",
+            "val": 80640,
+            "pos": "07",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 12,
+                "txval": 72000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 8640,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "ctin": "36AANCW6789P1Z8",
+        "trdnm": "HYDERABAD PACKAGING CO",
+        "inv": [
+          {
+            "inum": "HPC-2526-0101",
+            "idt": "10-11-2024",
+            "val": 816560,
+            "pos": "36",
+            "rev": "N",
+            "itcavl": "Y",
+            "rsn": "",
+            "items": [
+              {
+                "num": 1,
+                "rt": 18,
+                "txval": 692000,
+                "camt": 0,
+                "samt": 0,
+                "iamt": 124560,
+                "csamt": 0
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "cdnr": [],
+    "impg": [],
+    "isd": []
+  }
+}

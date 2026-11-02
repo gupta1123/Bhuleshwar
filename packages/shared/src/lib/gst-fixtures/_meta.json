@@ -1,0 +1,172 @@
+{
+  "asOf": "2025-06-10",
+  "company": {
+    "name": "Solution Nyx demo",
+    "gstin": "27AABCS1429B1ZX",
+    "fy": "2025-26",
+    "stateCode": "27"
+  },
+  "fy": "2025-26",
+  "reconPeriods": [
+    "2025-04",
+    "2025-05",
+    "2025-06"
+  ],
+  "portalPeriods": [
+    "2024-11",
+    "2025-04",
+    "2025-05",
+    "2025-06"
+  ],
+  "booksPeriods": [
+    "2024-03",
+    "2024-11",
+    "2025-04",
+    "2025-05",
+    "2025-06"
+  ],
+  "defaultSelection": [
+    "2025-04",
+    "2025-05",
+    "2025-06"
+  ],
+  "annualReturnDates": {
+    "2023-24": "2024-12-31",
+    "2024-25": "2025-12-31",
+    "2025-26": "2026-12-31"
+  },
+  "historySeed": {
+    "24AACCG5678B1Z4|GST25260105|inv": {
+      "b": "valueDiff",
+      "p": 1
+    },
+    "33AAECM7890E1Z6|MPL25260107|inv": {
+      "b": "valueDiff",
+      "p": 1
+    },
+    "29AABCK9012C1Z8|KTS25260106|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "19AAGCP6789G1Z5|BPC25260110|inv": {
+      "b": "portalOnly",
+      "p": 1
+    },
+    "24AAJCS9012K1Z7|STM25260110|inv": {
+      "b": "ineligible",
+      "p": 1
+    },
+    "27AALCU7890M1Z6|MFP0106|inv": {
+      "b": "rule37A",
+      "p": 0
+    },
+    "07AADCN3456D1Z2|NHC0109|inv": {
+      "b": "duplicate",
+      "p": 1
+    },
+    "27AAICR5678J1Z3|PPC25260107|inv": {
+      "b": "periodShift",
+      "p": 1
+    },
+    "27AAFCR1234A1ZP|RMW25260108|inv": {
+      "b": "valueDiff",
+      "p": 1
+    },
+    "27AAFCR1234A1ZP|RMW25260109|inv": {
+      "b": "valueDiff",
+      "p": 1
+    },
+    "36AAFCG2345F1Z1|GKP25260110|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "07AAMCV2345N1Z2|DPM25260109|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "29AAKCT3456L1Z1|BEL25260110|inv": {
+      "b": "portalOnly",
+      "p": 1
+    },
+    "36AANCW6789P1Z8|HPC25260107|inv": {
+      "b": "rule37A",
+      "p": 0
+    },
+    "29AABCK9012C1Z8|KTS25260107|inv": {
+      "b": "valueDiff",
+      "p": 1
+    },
+    "19AAGCP6789G1Z5|BPC25260111|inv": {
+      "b": "valueDiff",
+      "p": 1
+    },
+    "27AAFCR1234A1ZP|RMW25260110|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "36AAFCG2345F1Z1|GKP25260111|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "33AAECM7890E1Z6|MPL25260109|inv": {
+      "b": "portalOnly",
+      "p": 1
+    },
+    "24AAJCS9012K1Z7|STM25260111|inv": {
+      "b": "ineligible",
+      "p": 1
+    },
+    "27AALCU7890M1Z6|MFP0107|inv": {
+      "b": "ineligible",
+      "p": 1
+    },
+    "36AANCW6789P1Z8|HPC25260108|inv": {
+      "b": "rule37A",
+      "p": 0
+    },
+    "07AADCN3456D1Z2|NHC0110|inv": {
+      "b": "duplicate",
+      "p": 1
+    },
+    "19AAGCP6789G1Z5|BPC25260112|inv": {
+      "b": "matched",
+      "p": 1
+    },
+    "36AAFCG2345F1Z1|GKP24254471|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "24AACCG5678B1Z4|GST24251182|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "29AAKCT3456L1Z1|BEL23249104|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "27AAFCR1234A1ZP|RMW25260102|inv": {
+      "b": "booksOnly",
+      "p": 0
+    },
+    "27AADCS1234E1Z5|ISD25260042|isd": {
+      "b": "portalOnly",
+      "p": 1
+    }
+  },
+  "sources": {
+    "mode": "mock",
+    "tally": "simulated",
+    "portal": "simulated"
+  },
+  "bucketLegend": {
+    "matched": "Books, GSTR-2B and GSTR-2A agree within tolerance",
+    "valueDiff": "Present in both, but taxable value or tax differs",
+    "booksOnly": "Booked and claimed, but absent from GSTR-2B — credit not available",
+    "portalOnly": "Present in GSTR-2B/2A but never booked — do not claim",
+    "ineligible": "Blocked or unavailable ITC (Section 17(5), POS, non-filer, IMS rejection)",
+    "rule37A": "In GSTR-2A but not 2B — supplier filed GSTR-1, not GSTR-3B",
+    "reopened": "Was supported by GSTR-2B before — since withdrawn by the supplier",
+    "periodShift": "Portal reported the invoice in a later period than our books",
+    "duplicate": "Same supplier invoice booked and claimed twice"
+  }
+}

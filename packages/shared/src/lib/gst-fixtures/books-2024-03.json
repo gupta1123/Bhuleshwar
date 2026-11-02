@@ -1,0 +1,30 @@
+{
+  "companyGSTIN": "27AABCS1429B1ZX",
+  "companyName": "Solution Nyx demo",
+  "period": "2024-03",
+  "system": "Tally",
+  "generatedAt": "2024-03-28T18:12:00+05:30",
+  "vouchers": [
+    {
+      "voucherNumber": "PUR/2024/0111",
+      "voucherType": "Purchase",
+      "voucherDate": "2024-03-25",
+      "partyGSTIN": "29AAKCT3456L1Z1",
+      "partyName": "Bengaluru Electricals",
+      "supplierInvoiceNo": "BEL/23-24/9104",
+      "supplierInvoiceDate": "2024-03-25",
+      "docType": "inv",
+      "taxRate": 18,
+      "taxableValue": 342000,
+      "cgst": 0,
+      "sgst": 0,
+      "igst": 61560,
+      "cess": 0,
+      "roundOff": 0,
+      "grandTotal": 403560,
+      "natureOfTransaction": "Purchase - GST @18%",
+      "itcClaimedIn3B": true,
+      "itcEligibility": "eligible"
+    }
+  ]
+}

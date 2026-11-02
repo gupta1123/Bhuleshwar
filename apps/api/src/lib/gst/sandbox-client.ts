@@ -64,10 +64,11 @@ export function createSandboxClient(config: SandboxConfig) {
     } catch (error) {
       throw new SandboxError(`Could not reach Sandbox: ${error instanceof Error ? error.message : "network error"}`, "network");
     }
-    const json = (await response.json().catch(() => ({}))) as any;
-    const transactionId = String(json?.transaction_id ?? "");
-    const errorCode = String(json?.data?.error?.error_cd ?? "");
-    const message = String(json?.data?.error?.message ?? json?.message ?? "");
+    const json = asObj(await response.json().catch(() => ({})));
+    const failure = asObj(asObj(json.data).error);
+    const transactionId = String(json.transaction_id ?? "");
+    const errorCode = String(failure.error_cd ?? "");
+    const message = String(failure.message ?? json.message ?? "");
     if (response.status === 429) throw new SandboxError("Sandbox rate limit reached. Try again shortly.", "rate_limit", 429, errorCode, transactionId);
     if (response.status === 401 || response.status === 403 || /^AUTH/i.test(errorCode) || /invalid session|session expired/i.test(message)) {
       throw new SandboxError(message || "GST session is not valid.", "session", response.status, errorCode, transactionId);
@@ -79,15 +80,16 @@ export function createSandboxClient(config: SandboxConfig) {
   // Platform token: one per Sandbox account, shared by every client.
   async function authenticate() {
     const response = await call("/authenticate", { method: "POST", extra: { "x-api-secret": config.apiSecret } });
-    const token = String(response.json?.access_token ?? response.json?.data?.access_token ?? "");
+    const token = String(response.json.access_token ?? asObj(response.json.data).access_token ?? "");
     if (!token) throw new SandboxError("Sandbox did not return an access token.", "auth");
     return { accessToken: token, expiresAt: jwtExpiry(token) ?? now() + 23 * 3_600_000 };
   }
 
-  function sessionFrom(json: any): TaxpayerSession {
-    const token = String(json?.data?.access_token ?? "");
+  function sessionFrom(json: Obj): TaxpayerSession {
+    const data = asObj(json.data);
+    const token = String(data.access_token ?? "");
     if (!token) throw new SandboxError("Sandbox did not return a GST session token.", "otp");
-    return { token, sessionExpiry: Number(json.data.session_expiry), tokenExpiry: Number(json.data.token_expiry) };
+    return { token, sessionExpiry: Number(data.session_expiry), tokenExpiry: Number(data.token_expiry) };
   }
 
   async function generateOtp(platformToken: string, input: { gstin: string; username: string }) {
@@ -127,11 +129,11 @@ export function createSandboxClient(config: SandboxConfig) {
     const { year, month } = periodParts(period);
     const path = `${base}/gstr-2b/${year}/${month}`;
     const first = await taxpayerGet(session, path);
-    const inner = first.json?.data;
+    const inner = asObj(first.json.data);
     // Large 2B returns come in numbered files (status_cd 3); merge them back.
-    const fileCount = Number(inner?.status_cd) === 3 ? Number(inner?.data?.fc ?? inner?.fc ?? 0) : 0;
+    const fileCount = Number(inner.status_cd) === 3 ? Number(asObj(inner.data).fc ?? inner.fc ?? 0) : 0;
     if (!fileCount) return { payload: first.json, transactionId: first.transactionId, calls: 1 };
-    let merged: any = null;
+    let merged: Obj | null = null;
     for (let file = 1; file <= fileCount; file += 1) {
       const part = await taxpayerGet(session, path, { file_number: file });
       merged = merged ? mergeGstr2b(merged, part.json) : part.json;
@@ -145,7 +147,7 @@ export function createSandboxClient(config: SandboxConfig) {
     let transactionId = "";
     for (const section of sections) {
       const part = await taxpayerGet(session, `${base}/gstr-2a/${section}/${year}/${month}`);
-      Object.assign(out, part.json?.data?.data ?? {});
+      Object.assign(out, asObj(asObj(part.json.data).data));
       transactionId = part.transactionId || transactionId;
     }
     return { payload: { code: 200, data: { status_cd: "1", data: out } }, transactionId, calls: sections.length };
@@ -174,13 +176,22 @@ export function createSandboxClient(config: SandboxConfig) {
   return { authenticate, generateOtp, verifyOtp, refreshSession, ensureSession, getGstr2b, getGstr2a, getGstr3b, searchGstin, trackReturns };
 }
 
-function mergeGstr2b(a: any, b: any) {
-  const docA = a?.data?.data?.docdata ?? {};
-  const docB = b?.data?.data?.docdata ?? {};
+type Obj = { [key: string]: unknown };
+
+function asObj(value: unknown): Obj {
+  return value && typeof value === "object" ? (value as Obj) : {};
+}
+
+function mergeGstr2b(a: Obj, b: Obj) {
+  const target = asObj(asObj(a.data).data);
+  const docA = asObj(target.docdata);
+  const docB = asObj(asObj(asObj(b.data).data).docdata);
   for (const key of Object.keys(docB)) {
-    docA[key] = Array.isArray(docA[key]) && Array.isArray(docB[key]) ? [...docA[key], ...docB[key]] : (docA[key] ?? docB[key]);
+    const left = docA[key];
+    const right = docB[key];
+    docA[key] = Array.isArray(left) && Array.isArray(right) ? [...left, ...right] : (left ?? right);
   }
-  if (a?.data?.data) a.data.data.docdata = docA;
+  target.docdata = docA;
   return a;
 }
 

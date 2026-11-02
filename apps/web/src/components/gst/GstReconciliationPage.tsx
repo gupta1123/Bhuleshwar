@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/dashboard/AppShell";
 import { Loader2, RefreshCw } from "lucide-react";
 import {
-  ago, gstCall, periodLabel, readGstScope, recentPeriods,
+  ago, gstCall, periodLabel, recentPeriods, resolveGstScope,
   type GstMonth, type GstRun, type GstScopeInput,
 } from "@/lib/gst-client";
 import { OverviewView, ReviewView, WorklistView } from "./GstViews";
@@ -27,7 +27,7 @@ export default function GstReconciliationPage() {
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
 
-  useEffect(() => setScope(readGstScope()), []);
+  useEffect(() => { void resolveGstScope().then(setScope); }, []);
 
   const loadSaved = useCallback(async (current: GstScopeInput, selected: string[]) => {
     const [ready, latest] = await Promise.all([

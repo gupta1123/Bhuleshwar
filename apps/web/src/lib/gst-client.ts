@@ -21,6 +21,27 @@ export function readGstScope(): GstScopeInput | null {
   }
 }
 
+type ConnectionSummary = { id?: string; lastCompanyName?: string | null; bridgeConnected?: boolean; companyLoaded?: boolean };
+
+// The saved company choice can point at a connector that was since replaced.
+// Fall back to the company the live connector has loaded in Tally.
+export async function resolveGstScope(): Promise<GstScopeInput | null> {
+  const saved = readGstScope();
+  if (saved) return saved;
+  try {
+    const response = await apiFetch("/api/tally/connections", { cache: "no-store" });
+    if (!response.ok) return null;
+    const payload = await response.json() as { connections?: ConnectionSummary[] };
+    const live = (payload.connections ?? []).filter((c) => c.id && c.lastCompanyName && c.bridgeConnected && c.companyLoaded);
+    const preferred = readPreferredTallyConnectionId();
+    const pick = live.find((c) => c.id === preferred) ?? live[0];
+    if (!pick?.id || !pick.lastCompanyName) return null;
+    return { connectionId: pick.id, companyName: pick.lastCompanyName };
+  } catch {
+    return null;
+  }
+}
+
 export class GstApiError extends Error {
   constructor(message: string, readonly status: number, readonly code?: string) {
     super(message);

@@ -57,6 +57,21 @@ type BrowserLiveSession = {
 export type BankJobEvent = { type: string; jobId: string; importId?: string; revision: number; state: string };
 
 const SESSION_MAX_AGE_MS = 2 * 60_000;
+
+// A dropped or stalled live channel is a transport problem, not an answer from
+// Tally. Read-only requests are retried on a fresh channel; anything that can
+// change data is never retried automatically.
+class LiveChannelError extends Error {
+  constructor(message: string) { super(message); this.name = "LiveChannelError"; }
+}
+const RETRYABLE_OPERATIONS = new Set<string>([
+  "company_check", "bank_ledgers", "ledger_masters", "ledger_suggestions",
+  "test_purchase_document_folder", "collections_query", "collections_rows",
+]);
+const MAX_LIVE_ATTEMPTS = 3;
+// Saved-catalogue reads answer in seconds; a longer silence means the answer
+// was lost on a dropped channel. Fresh full reads of Tally keep the long wait.
+const QUICK_READ_STALL_MS = 60_000;
 let cachedGatewayUrl: Promise<string> | null = null;
 let cachedSession: BrowserLiveSession | null = null;
 registerAccessCache('tally-live-session',()=>{if(cachedSession)closeSession(cachedSession);});
@@ -205,20 +220,20 @@ function createSession(params: {
         if (message.success === true) pending.resolve(message.data);
         else pending.reject(new Error(message.error || "The live Tally request failed."));
       } else if (message.type === "error") {
-        endSession(session, new Error(message.error || "The live Cash Discount channel failed."));
+        endSession(session, new LiveChannelError(message.error || "The live Cash Discount channel failed."));
       }
     } catch {
       endSession(session, new Error("The live Cash Discount channel returned an invalid response."));
     }
   });
   socket.addEventListener("error", () => {
-    endSession(session, new Error("Could not connect to the live Cash Discount channel. Start the gateway and connector, then try again."));
+    endSession(session, new LiveChannelError("Could not connect to the live Cash Discount channel. Start the gateway and connector, then try again."));
   });
   socket.addEventListener("close", () => {
-    endSession(session, new Error("The live Cash Discount channel closed before the request completed."));
+    endSession(session, new LiveChannelError("The live Cash Discount channel closed before the request completed."));
   });
   session.authTimeout = window.setTimeout(() => {
-    endSession(session, new Error("Live Tally connection timed out. Check the connector and retry."));
+    endSession(session, new LiveChannelError("Live Tally connection timed out. Check the connector and retry."));
     socket.close();
   }, 15_000);
   return session;
@@ -298,7 +313,26 @@ export function watchBankJob(params: { connectionId: string; companyName: string
   return () => { stopped = true; clearTimeout(retry); detach(); };
 }
 
-export async function runCashDiscountLiveRequest<T>(request: LiveRequest) {
+export async function runCashDiscountLiveRequest<T>(request: LiveRequest): Promise<T> {
+  if (!RETRYABLE_OPERATIONS.has(request.operation)) return runLiveRequestOnce<T>(request);
+  const quickRead = request.payload?.requireFresh !== true &&
+    (request.operation === "ledger_masters" || request.operation === "company_check");
+  let lastError: unknown;
+  for (let attempt = 1; attempt <= MAX_LIVE_ATTEMPTS; attempt += 1) {
+    request.signal?.throwIfAborted();
+    try {
+      return await runLiveRequestOnce<T>(request, quickRead ? QUICK_READ_STALL_MS : undefined);
+    } catch (error) {
+      lastError = error;
+      if (!(error instanceof LiveChannelError) || attempt === MAX_LIVE_ATTEMPTS) throw error;
+      request.onProgress?.(`Connection to the local agent dropped. Retrying (${attempt + 1} of ${MAX_LIVE_ATTEMPTS})…`);
+      await new Promise((resolve) => window.setTimeout(resolve, 1000 * attempt));
+    }
+  }
+  throw lastError;
+}
+
+async function runLiveRequestOnce<T>(request: LiveRequest, stallMs?: number): Promise<T> {
   const epoch=accessCacheEpoch();
   request.signal?.throwIfAborted();
   const session = await getLiveSession(request);
@@ -325,10 +359,16 @@ export async function runCashDiscountLiveRequest<T>(request: LiveRequest) {
         }
         request.signal?.removeEventListener("abort", cancel);
         session.pending.delete(requestId);
+        if (stallMs) {
+          // No answer: drop this channel so the retry opens a fresh one.
+          closeSession(session);
+          reject(new LiveChannelError("The local agent did not answer in time."));
+          return;
+        }
         reject(new Error("The live Tally request timed out. Check the connector and try again."));
       },
       // Pages of a held dashboard are answered from memory; scans read Tally.
-      request.operation === "collections_query" || request.operation === "collections_rows" ? 30_000 : 4 * 60_000
+      stallMs ?? (request.operation === "collections_query" || request.operation === "collections_rows" ? 30_000 : 4 * 60_000)
     );
     session.pending.set(requestId, {
       operation: request.operation,

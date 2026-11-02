@@ -1470,7 +1470,7 @@ async function readCompanyAddress(tallyUrl, companyName) {
   const xml = await exportTallyCollection(tallyUrl, {
     collectionName: "Kalika Company Address",
     tallyType: "Company",
-    fetchFields: "Name,Address,PinCode,StateName",
+    fetchFields: "Name,Address,PinCode,StateName,CountryName,GSTRegistrationNumber",
     companyName: null,
     timeoutMs: 8_000,
   });
@@ -1486,9 +1486,65 @@ async function readCompanyAddress(tallyUrl, companyName) {
     address,
     pincode: getTagText(block, "PINCODE") || "",
     state: getTagText(block, "STATENAME") || "",
+    country: getTagText(block, "COUNTRYNAME") || "",
+    gstin: getTagText(block, "GSTREGISTRATIONNUMBER") || "",
   } : null;
   companyAddressCache.set(key, result);
   return result;
+}
+
+// The supplier ledger's own mailing details. Tally shows these on the e-way bill
+// (Consignor) and Party Details screens, and fills them only from voucher header tags.
+async function readPartyMailing(tallyUrl, companyName, ledgerName) {
+  const name = String(ledgerName || "").trim();
+  if (!name || name.includes('"')) return null;
+  const xml = await exportTallyCollection(tallyUrl, {
+    collectionName: "Kalika Party Mailing",
+    tallyType: "Ledger",
+    fetchFields: "Name,MailingName,PartyGSTIN,LedStateName,CountryName,Address,PinCode",
+    companyName,
+    formulae: [{ name: "KalikaPartyByName", formula: `$Name = "${name}"` }],
+    filterNames: ["KalikaPartyByName"],
+    timeoutMs: 8_000,
+  });
+  const block = extractBlocks(xml, "LEDGER").find((candidate) =>
+    String(getTagText(candidate, "NAME") || getAttribute(candidate, "NAME") || "").trim().toLowerCase() === name.toLowerCase()
+  );
+  if (!block) return null;
+  return {
+    mailingName: getTagText(block, "MAILINGNAME") || name,
+    gstin: getTagText(block, "PARTYGSTIN") || "",
+    state: getTagText(block, "LEDSTATENAME") || "",
+    country: getTagText(block, "COUNTRYNAME") || "",
+    address: [...block.matchAll(/<ADDRESS(?:\s[^>]*)?>([\s\S]*?)<\/ADDRESS>/gi)]
+      .map((match) => cleanXmlText(match[1]).trim()).filter(Boolean).slice(0, 4),
+  };
+}
+
+function buildPurchasePartyHeaderXml(header) {
+  if (!header || typeof header !== "object") return "";
+  const clean = (input) => escapeXml(String(input ?? "").replace(/\s+/g, " ").trim());
+  const tag = (name, input) => (String(input ?? "").trim() ? `<${name}>${clean(input)}</${name}>` : "");
+  const lines = (name, item, values) => {
+    const rows = (Array.isArray(values) ? values : [values]).map((line) => String(line ?? "").trim()).filter(Boolean);
+    return rows.length ? `<${name} TYPE="String">${rows.map((line) => `<${item}>${clean(line)}</${item}>`).join("")}</${name}>` : "";
+  };
+  return [
+    tag("PARTYMAILINGNAME", header.partyMailingName),
+    tag("PARTYGSTIN", header.partyGstin),
+    tag("STATENAME", header.partyState),
+    tag("COUNTRYOFRESIDENCE", header.partyCountry),
+    tag("PLACEOFSUPPLY", header.placeOfSupply),
+    lines("ADDRESS.LIST", "ADDRESS", header.partyAddress),
+    tag("CMPGSTIN", header.companyGstin),
+    tag("CMPGSTSTATE", header.companyState),
+    tag("BASICBUYERNAME", header.companyName),
+    tag("CONSIGNEEMAILINGNAME", header.companyName),
+    tag("CONSIGNEEGSTIN", header.companyGstin),
+    tag("CONSIGNEESTATENAME", header.companyState),
+    tag("CONSIGNEECOUNTRYNAME", header.companyCountry),
+    lines("BASICBUYERADDRESS.LIST", "BASICBUYERADDRESS", header.companyAddress),
+  ].join("");
 }
 
 // Tally's Party Details screen: Receipt Details and Order Details on the purchase voucher.
@@ -1497,7 +1553,12 @@ function buildPurchasePartyDetailsXml(details) {
   const clean = (input) => escapeXml(String(input ?? "").replace(/\s+/g, " ").trim());
   const tag = (name, input) => (String(input ?? "").trim() ? `<${name}>${clean(input)}</${name}>` : "");
   const lrDate = /^\d{4}-\d{2}-\d{2}/.test(String(details.lrDate || "")) ? toIsoLikeDate(details.lrDate) : "";
+  const noteDate = /^\d{4}-\d{2}-\d{2}/.test(String(details.receiptNoteDate || "")) ? toIsoLikeDate(details.receiptNoteDate) : "";
   return [
+    String(details.receiptNote ?? "").trim()
+      ? `<INVOICEDELNOTES.LIST>${noteDate ? `<BASICSHIPPINGDATE>${noteDate}</BASICSHIPPINGDATE>` : ""}${tag("BASICSHIPDELIVERYNOTE", details.receiptNote)}</INVOICEDELNOTES.LIST>`
+      : "",
+    tag("TRANSPORTERNAME", details.carrierName),
     tag("BASICSHIPDOCUMENTNO", details.receiptDocNo),
     tag("BASICSHIPPEDBY", details.dispatchedThrough),
     tag("BASICFINALDESTINATION", details.destination),
@@ -1677,6 +1738,7 @@ function buildPurchaseVoucherXml(payload, fallbackCompanyName) {
     "<ISINVOICE>Yes</ISINVOICE>",
     "<ISOPTIONAL>No</ISOPTIONAL>",
     "<DIFFACTUALQTY>No</DIFFACTUALQTY>",
+    buildPurchasePartyHeaderXml(payload?.partyHeader),
     buildPurchasePartyDetailsXml(payload?.partyDetails),
     `<NARRATION>${escapeXml(narration)}</NARRATION>`,
     buildPurchaseEwayBillXml(payload?.ewayBill),
@@ -2719,12 +2781,29 @@ async function postPurchaseVoucher(tallyUrl, payload, companyName, options = {})
   // E-way bill consignee is the company's own address from Tally. If it cannot
   // be read, the e-way bill's Ship To place/PIN are used instead.
   let postingPayload = numberedPayload;
-  if (payload?.ewayBill) {
-    const companyAddress = await readCompanyAddress(tallyUrl, companyName).catch(() => null);
-    if (companyAddress) {
-      postingPayload = { ...numberedPayload, ewayBill: { ...payload.ewayBill, consignee: { ...companyAddress, name: companyName } } };
-    }
+  const companyAddress = await readCompanyAddress(tallyUrl, companyName).catch(() => null);
+  if (payload?.ewayBill && companyAddress) {
+    postingPayload = { ...numberedPayload, ewayBill: { ...payload.ewayBill, consignee: { ...companyAddress, name: companyName } } };
   }
+  // Supplier mailing name/GSTIN/state and the company's own details go in the voucher
+  // header; the e-way bill and Party Details screens read them from there.
+  const partyMailing = await readPartyMailing(tallyUrl, companyName, payload?.supplierLedgerName).catch(() => null);
+  postingPayload = {
+    ...postingPayload,
+    partyHeader: {
+      partyMailingName: partyMailing?.mailingName || payload?.supplierLedgerName,
+      partyGstin: partyMailing?.gstin || payload?.supplierGstin,
+      partyState: partyMailing?.state,
+      partyCountry: partyMailing?.country || "India",
+      partyAddress: partyMailing?.address,
+      placeOfSupply: companyAddress?.state,
+      companyName,
+      companyGstin: companyAddress?.gstin,
+      companyState: companyAddress?.state,
+      companyCountry: companyAddress?.country || "India",
+      companyAddress: companyAddress?.address ? [companyAddress.address] : [],
+    },
+  };
   let xml = buildPurchaseVoucherXml(postingPayload, companyName);
   let importOutcome;
   try {

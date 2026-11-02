@@ -1400,6 +1400,18 @@ test("purchase vouchers record the supplier e-way bill as reference, like the cl
   assert.match(withParty, /<BILLOFLADINGNO>LR\/4417<\/BILLOFLADINGNO><BILLOFLADINGDATE>20261025<\/BILLOFLADINGDATE><BASICSHIPVESSELNO>MH31DK4821<\/BASICSHIPVESSELNO>/);
   assert.match(withParty, /<BASICDUEDATEOFPYMT>30 days from invoice<\/BASICDUEDATEOFPYMT><BASICORDERREF>BPO\/26-27\/0221<\/BASICORDERREF><BASICORDERTERMS>To-Pay<\/BASICORDERTERMS>/);
   assert.doesNotMatch(buildPurchaseVoucherXml(payload, payload.companyName), /BASICSHIPPEDBY|BILLOFLADING/);
+  // Carrier name is the voucher-level TRANSPORTERNAME; the receipt note is a list with its date.
+  const withNote = buildPurchaseVoucherXml({ ...payload, partyDetails: { carrierName: "Kedar Transport Co", receiptNote: "WS-90114", receiptNoteDate: "2026-10-24" } }, payload.companyName);
+  assert.match(withNote, /<INVOICEDELNOTES\.LIST><BASICSHIPPINGDATE>20261024<\/BASICSHIPPINGDATE><BASICSHIPDELIVERYNOTE>WS-90114<\/BASICSHIPDELIVERYNOTE><\/INVOICEDELNOTES\.LIST><TRANSPORTERNAME>Kedar Transport Co<\/TRANSPORTERNAME>/);
+  // Party and company identity go in the header, where the e-way and Party Details screens read them.
+  const withHeader = buildPurchaseVoucherXml({ ...payload, partyHeader: { partyMailingName: "Vidarbha Iron Resources", partyGstin: "27AAEFV7421L1ZT",
+    partyState: "Maharashtra", partyCountry: "India", partyAddress: ["MIDC Hingna, Nagpur"], placeOfSupply: "Maharashtra", companyName: "Solution Nyx",
+    companyGstin: "27BBBBB0000B1Z5", companyState: "Maharashtra", companyCountry: "India", companyAddress: ["Pune"] } }, payload.companyName);
+  assert.match(withHeader, /<PARTYMAILINGNAME>Vidarbha Iron Resources<\/PARTYMAILINGNAME><PARTYGSTIN>27AAEFV7421L1ZT<\/PARTYGSTIN><STATENAME>Maharashtra<\/STATENAME>/);
+  assert.match(withHeader, /<CMPGSTIN>27BBBBB0000B1Z5<\/CMPGSTIN>/);
+  assert.match(withHeader, /<CONSIGNEEMAILINGNAME>Solution Nyx<\/CONSIGNEEMAILINGNAME><CONSIGNEEGSTIN>27BBBBB0000B1Z5<\/CONSIGNEEGSTIN>/);
+  assert.match(withHeader, /<ADDRESS\.LIST TYPE="String"><ADDRESS>MIDC Hingna, Nagpur<\/ADDRESS><\/ADDRESS\.LIST>/);
+  assert.doesNotMatch(buildPurchaseVoucherXml(payload, payload.companyName), /PARTYMAILINGNAME|CMPGSTIN/);
   // No e-way bill, or an invalid number: the voucher is exactly as before.
   assert.doesNotMatch(buildPurchaseVoucherXml({ ...payload, ewayBill: undefined }, payload.companyName), /EWAYBILL/);
   assert.doesNotMatch(buildPurchaseVoucherXml({ ...payload, ewayBill: { ...payload.ewayBill, number: "12345" } }, payload.companyName), /EWAYBILL/);

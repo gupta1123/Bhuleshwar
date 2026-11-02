@@ -979,6 +979,9 @@ function emptyEwayBill(): PurchaseEwayBill {
 // purchase voucher, filled from the packet's weighment slip, lorry receipt and
 // purchase order. Empty values are dropped so nothing is overwritten with blanks.
 export type PurchasePartyDetails = {
+  receiptNote?: string;
+  receiptNoteDate?: string;
+  carrierName?: string;
   receiptDocNo?: string;
   dispatchedThrough?: string;
   destination?: string;
@@ -1001,7 +1004,11 @@ function packetPartyDetails(
   const weighment = first(/weigh(?:ment|bridge)/i);
   const lorry = first(/lorry\s*receipt/i);
   const order = first(/purchase\s*order/i);
+  const transporter = text(lorry.transporterName) || context.ewayBill?.transporterName || "";
   const details: PurchasePartyDetails = {
+    receiptNote: text(weighment.weighmentNumber),
+    receiptNoteDate: parseDate(text(weighment.weighmentDate || weighment.date).split(/\s+/)[0]),
+    carrierName: transporter,
     receiptDocNo: text(weighment.weighmentNumber),
     dispatchedThrough: text(lorry.transporterName) || context.ewayBill?.transporterName || "",
     destination: text(lorry.routeTo) || context.ewayBill?.toPlace || "",

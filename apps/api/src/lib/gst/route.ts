@@ -3,6 +3,7 @@ import { GstServiceError } from './service';
 import { GstScopeError, resolveGstScope, type GstScope } from './scope';
 import { PullBlockedError } from './return-store';
 import { SandboxError } from './sandbox-client';
+import { BooksError } from './books';
 
 // Shared plumbing for the /api/gst routes: body, scope, and error mapping.
 export async function gstRoute(request: Request, run: (scope: GstScope, body: Record<string, unknown>) => Promise<unknown>) {
@@ -14,6 +15,7 @@ export async function gstRoute(request: Request, run: (scope: GstScope, body: Re
     return jsonWithCors(request, await run(scope, body));
   } catch (error) {
     if (error instanceof GstScopeError) return jsonWithCors(request, { error: error.message }, { status: error.status });
+    if (error instanceof BooksError) return jsonWithCors(request, { error: error.message }, { status: error.status });
     if (error instanceof GstServiceError) return jsonWithCors(request, { error: error.message, code: error.code }, { status: error.status });
     if (error instanceof PullBlockedError) return jsonWithCors(request, { error: error.message, code: error.kind, retryAt: error.retryAt }, { status: 429 });
     if (error instanceof SandboxError) return jsonWithCors(request, { error: error.message, code: error.kind, portalCode: error.errorCode || undefined }, { status: 502 });

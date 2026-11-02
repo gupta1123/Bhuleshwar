@@ -21,7 +21,8 @@ export type TallyBridgeCommandType =
   | "agent_diagnostics"
   | "agent_query_open_bills"
   | "agent_query_workflow_vouchers"
-  | "agent_voucher_identity";
+  | "agent_voucher_identity"
+  | "fetch_purchase_register";
 
 export type TallyBridgeCommandStatus =
   | "queued"
@@ -86,6 +87,7 @@ export const TALLY_BRIDGE_COMMAND_TYPES: TallyBridgeCommandType[] = [
   "agent_query_open_bills",
   "agent_query_workflow_vouchers",
   "agent_voucher_identity",
+  "fetch_purchase_register",
 ];
 
 export function serializeTallyBridgeCommand(row: TallyBridgeCommandRow) {

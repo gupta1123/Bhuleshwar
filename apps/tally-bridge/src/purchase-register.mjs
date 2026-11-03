@@ -60,12 +60,26 @@ export function buildDayBookXml(company, from, to) {
   return `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Data</TYPE><ID>Day Book</ID></HEADER><BODY><DESC><STATICVARIABLES><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT><SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY><SVFROMDATE>${from}</SVFROMDATE><SVTODATE>${to}</SVTODATE></STATICVARIABLES></DESC></BODY></ENVELOPE>`;
 }
 
-// A voucher collection answers for any company period; the Day Book report returns
-// nothing when the date range is outside the period Tally has open for that company.
-export const buildVoucherCollectionXml = (company) => collectionXml(company, "Voucher",
+const MONTH_NAMES = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+// 20260901 -> 01-Sep-2026, the date literal Tally's formulae understand in any regional setting.
+const tdlDate = (value) => `${value.slice(6, 8)}-${MONTH_NAMES[Number(value.slice(4, 6)) - 1]}-${value.slice(0, 4)}`;
+
+const VOUCHER_FETCH =
   "DATE,VOUCHERTYPENAME,VOUCHERNUMBER,REFERENCE,REFERENCEDATE,PARTYLEDGERNAME,PARTYGSTIN,NARRATION,ISCANCELLED,ISOPTIONAL," +
   "LEDGERENTRIES.LEDGERNAME,LEDGERENTRIES.AMOUNT,ALLLEDGERENTRIES.LEDGERNAME,ALLLEDGERENTRIES.AMOUNT," +
-  "ALLINVENTORYENTRIES.ACCOUNTINGALLOCATIONS.LEDGERNAME,ALLINVENTORYENTRIES.ACCOUNTINGALLOCATIONS.AMOUNT");
+  "ALLINVENTORYENTRIES.ACCOUNTINGALLOCATIONS.LEDGERNAME,ALLINVENTORYENTRIES.ACCOUNTINGALLOCATIONS.AMOUNT";
+
+// A voucher collection answers for any company period; the Day Book report returns
+// nothing when the date range is outside the period Tally has open for that company.
+// With a from/to the month is filtered inside Tally. Without it a company with years of
+// vouchers sends every one of them, which is far too slow (it timed out at 60 s).
+export function buildVoucherCollectionXml(company, from, to) {
+  if (!from || !to) return collectionXml(company, "Voucher", VOUCHER_FETCH);
+  return `<ENVELOPE><HEADER><VERSION>1</VERSION><TALLYREQUEST>Export</TALLYREQUEST><TYPE>Collection</TYPE><ID>GstRecoColl</ID></HEADER>
+<BODY><DESC><STATICVARIABLES><SVCURRENTCOMPANY>${escapeXml(company)}</SVCURRENTCOMPANY><SVEXPORTFORMAT>$$SysName:XML</SVEXPORTFORMAT></STATICVARIABLES>
+<TDL><TDLMESSAGE><COLLECTION NAME="GstRecoColl" ISMODIFY="No"><TYPE>Voucher</TYPE><FETCH>${VOUCHER_FETCH}</FETCH><FILTERS>GstRecoMonth</FILTERS></COLLECTION>
+<SYSTEM TYPE="Formulae" NAME="GstRecoMonth">$Date &gt;= $$Date:"${tdlDate(from)}" AND $Date &lt;= $$Date:"${tdlDate(to)}"</SYSTEM></TDLMESSAGE></TDL></DESC></BODY></ENVELOPE>`;
+}
 
 function parseNamedParents(xml, tag, extra) {
   const map = new Map();
@@ -167,7 +181,7 @@ export async function fetchPurchaseRegister({ exportXml, company, period }) {
   const ledgers = parseLedgerMasters(await exportXml(buildLedgerMasterXml(company), "GST register ledgers"));
   const groups = parseGroups(await exportXml(buildGroupMasterXml(company), "GST register groups"));
   const voucherTypes = parseVoucherTypes(await exportXml(buildVoucherTypeXml(company), "GST register voucher types"));
-  let dayBook = await exportXml(buildVoucherCollectionXml(company), "GST register vouchers");
+  let dayBook = await exportXml(buildVoucherCollectionXml(company, from, to), "GST register vouchers");
   if (!blocks(dayBook, "VOUCHER").length) dayBook = await exportXml(buildDayBookXml(company, from, to), "GST register day book");
   const { vouchers, skipped } = parsePurchaseRegister(dayBook, { ledgers, groups, voucherTypes, period });
   return {

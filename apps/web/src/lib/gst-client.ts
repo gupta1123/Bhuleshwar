@@ -71,7 +71,18 @@ export async function gstCall<T = Record<string, unknown>>(
 
 export const inr = (value: unknown) => {
   const n = Number(value) || 0;
-  return `${n < 0 ? "-" : ""}₹${Math.abs(n).toLocaleString("en-IN", { maximumFractionDigits: 2 })}`;
+  const abs = Math.abs(n);
+  return `${n < 0 ? "-" : ""}₹${abs.toLocaleString("en-IN", { minimumFractionDigits: Number.isInteger(abs) ? 0 : 2, maximumFractionDigits: 2 })}`;
+};
+
+// Lakh / crore shorthand for headline figures; full rupees stay in tables.
+export const inrShort = (value: unknown) => {
+  const n = Number(value) || 0;
+  const abs = Math.abs(n);
+  const sign = n < 0 ? "-" : "";
+  if (abs >= 1e7) return sign + "₹" + (abs / 1e7).toFixed(2) + " Cr";
+  if (abs >= 1e5) return sign + "₹" + (abs / 1e5).toFixed(2) + " L";
+  return inr(n);
 };
 
 export function ago(iso?: string | null) {

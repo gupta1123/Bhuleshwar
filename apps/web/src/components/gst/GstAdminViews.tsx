@@ -1,11 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { Plug, Users } from "lucide-react";
 import { ago, gstCall, inr, type GstRun, type GstScopeInput } from "@/lib/gst-client";
-
-const card = "rounded-2xl border border-[#e5ddd0] bg-white p-5 shadow-sm";
-const input = "h-9 rounded-lg border border-[#e5ddd0] bg-white px-3 text-xs";
-const button = "h-9 rounded-lg bg-[#2d2d2d] px-4 text-xs font-bold text-white disabled:opacity-50";
+import { Alert, btn, btnPrimary, Empty, inputCls, Panel, Pill, td, th } from "./gst-ui";
 
 type Supplier = { gstin: string; legalName: string | null; tradeName: string | null; status: string; taxpayerType: string; verifiedAt: string; warning: string | null };
 
@@ -31,33 +29,35 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
     } catch (e) { setError(e instanceof Error ? e.message : "Lookup failed."); } finally { setBusy(""); }
   }
 
-  if (!run) return <div className={`${card} text-sm font-semibold text-slate-500`}>No reconciliation yet.</div>;
+  if (!run) return <Empty icon={<Users className="h-7 w-7" />} title="No suppliers yet" text="Suppliers appear here after the first reconciliation." />;
   return (
     <div className="space-y-3">
-      <p className="text-xs font-semibold text-slate-500">Status checks use one GST call each and are saved for 60 days. They run only when you press Check.</p>
-      {error && <p className="rounded-lg bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-800">{error}</p>}
-      <section className="overflow-x-auto rounded-2xl border border-[#e5ddd0] bg-white shadow-sm">
-        <table className="w-full min-w-[820px] text-left text-xs">
-          <thead className="bg-[#fcfbfa] text-[10px] font-bold uppercase tracking-wider text-slate-400">
-            <tr><th className="px-4 py-3">Supplier</th><th>Invoices</th><th>Open</th><th>Claimed</th><th>At risk</th><th>Filing pattern</th><th className="pr-4">Portal status</th></tr>
+      <p className="text-[11.5px] text-[#8a7f72]">A status check uses one GST call and is saved for 60 days. It runs only when you press Check.</p>
+      {error && <Alert tone="bad">{error}</Alert>}
+      <section className="overflow-hidden rounded-xl border border-[#ded8d0] bg-white">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[820px] border-collapse text-left">
+          <thead>
+            <tr><th className={th}>Supplier</th><th className={`${th} text-right`}>Invoices</th><th className={`${th} text-right`}>Open</th><th className={`${th} text-right`}>Claimed</th><th className={`${th} text-right`}>At risk</th><th className={th}>Filing</th><th className={th}>Portal status</th></tr>
           </thead>
-          <tbody className="font-semibold">
+          <tbody>
             {suppliers.map((s) => {
               const profile = profiles[s.gstin];
               return (
-                <tr key={s.gstin} className="border-t border-[#efe8dc]">
-                  <td className="px-4 py-3"><div className="font-extrabold">{s.name || profile?.legalName || s.gstin}</div><div className="text-slate-400">{s.gstin}</div></td>
-                  <td>{s.invoices}</td><td>{s.exceptions}</td><td>{inr(s.claimed)}</td><td>{s.atRisk ? inr(s.atRisk) : "-"}</td>
-                  <td className="capitalize">{s.filer}</td>
-                  <td className="pr-4">
+                <tr key={s.gstin} className="h-[52px] border-b border-[#ece6dc]">
+                  <td className={td}><span className="block max-w-[30ch] truncate text-[12.5px] font-medium text-[#1a1a1a]">{s.name || profile?.legalName || s.gstin}</span><span className="font-mono text-[10.5px] text-[#8a7f72]">{s.gstin}</span></td>
+                  <td className={`${td} text-right tabular-nums`}>{s.invoices}</td><td className={`${td} text-right tabular-nums`}>{s.exceptions}</td><td className={`${td} text-right tabular-nums`}>{inr(s.claimed)}</td>
+                  <td className={`${td} text-right font-semibold tabular-nums ${s.atRisk ? "text-[#991b1b]" : "text-[#b5a99a]"}`}>{s.atRisk ? inr(s.atRisk) : "—"}</td>
+                  <td className={td}><Pill tone={s.filer === "regular" ? "ok" : s.filer === "irregular" ? "warn" : s.filer === "non-filer" ? "bad" : "stone"}>{s.filer ? s.filer.charAt(0).toUpperCase() + s.filer.slice(1) : "Unknown"}</Pill></td>
+                  <td className={td}>
                     {profile ? (
                       <div>
-                        <span className={profile.warning ? "text-rose-700" : "text-emerald-700"}>{profile.status} · {profile.taxpayerType || "n/a"}</span>
-                        <div className="text-[10px] text-slate-400">checked {ago(profile.verifiedAt)}</div>
-                        {profile.warning && <div className="text-[10px] text-rose-700">{profile.warning}</div>}
+                        <Pill tone={profile.warning ? "bad" : "ok"}>{profile.status} · {profile.taxpayerType || "n/a"}</Pill>
+                        <div className="mt-0.5 text-[10.5px] text-[#8a7f72]">checked {ago(profile.verifiedAt)}</div>
+                        {profile.warning && <div className="text-[10.5px] text-[#991b1b]">{profile.warning}</div>}
                       </div>
                     ) : (
-                      <button disabled={!!busy} onClick={() => check(s.gstin, false)} className="rounded-lg border border-[#e5ddd0] px-3 py-1 text-[11px] font-bold disabled:opacity-50">
+                      <button disabled={!!busy} onClick={() => check(s.gstin, false)} className={btn}>
                         {busy === s.gstin ? "Checking…" : "Check"}
                       </button>
                     )}
@@ -67,6 +67,7 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
             })}
           </tbody>
         </table>
+        </div>
       </section>
     </div>
   );
@@ -97,50 +98,45 @@ export function ConnectView({ scope }: { scope: GstScopeInput }) {
   const active = status?.connected && status.status === "active";
   return (
     <div className="space-y-4">
-      <section className={card}>
-        <h3 className="text-sm font-extrabold">GST account</h3>
-        {!status ? <p className="mt-2 text-xs text-slate-500">Loading…</p> : status.connected ? (
-          <div className="mt-2 space-y-1 text-xs font-semibold text-slate-600">
-            <div>GSTIN {status.gstin} · user {status.username}</div>
-            <div className={active ? "text-emerald-700" : "text-rose-700"}>
-              {active ? `Connected until ${new Date(status.sessionExpiry ?? "").toLocaleDateString("en-IN")}` : "Session ended. Send a new OTP below."}
-            </div>
-            <div>GST calls used in the last 24 hours: {status.callsLast24h} of {status.dailyCap}</div>
-          </div>
-        ) : <p className="mt-2 text-xs font-semibold text-slate-500">No GST account connected for this company yet.</p>}
-      </section>
+      <Panel title="GST account" action={status?.connected ? <Pill tone={active ? "ok" : "bad"}>{active ? "Connected" : "Session ended"}</Pill> : undefined}>
+        {!status ? <p className="text-xs text-[#8a7f72]">Loading…</p> : status.connected ? (
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs">
+            <dt className="text-[#756b60]">GSTIN</dt><dd className="font-mono text-[#1a1a1a]">{status.gstin}</dd>
+            <dt className="text-[#756b60]">Portal user</dt><dd className="text-[#1a1a1a]">{status.username}</dd>
+            <dt className="text-[#756b60]">Session</dt><dd className="text-[#1a1a1a]">{active ? `Valid until ${new Date(status.sessionExpiry ?? "").toLocaleDateString("en-IN")}` : "Ended. Send a new OTP below."}</dd>
+            <dt className="text-[#756b60]">GST calls</dt><dd className="text-[#1a1a1a]">{status.callsLast24h} of {status.dailyCap} in the last 24 hours</dd>
+          </dl>
+        ) : <Empty icon={<Plug className="h-7 w-7" />} title="No GST account connected" text="Connect this company's GST portal login to fetch GSTR-2B, 2A and 3B." />}
+      </Panel>
       {!active && (
-        <section className={card}>
-          <h3 className="text-sm font-extrabold">Connect with OTP</h3>
-          <p className="mt-1 text-xs text-slate-500">The OTP goes to the phone registered on the GST portal. One OTP keeps the connection alive for about a month.</p>
-          <div className="mt-3 flex flex-wrap gap-2">
-            <input className={input} placeholder="GSTIN" value={gstin || status?.gstin || ""} onChange={(e) => setGstin(e.target.value.toUpperCase())} />
-            <input className={input} placeholder="GST portal username" value={username || status?.username || ""} onChange={(e) => setUsername(e.target.value)} />
-            <button className={button} disabled={busy} onClick={() => run(async () => {
+        <Panel title="Connect with OTP" sub="The OTP goes to the phone registered on the GST portal. One OTP keeps the connection alive for about a month.">
+          <div className="flex flex-wrap gap-2">
+            <input className={inputCls} placeholder="GSTIN" value={gstin || status?.gstin || ""} onChange={(e) => setGstin(e.target.value.toUpperCase())} />
+            <input className={inputCls} placeholder="GST portal username" value={username || status?.username || ""} onChange={(e) => setUsername(e.target.value)} />
+            <button className={btnPrimary} disabled={busy} onClick={() => run(async () => {
               await gstCall("POST", "/api/gst/otp", scope, { gstin: gstin || status?.gstin, username: username || status?.username }); setSent(true);
             }, "OTP sent.")}>Send OTP</button>
             {sent && (
               <>
-                <input className={input} placeholder="6-digit OTP" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} />
-                <button className={button} disabled={busy || otp.length !== 6} onClick={() => run(() => gstCall("POST", "/api/gst/otp/verify", scope, { gstin: gstin || status?.gstin, username: username || status?.username, otp }), "Connected.")}>Verify</button>
+                <input className={inputCls} placeholder="6-digit OTP" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} />
+                <button className={btnPrimary} disabled={busy || otp.length !== 6} onClick={() => run(() => gstCall("POST", "/api/gst/otp/verify", scope, { gstin: gstin || status?.gstin, username: username || status?.username, otp }), "Connected.")}>Verify</button>
               </>
             )}
           </div>
-        </section>
+        </Panel>
       )}
-      {message && <p className="rounded-lg bg-[#f1eee6] px-3 py-2 text-xs font-semibold">{message}</p>}
+      {message && <Alert>{message}</Alert>}
       {status?.snapshots && status.snapshots.length > 0 && (
-        <section className={`${card} overflow-x-auto`}>
-          <h3 className="text-sm font-extrabold">Saved GST returns</h3>
-          <table className="mt-3 w-full min-w-[420px] text-left text-xs">
-            <thead className="text-[10px] uppercase tracking-wider text-slate-400"><tr><th className="py-2">Return</th><th>Month</th><th>Fetched</th><th>Final</th></tr></thead>
-            <tbody className="font-semibold">
+        <Panel title="Saved GST returns" sub="Reused on the next run, so they cost nothing again">
+          <div className="overflow-x-auto"><table className="w-full min-w-[420px] text-left text-xs">
+            <thead><tr className="text-[10.5px] font-bold uppercase tracking-[0.04em] text-[#8a7f72]"><th className="pb-2 font-bold">Return</th><th className="pb-2 font-bold">Month</th><th className="pb-2 font-bold">Fetched</th><th className="pb-2 font-bold">Status</th></tr></thead>
+            <tbody>
               {status.snapshots.map((s) => (
-                <tr key={`${s.returnType}${s.period}`} className="border-t border-[#efe8dc]"><td className="py-2 uppercase">{s.returnType}</td><td>{s.period}</td><td>{ago(s.fetchedAt)}</td><td>{s.isFinal ? "Yes" : "No"}</td></tr>
+                <tr key={`${s.returnType}${s.period}`} className="border-t border-[#ece6dc]"><td className="py-2 font-medium uppercase text-[#1a1a1a]">{s.returnType.replace("gstr", "GSTR-")}</td><td className="py-2">{s.period}</td><td className="py-2">{ago(s.fetchedAt)}</td><td className="py-2">{s.isFinal ? <Pill tone="ok">Final</Pill> : <Pill>Provisional</Pill>}</td></tr>
               ))}
             </tbody>
-          </table>
-        </section>
+          </table></div>
+        </Panel>
       )}
     </div>
   );
@@ -152,7 +148,7 @@ export function SettingsView({ scope }: { scope: GstScopeInput }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [message, setMessage] = useState("");
   useEffect(() => { gstCall<Settings>("GET", "/api/gst/settings", scope).then(setSettings).catch((e: Error) => setMessage(e.message)); }, [scope]);
-  if (!settings) return <div className={`${card} text-xs text-slate-500`}>{message || "Loading…"}</div>;
+  if (!settings) return <Panel><p className="text-xs text-[#8a7f72]">{message || "Loading…"}</p></Panel>;
 
   const num = (value: string) => Math.max(0, Number(value) || 0);
   const save = async () => {
@@ -160,23 +156,25 @@ export function SettingsView({ scope }: { scope: GstScopeInput }) {
     catch (e) { setMessage(e instanceof Error ? e.message : "Could not save."); }
   };
   const field = (label: string, hint: string, value: number, set: (n: number) => void) => (
-    <label className="block text-xs font-semibold">
-      <span className="font-extrabold">{label}</span><span className="ml-2 text-slate-400">{hint}</span>
-      <input className={`${input} mt-1 block w-40`} type="number" min={0} value={value} onChange={(e) => set(num(e.target.value))} />
+    <label className="block text-xs">
+      <span className="font-medium text-[#3d3530]">{label}</span><span className="ml-2 text-[10.5px] text-[#8a7f72]">{hint}</span>
+      <input className={`${inputCls} mt-1.5 block w-40`} type="number" min={0} value={value} onChange={(e) => set(num(e.target.value))} />
     </label>
   );
   return (
-    <section className={`${card} space-y-4`}>
-      <h3 className="text-sm font-extrabold">Matching rules</h3>
+    <div className="grid items-start gap-3 lg:grid-cols-2">
+    <Panel title="Matching rules" sub="Applied on the next reconciliation" className="space-y-4">
       {field("Amount tolerance (₹)", "differences up to this still match", settings.tolerance.amount, (n) => setSettings({ ...settings, tolerance: { ...settings.tolerance, amount: n } }))}
       {field("Percent tolerance (%)", "0 means exact", settings.tolerance.percent, (n) => setSettings({ ...settings, tolerance: { ...settings.tolerance, percent: n } }))}
       {field("Date window (days)", "invoice date may differ by this much", settings.tolerance.dateWindowDays, (n) => setSettings({ ...settings, tolerance: { ...settings.tolerance, dateWindowDays: n } }))}
-      <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={settings.fuzzy} onChange={(e) => setSettings({ ...settings, fuzzy: e.target.checked })} /> Link invoices with slightly different numbers</label>
-      <label className="flex items-center gap-2 text-xs font-semibold"><input type="checkbox" checked={settings.includeA2} onChange={(e) => setSettings({ ...settings, includeA2: e.target.checked })} /> Also compare with GSTR-2A</label>
-      <h3 className="pt-2 text-sm font-extrabold">GST call limits</h3>
+      <label className="flex items-center gap-2 text-xs text-[#3d3530]"><input type="checkbox" className="h-[15px] w-[15px] accent-[#2d2d2d]" checked={settings.fuzzy} onChange={(e) => setSettings({ ...settings, fuzzy: e.target.checked })} /> Link invoices with slightly different numbers</label>
+      <label className="flex items-center gap-2 text-xs text-[#3d3530]"><input type="checkbox" className="h-[15px] w-[15px] accent-[#2d2d2d]" checked={settings.includeA2} onChange={(e) => setSettings({ ...settings, includeA2: e.target.checked })} /> Also compare with GSTR-2A</label>
+    </Panel>
+    <Panel title="GST call limits" sub="Every call to the GST portal costs money" className="space-y-4">
       {field("Daily call limit", "stops runaway cost", settings.dailyCallCap, (n) => setSettings({ ...settings, dailyCallCap: n }))}
       {field("Minimum minutes between refreshes", "of the same return", settings.minRefreshMinutes, (n) => setSettings({ ...settings, minRefreshMinutes: n }))}
-      <div className="flex items-center gap-3"><button className={button} onClick={save}>Save settings</button>{message && <span className="text-xs font-semibold text-slate-600">{message}</span>}</div>
-    </section>
+      <div className="flex items-center gap-3"><button className={btnPrimary} onClick={save}>Save settings</button>{message && <span className="text-[11.5px] text-[#5a5046]">{message}</span>}</div>
+    </Panel>
+    </div>
   );
 }

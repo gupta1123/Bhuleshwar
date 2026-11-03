@@ -1,4 +1,4 @@
-export const AGENT_VERSION = "1.2.46";
+export const AGENT_VERSION = "1.2.47";
 export const AGENT_PROTOCOL_VERSION = 1;
 export const LOCAL_SCHEMA_VERSION = 3;
 export const TDL_REPORT_VERSION = 1;

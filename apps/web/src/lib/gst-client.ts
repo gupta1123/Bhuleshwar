@@ -2,6 +2,9 @@
 
 import { apiFetch } from "@/lib/api-client";
 import { readPreferredTallyConnectionId } from "@/lib/tally-company-selection";
+import { DEMO_SCOPE, demoGstCall, isGstDemo } from "@/lib/gst-demo";
+
+export { isGstDemo };
 
 export type GstScopeInput = { connectionId: string; companyName: string; companyGuid?: string };
 
@@ -26,6 +29,7 @@ type ConnectionSummary = { id?: string; lastCompanyName?: string | null; bridgeC
 // The saved company choice can point at a connector that was since replaced.
 // Fall back to the company the live connector has loaded in Tally.
 export async function resolveGstScope(): Promise<GstScopeInput | null> {
+  if (isGstDemo()) return DEMO_SCOPE;
   const saved = readGstScope();
   if (saved) return saved;
   try {
@@ -56,6 +60,7 @@ export async function gstCall<T = Record<string, unknown>>(
   params: Record<string, unknown> = {},
 ): Promise<T> {
   const merged = { ...scope, ...params };
+  if (isGstDemo()) return (await demoGstCall(method, path, merged)) as T;
   let response: Response;
   if (method === "GET") {
     const query = new URLSearchParams();

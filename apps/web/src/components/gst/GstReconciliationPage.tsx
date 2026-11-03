@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "@/components/dashboard/AppShell";
 import { Check, Loader2, Play, Plug, RefreshCw } from "lucide-react";
 import {
-  ago, gstCall, periodLabel, recentPeriods, resolveGstScope,
+  ago, gstCall, isGstDemo, periodLabel, recentPeriods, resolveGstScope,
   type GstMonth, type GstRun, type GstScopeInput,
 } from "@/lib/gst-client";
 import { OverviewView, ReviewView, WorklistView } from "./GstViews";
@@ -161,6 +161,12 @@ export default function GstReconciliationPage() {
               </button>
             )}
           </header>
+
+          {isGstDemo() && (
+            <p className="mb-3 rounded-lg border border-[#e9d5a0] bg-[#fdf6e3] px-3 py-2 text-xs text-[#7a5b12]">
+              Demo data. Nothing here comes from your GST account or Tally, and nothing is sent anywhere. <a href="?demo=0" className="underline">Exit demo</a>
+            </p>
+          )}
 
           {!scope ? (
             <Empty icon={<Plug className="h-7 w-7" />} title="Waiting for Tally" text="Keep the Bhuleshwar Local Agent and Tally open with your company loaded. This page connects on its own." />

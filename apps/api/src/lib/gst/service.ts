@@ -79,10 +79,17 @@ async function saveSession(db: Db, connectionId: string, session: TaxpayerSessio
   if (error) throw new Error('Could not save the refreshed GST session.');
 }
 
+// The client's GSTIN and portal username live in env, so nobody types them in.
+export function gstDefaults() {
+  const gstin = (process.env.GST_DEFAULT_GSTIN || process.env.GST_SEED_GSTIN || '').trim().toUpperCase();
+  const username = (process.env.GST_DEFAULT_USERNAME || process.env.GST_SEED_USERNAME || '').trim();
+  return gstin && username ? { gstin, username } : null;
+}
+
 export async function gstStatus(scope: GstScope) {
   const db = createSupabaseAdminClient();
   const connection = await loadConnection(db, scope);
-  if (!connection) return { connected: false as const };
+  if (!connection) return { connected: false as const, defaults: gstDefaults() };
   const since = new Date(Date.now() - 24 * 3_600_000).toISOString();
   const [calls, snapshots, policy] = await Promise.all([
     db.from('gst_api_calls').select('id', { count: 'exact', head: true }).eq('organization_id', scope.organizationId).gte('created_at', since),

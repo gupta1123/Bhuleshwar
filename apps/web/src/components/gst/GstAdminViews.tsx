@@ -74,7 +74,7 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
 }
 
 type Status = {
-  connected: boolean; gstin?: string; username?: string; status?: string; sessionExpiry?: string; verifiedAt?: string;
+  connected: boolean; defaults?: { gstin: string; username: string } | null; gstin?: string; username?: string; status?: string; sessionExpiry?: string; verifiedAt?: string;
   callsLast24h?: number; dailyCap?: number; snapshots?: { returnType: string; period: string; fetchedAt: string; isFinal: boolean }[];
 };
 
@@ -96,6 +96,8 @@ export function ConnectView({ scope }: { scope: GstScopeInput }) {
   }
 
   const active = status?.connected && status.status === "active";
+  const known = status?.connected ? { gstin: status.gstin ?? "", username: status.username ?? "" } : status?.defaults ?? null;
+  const [editing, setEditing] = useState(false);
   return (
     <div className="space-y-4">
       <Panel title="GST account" action={status?.connected ? <Pill tone={active ? "ok" : "bad"}>{active ? "Connected" : "Session ended"}</Pill> : undefined}>
@@ -110,16 +112,20 @@ export function ConnectView({ scope }: { scope: GstScopeInput }) {
       </Panel>
       {!active && (
         <Panel title="Connect with OTP" sub="The OTP goes to the phone registered on the GST portal. One OTP keeps the connection alive for about a month.">
-          <div className="flex flex-wrap gap-2">
-            <input className={inputCls} placeholder="GSTIN" value={gstin || status?.gstin || ""} onChange={(e) => setGstin(e.target.value.toUpperCase())} />
-            <input className={inputCls} placeholder="GST portal username" value={username || status?.username || ""} onChange={(e) => setUsername(e.target.value)} />
+          <div className="flex flex-wrap items-center gap-2">
+            {known && !editing ? (
+              <p className="text-xs text-[#756b60]">Account <span className="font-mono text-[#1a1a1a]">{known.gstin}</span> · {known.username} <button className="ml-1 underline" onClick={() => setEditing(true)}>Change</button></p>
+            ) : (<>
+            <input className={inputCls} placeholder="GSTIN" value={gstin || known?.gstin || ""} onChange={(e) => setGstin(e.target.value.toUpperCase())} />
+            <input className={inputCls} placeholder="GST portal username" value={username || known?.username || ""} onChange={(e) => setUsername(e.target.value)} />
+            </>)}
             <button className={btnPrimary} disabled={busy} onClick={() => run(async () => {
-              await gstCall("POST", "/api/gst/otp", scope, { gstin: gstin || status?.gstin, username: username || status?.username }); setSent(true);
+              await gstCall("POST", "/api/gst/otp", scope, { gstin: gstin || known?.gstin, username: username || known?.username }); setSent(true);
             }, "OTP sent.")}>Send OTP</button>
             {sent && (
               <>
                 <input className={inputCls} placeholder="6-digit OTP" value={otp} onChange={(e) => setOtp(e.target.value.replace(/\D/g, "").slice(0, 6))} />
-                <button className={btnPrimary} disabled={busy || otp.length !== 6} onClick={() => run(() => gstCall("POST", "/api/gst/otp/verify", scope, { gstin: gstin || status?.gstin, username: username || status?.username, otp }), "Connected.")}>Verify</button>
+                <button className={btnPrimary} disabled={busy || otp.length !== 6} onClick={() => run(() => gstCall("POST", "/api/gst/otp/verify", scope, { gstin: gstin || known?.gstin, username: username || known?.username, otp }), "Connected.")}>Verify</button>
               </>
             )}
           </div>

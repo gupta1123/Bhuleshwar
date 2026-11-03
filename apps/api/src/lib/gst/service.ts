@@ -186,7 +186,7 @@ export async function verifyGstOtp(scope: GstScope, input: { gstin: string; user
 
 // Refreshes every live GST token that is close to expiring, so the 30-day session never
 // lapses just because nobody pulled a return for six hours. Costs no return calls.
-export async function keepGstSessionsAlive(marginMinutes = 150) {
+export async function keepGstSessionsAlive(marginMinutes = 240) {
   const db = createSupabaseAdminClient();
   const client = sandboxClientFromEnv();
   const { data, error } = await db.from('gst_connections').select('id,gstin,session_token_enc,session_expiry,token_expiry').eq('status', 'active');
@@ -202,6 +202,7 @@ export async function keepGstSessionsAlive(marginMinutes = 150) {
           sessionExpiry: Date.parse(row.session_expiry), tokenExpiry: Date.parse(row.token_expiry),
         });
         await saveSession(db, row.id, session);
+        console.log('[gst] keep-alive refreshed; token until', new Date(session.tokenExpiry).toISOString(), 'session until', new Date(session.sessionExpiry).toISOString());
         return 'refreshed';
       } catch (err) {
         const message = err instanceof Error ? err.message : 'refresh failed';

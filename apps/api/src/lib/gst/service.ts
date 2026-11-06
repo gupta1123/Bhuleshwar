@@ -96,7 +96,7 @@ export async function loadPolicy(db: Db, scope: GstScope): Promise<PullPolicy> {
 // Saves a new session. When `previous` (the stored token being replaced) is given, the write only
 // happens if the row still holds that token, so two refreshers cannot overwrite each other, and the
 // replaced token is kept in prev_* as a safety copy. Returns false when someone else saved first.
-async function saveSession(db: Db, connectionId: string, session: TaxpayerSession, previous?: { tokenEnc: string; tokenExpiry: string }) {
+async function saveSession(db: Db, connectionId: string, session: TaxpayerSession, previous?: { tokenEnc: string; tokenExpiry: string; guard?: boolean }) {
   const now = new Date().toISOString();
   const fields = {
     status: 'active', session_token_enc: encryptSecret(session.token),
@@ -105,7 +105,7 @@ async function saveSession(db: Db, connectionId: string, session: TaxpayerSessio
   };
   const attempt = async (extra: Record<string, unknown>) => {
     let query = db.from('gst_connections').update({ ...fields, ...extra }).eq('id', connectionId);
-    if (previous) query = query.eq('session_token_enc', previous.tokenEnc);
+    if (previous && previous.guard !== false) query = query.eq('session_token_enc', previous.tokenEnc);
     return query.select('id');
   };
   let result = await attempt(previous ? { prev_session_token_enc: previous.tokenEnc, prev_token_expiry: previous.tokenExpiry, prev_token_saved_at: now } : {});
@@ -199,11 +199,30 @@ export async function platformToken(db: Db) {
   return fresh.accessToken;
 }
 
+// Creates the connection row, or updates the existing one. An existing row that holds a live session
+// keeps its status and its stored token: sending an OTP must never switch a healthy connection off
+// (the keep-alive only looks after active/expired rows). Only the session saved after a verified OTP
+// replaces the token.
 async function upsertConnection(db: Db, scope: GstScope, gstin: string, username: string, status: string) {
-  const { data, error } = await db.from('gst_connections').upsert({
+  const { data: existing, error: readError } = await db.from('gst_connections')
+    .select('id,status,session_expiry,session_token_enc,token_expiry')
+    .eq('organization_id', scope.organizationId).eq('gstin', gstin).maybeSingle();
+  if (readError) throw new Error('Could not read the GST connection.');
+  const now = new Date().toISOString();
+  if (existing) {
+    const liveSession = !!existing.session_token_enc && Date.parse(existing.session_expiry) > Date.now();
+    const keepStatus = liveSession && status !== 'active';
+    const { error } = await db.from('gst_connections').update({
+      company_key: scope.companyKey, gst_username: username, updated_at: now,
+      ...(keepStatus ? {} : { status }),
+    }).eq('id', existing.id);
+    if (error) throw new Error('Could not save the GST connection.');
+    return existing.id as string;
+  }
+  const { data, error } = await db.from('gst_connections').insert({
     organization_id: scope.organizationId, company_key: scope.companyKey, gstin, gst_username: username,
-    status, created_by: scope.userId, updated_at: new Date().toISOString(),
-  }, { onConflict: 'organization_id,gstin' }).select('id').single();
+    status, created_by: scope.userId, updated_at: now,
+  }).select('id').single();
   if (error || !data) throw new Error('Could not save the GST connection.');
   return data.id as string;
 }
@@ -218,7 +237,9 @@ export async function verifyGstOtp(scope: GstScope, input: { gstin: string; user
   const db = createSupabaseAdminClient();
   const session = await sandboxClientFromEnv().verifyOtp(await platformToken(db), input);
   const id = await upsertConnection(db, scope, input.gstin, input.username, 'active');
-  await saveSession(db, id, session);
+  // Keep the token being replaced as a safety copy. The OTP session wins even if the cron refreshed meanwhile.
+  const { data: before } = await db.from('gst_connections').select('session_token_enc,token_expiry').eq('id', id).maybeSingle();
+  await saveSession(db, id, session, before?.session_token_enc ? { tokenEnc: before.session_token_enc, tokenExpiry: before.token_expiry, guard: false } : undefined);
   return { sessionExpiry: new Date(session.sessionExpiry).toISOString() };
 }
 
@@ -227,7 +248,7 @@ export async function verifyGstOtp(scope: GstScope, input: { gstin: string; user
 export async function keepGstSessionsAlive(marginMinutes = 240) {
   const db = createSupabaseAdminClient();
   const client = sandboxClientFromEnv();
-  const { data, error } = await db.from('gst_connections').select('id,gstin,status,session_token_enc,session_expiry,token_expiry').in('status', ['active', 'expired']);
+  const { data, error } = await db.from('gst_connections').select('id,gstin,status,session_token_enc,session_expiry,token_expiry').in('status', ['active', 'expired', 'otp_sent']);
   if (error) throw new Error('Could not read GST connections.');
   const results: Array<{ gstin: string; result: 'fresh' | 'refreshed' | 'expired' | 'failed' }> = [];
   for (const row of data ?? []) {

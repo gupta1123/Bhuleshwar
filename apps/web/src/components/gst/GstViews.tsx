@@ -8,6 +8,11 @@ import {
 } from "@/lib/gst-client";
 import { Alert, btn, btnPrimary, card, Drawer, Empty, inputCls, Panel, Pill, td, th, TONE_BAR, TONE_TEXT, toneOf, type Tone } from "./gst-ui";
 
+// Show-and-highlight only for now. Set to true to bring back everything that records a decision
+// or drafts a message: Mark chased / Accept, Accept all, the drawer's decision buttons and note,
+// and Copy reminder. Viewing (rows, drawer, previous/next, saved decisions) is unaffected.
+const ACTIONS_ENABLED = false;
+
 const labelOf = (run: GstRun, id: string) => run.run.totals.buckets.find((b) => b.id === id)?.label ?? id;
 const nameOf = (item: GstItem) => (item.books ?? item.g2b ?? item.g2a)?.supplierName ?? "";
 const num = (value: unknown) => Number(value) || 0;
@@ -261,7 +266,7 @@ export function OverviewView({ run, full, all, months, onMonths, onOpen, onRun }
                     <span className="text-[11.5px] text-[#6b6157]" title={s.gstin}>{s.exceptions} invoice{s.exceptions === 1 ? "" : "s"} not reported</span>
                   </div>
                   <span className={`text-[13.5px] font-semibold tabular-nums ${s.atRisk >= HIGH ? "text-[#991b1b]" : "text-[#3d3530]"}`}>{rs(s.atRisk)}</span>
-                  {chaseable
+                  {chaseable && ACTIONS_ENABLED
                     ? <button onClick={() => copy(s.gstin, s.name)} className={btn}>{copied === s.gstin ? <><Check className="h-3 w-3" />Copied</> : copied === "failed" ? "Copy failed" : <><Copy className="h-3 w-3" />Copy reminder</>}</button>
                     : <span className="w-[112px]" />}
                 </li>
@@ -373,15 +378,15 @@ function ItemDrawer({ item, run, scope, onClose, onSaved, onStep }: { item: GstI
       footer={(
         <div className="space-y-2.5">
           {error && <Alert tone="bad">{error}</Alert>}
-          <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="Add a note for your team (optional)" className={`${inputCls} w-full`} />
-          <p className="text-[11.5px] text-[#6b6157]">{result}</p>
+          {ACTIONS_ENABLED && <input value={note} onChange={(e) => setNote(e.target.value)} maxLength={1000} placeholder="Add a note for your team (optional)" className={`${inputCls} w-full`} />}
+          {ACTIONS_ENABLED && <p className="text-[11.5px] text-[#6b6157]">{result}</p>}
           <div className="flex flex-wrap items-center justify-between gap-2">
             <span className="flex gap-1">
               {onStep && <><button aria-label="Previous invoice" disabled={!onStep.hasPrev} onClick={() => onStep.go(-1)} className={`${btn} px-2`}><ChevronLeft className="h-3.5 w-3.5" /></button>
               <button aria-label="Next invoice" disabled={!onStep.hasNext} onClick={() => onStep.go(1)} className={`${btn} px-2`}><ChevronRight className="h-3.5 w-3.5" /></button></>}
             </span>
             <span className="flex flex-wrap items-center justify-end gap-2">
-              {ordered.map(([id, label]) => (
+              {ACTIONS_ENABLED && ordered.map(([id, label]) => (
                 <button key={id} disabled={!!saving} onClick={() => decide(id)} className={id === lead ? btnPrimary : btn}>{saving === id ? "Saving…" : label}</button>
               ))}
             </span>
@@ -457,7 +462,7 @@ function ItemTable({ run, items, scope, onChanged }: { run: GstRun; items: GstIt
       {minor.length >= 2 && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-[#fde68a] bg-[#fffbeb] px-4 py-3 text-[13px] text-[#78350f]">
           <span><b>{minor.length} small differences</b> under {rs(MINOR)} each ({rs(minor.reduce((s, i) => s + i.atRisk, 0))} in total). These are usually rounding.</span>
-          <button className={btnPrimary} disabled={bulk} onClick={acceptMinor}>{bulk ? "Accepting…" : `Accept all ${minor.length}`}</button>
+          {ACTIONS_ENABLED && <button className={btnPrimary} disabled={bulk} onClick={acceptMinor}>{bulk ? "Accepting…" : `Accept all ${minor.length}`}</button>}
         </div>
       )}
       {error && <Alert tone="bad">{error}</Alert>}
@@ -507,8 +512,12 @@ function ItemTable({ run, items, scope, onChanged }: { run: GstRun; items: GstIt
                         : item.bucket === "matched" ? <span className="text-[#065f46]">Matched</span>
                         : item.flags.includes("awaited") ? <span className="text-[12px] text-[#0369a1]">Wait for filing</span>
                         : item.docType === "isd" ? <span className="text-[12px] text-[#6b6157]">Via ISD return</span>
-                        : group?.id === "g:chase" ? <button className={btn} disabled={busyKey === item.key} onClick={() => quick(item, "chase_supplier")}>{busyKey === item.key ? "Saving…" : "Mark chased"}</button>
-                        : isMinorDiff ? <button className={btn} disabled={busyKey === item.key} onClick={() => quick(item, "accept")}>{busyKey === item.key ? "Saving…" : "Accept"}</button>
+                        : group?.id === "g:chase" ? (ACTIONS_ENABLED
+                          ? <button className={btn} disabled={busyKey === item.key} onClick={() => quick(item, "chase_supplier")}>{busyKey === item.key ? "Saving…" : "Mark chased"}</button>
+                          : <span className="text-[12px] font-medium text-[#991b1b]">Supplier has not filed</span>)
+                        : isMinorDiff ? (ACTIONS_ENABLED
+                          ? <button className={btn} disabled={busyKey === item.key} onClick={() => quick(item, "accept")}>{busyKey === item.key ? "Saving…" : "Accept"}</button>
+                          : <span className="text-[12px] text-[#6b6157]">Small difference</span>)
                         : <button className={btn} onClick={() => setOpenKey(item.key)}>Review</button>}
                     </td>
                   </tr>,

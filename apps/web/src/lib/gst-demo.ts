@@ -4,7 +4,7 @@
 // page can be tried end to end with no GST portal, Tally or login. Nothing leaves the browser.
 import type { GstItem, GstMonth, GstRun, GstScopeInput, GstSide, GstTax } from "./gst-client";
 
-export const DEMO_SCOPE: GstScopeInput = { connectionId: "demo", companyName: "Solution Nyx (demo data)" };
+export const DEMO_SCOPE: GstScopeInput = { connectionId: "demo", companyName: "Solution Nyx" };
 const DEMO_GSTIN = "27AAACS0000A1Z5";
 
 export function isGstDemo() {
@@ -41,7 +41,7 @@ function rng(seed: number) {
 
 const BUCKETS: [string, string][] = [
   ["matched", "Matched"], ["valueDiff", "Value differs"], ["booksOnly", "In books, not on portal"], ["portalOnly", "On portal, not in books"],
-  ["ineligible", "Blocked credit"], ["rule37A", "Rule 37A risk"], ["periodShift", "Different month"], ["duplicate", "Possible duplicate"],
+  ["ineligible", "Blocked credit"], ["rule37A", "Rule 37A risk"], ["reopened", "Reopened"], ["periodShift", "Different month"], ["duplicate", "Possible duplicate"],
 ];
 const REASON: Record<string, string> = {
   matched: "Invoice number, date and tax all agree.",
@@ -52,45 +52,129 @@ const REASON: Record<string, string> = {
   rule37A: "Supplier has not filed; credit may need reversing after the deadline.",
   periodShift: "Matched, but the supplier reported it in a different month.",
   duplicate: "The same invoice number appears twice in the books.",
+  reopened: "Credit claimed earlier is no longer supported.",
 };
+
+type Mk = {
+  period: string; gstin: string; name: string; invoiceNo: string; day: string; bucket: string; docType?: string; flags?: string[];
+  reason: string; books?: GstTax | null; portal?: GstTax | null; atRisk: number; portalNo?: string; portalDate?: string; vouchers?: number;
+};
+let voucherSeq = 3000;
+function mk(m: Mk): GstItem {
+  const invoiceDate = `${m.period}-${m.day}`;
+  voucherSeq += 1;
+  const books: GstSide = m.books
+    ? { invoiceNo: m.invoiceNo, invoiceDate, voucherNumber: m.vouchers && m.vouchers > 1 ? `PV-${voucherSeq}, PV-${voucherSeq + 1}` : `PV-${voucherSeq}`, supplierName: m.name, tax: m.books }
+    : null;
+  const g2b: GstSide = m.portal
+    ? { invoiceNo: m.portalNo ?? m.invoiceNo, invoiceDate: m.portalDate ?? invoiceDate, supplierName: m.name, tax: m.portal }
+    : null;
+  return {
+    key: `${m.period}:${m.gstin || "IMP"}:${m.invoiceNo}`, period: m.period, gstin: m.gstin, invoiceNo: m.invoiceNo, invoiceDate,
+    docType: m.docType ?? "inv", bucket: m.bucket, flags: m.flags ?? [], reason: m.reason,
+    matchType: m.bucket === "matched" ? (m.flags?.includes("fuzzy") ? "fuzzy" : "exact") : m.bucket === "valueDiff" || m.bucket === "periodShift" ? "fuzzy" : null,
+    atRisk: Math.round(m.atRisk * 100) / 100, books, g2b, g2a: g2b, decision: null,
+  };
+}
+
+// Reason texts mirror the ones the real matching engine produces.
+const R = {
+  pos: "Place of supply does not match your registration state",
+  nonf: "Supplier is a non-filer / registration inactive",
+  ims: "You rejected this invoice in IMS — the portal excludes it from GSTR-2B by your own action",
+  reopened: "Previously supported by GSTR-2B — the supplier has since withdrawn or amended the invoice. Reverse the credit.",
+  r37a: "Present in GSTR-2A but not in GSTR-2B — supplier filed GSTR-1 without GSTR-3B",
+  isd: "ISD credit — claimed through the ISD return, not purchase ITC",
+  impg: "Import of goods — IGST credit via bill of entry",
+};
+
+// One hand-made example of every situation an Indian purchase reconciliation can hit.
+function scenarios(period: string, rand: () => number): { id: string; item: GstItem }[] {
+  const [y, mo] = period.split("-").map(Number);
+  const next = `${mo === 12 ? y + 1 : y}-${String(mo === 12 ? 1 : mo + 1).padStart(2, "0")}`;
+  const yy = period.slice(2, 4) + period.slice(5);
+  const amt = (lo: number, hi: number) => Math.round((lo + rand() * (hi - lo)) / 10) * 10;
+  const t = (i: number, taxable: number, rate = 18) => tax(taxable, rate, SUPPLIERS[i][0].slice(0, 2) !== "27");
+  const S = (i: number) => ({ gstin: SUPPLIERS[i][0], name: SUPPLIERS[i][1] });
+  const day = () => String(1 + Math.floor(rand() * 27)).padStart(2, "0");
+  const list: { id: string; item: GstItem }[] = [];
+  const add = (id: string, m: Omit<Mk, "period" | "day"> & { day?: string }) => list.push({ id, item: mk({ period, day: m.day ?? day(), ...m }) });
+
+  let a = t(0, amt(30000, 90000));
+  add("crn-ok", { ...S(0), invoiceNo: `CN/${yy}/11`, docType: "crn", bucket: "matched", reason: "Credit note agrees with GSTR-2B.", books: a, portal: a, atRisk: 0 });
+  a = t(3, amt(50000, 90000));
+  const a2 = t(3, Math.round(a.taxable * 0.9));
+  add("crn-diff", { ...S(3), invoiceNo: `CN/${yy}/14`, docType: "crn", bucket: "valueDiff", reason: "Differs from GSTR-2B", books: a, portal: a2, atRisk: itc(a) - itc(a2) });
+  a = t(4, amt(20000, 60000));
+  add("dbn-missing", { ...S(4), invoiceNo: `DN/${yy}/05`, docType: "dbn", bucket: "booksOnly", reason: "Not reported by the supplier in GSTR-2B", books: a, atRisk: itc(a) });
+  a = tax(amt(400000, 900000), 18, true);
+  add("imp-unbooked", { gstin: "", name: "Shanghai Steel Co (import)", invoiceNo: `BoE 73${yy}01`, docType: "imp", bucket: "portalOnly", reason: R.impg, portal: a, atRisk: 0 });
+  a = tax(amt(300000, 700000), 18, true);
+  add("imp-ok", { gstin: "", name: "Hamburg Tooling GmbH (import)", invoiceNo: `BoE 73${yy}02`, docType: "imp", bucket: "matched", reason: "Bill of entry agrees with GSTR-2B.", books: a, portal: a, atRisk: 0 });
+  a = tax(amt(15000, 45000), 18, false);
+  add("isd", { gstin: "27AAACH1111A1Z1", name: "Head Office (ISD)", invoiceNo: `ISD/${yy}/03`, docType: "isd", bucket: "portalOnly", reason: R.isd, portal: a, atRisk: 0 });
+  a = t(1, amt(20000, 70000), 5);
+  add("rcm", { ...S(1), invoiceNo: `SSL/${yy}/R1`, flags: ["rcm"], bucket: "matched", reason: "Reverse charge: you pay the tax yourself, then claim the credit.", books: a, portal: a, atRisk: 0 });
+  a = t(7, amt(90000, 200000));
+  add("pos", { ...S(7), invoiceNo: `GE/${yy}/41`, bucket: "ineligible", reason: R.pos, books: a, portal: a, atRisk: itc(a) });
+  a = t(5, amt(80000, 220000));
+  add("nonfiler", { ...S(5), invoiceNo: `DAPL/${yy}/77`, bucket: "ineligible", reason: R.nonf, books: a, portal: a, atRisk: itc(a) });
+  a = t(6, amt(60000, 180000));
+  add("ims", { ...S(6), invoiceNo: `RH/${yy}/52`, flags: ["ims_rejected"], bucket: "ineligible", reason: R.ims, books: a, atRisk: itc(a) });
+  a = t(2, amt(150000, 400000));
+  add("reopened", { ...S(2), invoiceNo: `VIR/${yy}/88`, flags: ["amended"], bucket: "reopened", reason: R.reopened, books: a, atRisk: itc(a) });
+  a = t(3, amt(40000, 120000));
+  add("duplicate", { ...S(3), invoiceNo: `PPC/${yy}/63`, bucket: "duplicate", reason: "2 vouchers booked for one supplier invoice", vouchers: 2, books: a, portal: a, atRisk: itc(a) });
+  a = t(4, amt(50000, 150000));
+  add("shift", { ...S(4), invoiceNo: `BF/${yy}/19`, bucket: "periodShift", reason: `Booked in ${period}, reported by the supplier in ${next}`, books: a, portal: a, portalDate: `${next}-03`, atRisk: 0 });
+  a = t(1, amt(40000, 110000));
+  add("fuzzy", { ...S(1), invoiceNo: `SSL/${yy}/208`, portalNo: `SSL/${yy}/2008`, flags: ["fuzzy"], bucket: "matched", reason: "Linked by a similar invoice number", books: a, portal: a, atRisk: 0 });
+  a = t(6, amt(50000, 140000));
+  add("quarterly", { ...S(6), invoiceNo: `RH/${yy}/60`, flags: ["awaited"], bucket: "booksOnly", reason: "Not reported by the supplier in GSTR-2B", books: a, atRisk: 0 });
+  a = t(2, amt(100000, 300000));
+  add("r37a", { ...S(2), invoiceNo: `VIR/${yy}/91`, bucket: "rule37A", reason: R.r37a, books: a, atRisk: itc(a) });
+  return list;
+}
 
 function buildItems(periods: string[]): GstItem[] {
   const out: GstItem[] = [];
   periods.forEach((period, pi) => {
     const rand = rng(1000 + pi * 77 + Number(period.replace("-", "")));
-    const count = 34;
+    const count = 28;
     for (let i = 0; i < count; i += 1) {
       const sup = SUPPLIERS[Math.floor(rand() * SUPPLIERS.length)];
       const roll = rand();
-      const bucket = roll < 0.55 ? "matched" : roll < 0.67 ? "valueDiff" : roll < 0.78 ? "booksOnly" : roll < 0.86 ? "portalOnly"
-        : roll < 0.9 ? "ineligible" : roll < 0.94 ? "rule37A" : roll < 0.97 ? "periodShift" : "duplicate";
+      const bucket = roll < 0.6 ? "matched" : roll < 0.74 ? "valueDiff" : roll < 0.86 ? "booksOnly" : roll < 0.93 ? "portalOnly" : "matched";
       const taxable = Math.round((20000 + rand() * 480000) / 10) * 10;
       const rate = [5, 12, 18, 18, 18, 28][Math.floor(rand() * 6)];
       const inter = sup[0].slice(0, 2) !== "27";
       const day = String(1 + Math.floor(rand() * 27)).padStart(2, "0");
       const invoiceNo = `${sup[1].split(" ").map((w) => w[0]).join("")}/${period.slice(2, 4)}${period.slice(5)}/${String(100 + i * 7 + pi * 3)}`;
-      const invoiceDate = `${period}-${day}`;
       const real = tax(taxable, rate, inter);
-      const off = bucket === "valueDiff" ? tax(taxable - Math.round(taxable * 0.02), rate, inter) : real;
-      const books: GstSide = bucket === "portalOnly" ? null : { invoiceNo, invoiceDate, voucherNumber: `PV-${2000 + i + pi * 40}`, supplierName: sup[1], tax: real };
-      const g2b: GstSide = bucket === "booksOnly" || bucket === "rule37A" ? null : { invoiceNo, invoiceDate, supplierName: sup[1], tax: off };
-      const atRisk = bucket === "matched" || bucket === "periodShift" ? 0
-        : bucket === "valueDiff" ? Math.abs(itc(real) - itc(off)) : bucket === "portalOnly" ? 0 : itc(real);
-      out.push({
-        key: `${period}:${sup[0]}:${invoiceNo}`, period, gstin: sup[0], invoiceNo, invoiceDate, docType: "Invoice", bucket,
-        flags: sup[2] === "Quarterly" && (bucket === "booksOnly") ? ["awaited"] : [], reason: REASON[bucket],
-        matchType: bucket === "matched" ? "exact" : bucket === "valueDiff" || bucket === "periodShift" ? "fuzzy" : null,
-        atRisk: Math.round(atRisk * 100) / 100, books, g2b, g2a: g2b, decision: null,
-      });
+      const off = bucket === "valueDiff" ? tax(taxable - Math.round(taxable * (i % 3 === 0 ? 0.0004 : 0.02)), rate, inter) : real;
+      const atRisk = bucket === "valueDiff" ? Math.abs(itc(real) - itc(off)) : bucket === "booksOnly" ? itc(real) : 0;
+      out.push(mk({
+        period, day, gstin: sup[0], name: sup[1], invoiceNo, bucket,
+        reason: REASON[bucket],
+        books: bucket === "portalOnly" ? null : real, portal: bucket === "booksOnly" ? null : off, atRisk,
+        flags: sup[2] === "Quarterly" && bucket === "booksOnly" ? ["awaited"] : [],
+      }));
+      if (sup[2] === "Quarterly" && bucket === "booksOnly") out[out.length - 1].atRisk = 0;
     }
+    const last = pi === periods.length - 1;
+    scenarios(period, rand).forEach((s, k) => { if (last || (pi + k) % 3 === 0) out.push(s.item); });
   });
   return out;
 }
 
-type Demo = { saved: Set<string>; run: GstRun | null; decisions: Record<string, GstItem["decision"]>; settings: Record<string, unknown> };
+const DEMO_SAVED = ["2025-10", "2025-11", "2025-12", "2026-01", "2026-02", "2026-03", "2026-04", "2026-05", "2026-06", "2026-07", "2026-08", "2026-09"];
+type Demo = { saved: Set<string>; run: GstRun | null; started?: boolean; decisions: Record<string, GstItem["decision"]>; settings: Record<string, unknown> };
+// /gst?demo=1&fresh=1 shows the page as it looks before anything has been reconciled.
+const FRESH = typeof window !== "undefined" && new URLSearchParams(window.location.search).get("fresh") === "1";
 const state: Demo = {
-  saved: new Set(["2026-09"]),
+  saved: new Set(FRESH ? [] : DEMO_SAVED),
   run: null,
+  started: FRESH,
   decisions: {},
   settings: { tolerance: { amount: 1, percent: 0.5, dateWindowDays: 10 }, includeA2: true, fuzzy: true, dailyCallCap: 100, minRefreshMinutes: 60 },
 };
@@ -112,7 +196,7 @@ function buildRun(periods: string[]): GstRun {
   return {
     run: {
       id: "demo-run", createdAt: new Date().toISOString(), gstin: DEMO_GSTIN, periods, booksAsOf: new Date().toISOString(),
-      dataVersions: {},
+      dataVersions: Object.fromEntries(periods.flatMap((p) => [[`gstr2b:${p}`, new Date(Date.now() - 3_600_000).toISOString()], [`gstr2a:${p}`, new Date(Date.now() - 3_600_000).toISOString()]])),
       totals: {
         summary: {
           claimed: Math.round(claimed), available: Math.round(available), gap: Math.max(0, Math.round(claimed - available)),
@@ -144,7 +228,7 @@ export async function demoGstCall(method: "GET" | "POST", path: string, params: 
   await wait(250);
   const route = `${method} ${path}`;
   if (route === "GET /api/gst/readiness") return { months: months(String(params.periods || "").split(",").filter(Boolean)) };
-  if (route === "GET /api/gst/reconcile") return { result: state.run };
+  if (route === "GET /api/gst/reconcile") { if (!state.run && !state.started) state.run = buildRun(DEMO_SAVED); return { result: state.run }; }
   if (route === "POST /api/gst/books") { return { commandId: "demo-cmd", period: params.period }; }
   if (route === "GET /api/gst/books") { await wait(900); return { state: "saved" }; }
   if (route === "GET /api/gst/returns") { await wait(600); return { ok: true }; }
@@ -152,6 +236,7 @@ export async function demoGstCall(method: "GET" | "POST", path: string, params: 
     const periods = (params.periods as string[]) ?? [];
     periods.forEach((p) => state.saved.add(p));
     await wait(700);
+    state.started = true;
     state.run = buildRun(periods);
     return { state: "done" };
   }

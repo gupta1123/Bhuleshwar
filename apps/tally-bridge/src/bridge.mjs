@@ -37,6 +37,7 @@ const TALLY_READINESS_TIMEOUT_MS = 5_000;
 // Exports can be larger than imports, but they must still release the bridge
 // cycle if Tally is busy or has stopped responding.
 const TALLY_EXPORT_TIMEOUT_MS = 60_000;
+const PURCHASE_REGISTER_TIMEOUT_MS = 300_000;
 const BANK_MATCH_READ_TIMEOUT_MS = 20_000;
 const BANK_MATCH_MAX_XML_BYTES = 8 * 1024 * 1024;
 const OPEN_BILL_LEDGER_BATCH_SIZE = 50;
@@ -7639,13 +7640,29 @@ async function runCommand(config, command, options = {}) {
   if (command.commandType === "fetch_purchase_register") {
     try {
       const tallyUrl = normalizeTallyUrl(command.payload?.tallyUrl || config.tallyUrl);
+      // Ledger/group masters come from the Local Agent's synced catalogue when it has
+      // one, which avoids a ~47 s cold ledger export on large companies.
+      let localMasters = null;
+      try {
+        const runtime = config.__agentRuntime;
+        const catalogue = await runtime?.localMasterCatalogue({
+          companyName: command.payload?.companyName,
+          financialYear: runtime?.activeIdentity?.financialYear,
+          requestedTypes: ["ledger", "group"],
+        }, { moduleName: "purchase" });
+        if (catalogue?.masters) localMasters = { ledgers: catalogue.masters.ledgers, groups: catalogue.masters.groups };
+      } catch (catalogueError) {
+        console.log(`Command ${command.id}: local catalogue unavailable (${catalogueError instanceof Error ? catalogueError.message : catalogueError}); reading masters from Tally.`);
+      }
+      // Tally filters the whole company by date, so a large company can need minutes.
       const result = await fetchPurchaseRegister({
         company: command.payload?.companyName,
         period: command.payload?.period,
-        exportXml: (xml, label) => exportTallyXml(tallyUrl, xml, label),
+        localMasters,
+        exportXml: (xml, label) => exportTallyXml(tallyUrl, xml, label, PURCHASE_REGISTER_TIMEOUT_MS),
       });
       await sendCommandResult(config, command, { success: true, result });
-      console.log(`Command ${command.id} completed: read ${result.vouchers.length} purchase voucher(s) for ${result.period}.`);
+      console.log(`Command ${command.id} completed: read ${result.vouchers.length} purchase voucher(s) for ${result.period} (masters: ${result.mastersSource}).`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error ?? "Purchase register read failed.");
       await sendCommandResult(config, command, { success: false, result: {}, error: message });

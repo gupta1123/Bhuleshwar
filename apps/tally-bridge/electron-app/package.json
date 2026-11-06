@@ -1,7 +1,7 @@
 {
   "name": "bhuleshwar-local-agent",
   "productName": "Bhuleshwar Local Agent",
-  "version": "1.2.47",
+  "version": "1.2.48",
   "description": "Secure local workflow agent connecting Bhuleshwar to Tally Prime.",
   "author": "Bhuleshwar",
   "private": true,
@@ -39,7 +39,11 @@
       "update-state.mjs",
       "backup-retention.mjs",
       "package.json",
-      "node_modules/**/*"
+      "node_modules/**/*",
+      "!node_modules/@autodealer/tally-bridge/output{,/**/*}",
+      "!node_modules/@autodealer/tally-bridge/electron-app{,/**/*}",
+      "!node_modules/@autodealer/tally-bridge/**/*.exe",
+      "!node_modules/@autodealer/tally-bridge/**/*.blockmap"
     ],
     "extraResources": [
       {

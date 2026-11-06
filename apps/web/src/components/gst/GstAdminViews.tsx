@@ -32,7 +32,7 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
   if (!run) return <Empty icon={<Users className="h-7 w-7" />} title="No suppliers yet" text="Suppliers appear here after the first reconciliation." />;
   return (
     <div className="space-y-3">
-      <p className="text-[11.5px] text-[#8a7f72]">A status check uses one GST call and is saved for 60 days. It runs only when you press Check.</p>
+      <p className="text-[11.5px] text-[#6b6157]">A status check uses one GST call and is saved for 60 days. It runs only when you press Check.</p>
       {error && <Alert tone="bad">{error}</Alert>}
       <section className="overflow-hidden rounded-xl border border-[#ded8d0] bg-white">
         <div className="overflow-x-auto">
@@ -45,7 +45,7 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
               const profile = profiles[s.gstin];
               return (
                 <tr key={s.gstin} className="h-[52px] border-b border-[#ece6dc]">
-                  <td className={td}><span className="block max-w-[30ch] truncate text-[12.5px] font-medium text-[#1a1a1a]">{s.name || profile?.legalName || s.gstin}</span><span className="font-mono text-[10.5px] text-[#8a7f72]">{s.gstin}</span></td>
+                  <td className={td}><span className="block max-w-[30ch] truncate text-[12.5px] font-medium text-[#1a1a1a]">{s.name || profile?.legalName || s.gstin}</span><span className="font-mono text-[11.5px] text-[#6b6157]">{s.gstin}</span></td>
                   <td className={`${td} text-right tabular-nums`}>{s.invoices}</td><td className={`${td} text-right tabular-nums`}>{s.exceptions}</td><td className={`${td} text-right tabular-nums`}>{inr(s.claimed)}</td>
                   <td className={`${td} text-right font-semibold tabular-nums ${s.atRisk ? "text-[#991b1b]" : "text-[#b5a99a]"}`}>{s.atRisk ? inr(s.atRisk) : "—"}</td>
                   <td className={td}><Pill tone={s.filer === "regular" ? "ok" : s.filer === "irregular" ? "warn" : s.filer === "non-filer" ? "bad" : "stone"}>{s.filer ? s.filer.charAt(0).toUpperCase() + s.filer.slice(1) : "Unknown"}</Pill></td>
@@ -53,8 +53,8 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
                     {profile ? (
                       <div>
                         <Pill tone={profile.warning ? "bad" : "ok"}>{profile.status} · {profile.taxpayerType || "n/a"}</Pill>
-                        <div className="mt-0.5 text-[10.5px] text-[#8a7f72]">checked {ago(profile.verifiedAt)}</div>
-                        {profile.warning && <div className="text-[10.5px] text-[#991b1b]">{profile.warning}</div>}
+                        <div className="mt-0.5 text-[11.5px] text-[#6b6157]">checked {ago(profile.verifiedAt)}</div>
+                        {profile.warning && <div className="text-[11.5px] text-[#991b1b]">{profile.warning}</div>}
                       </div>
                     ) : (
                       <button disabled={!!busy} onClick={() => check(s.gstin, false)} className={btn}>
@@ -101,7 +101,7 @@ export function ConnectView({ scope }: { scope: GstScopeInput }) {
   return (
     <div className="space-y-4">
       <Panel title="GST account" action={status?.connected ? <Pill tone={active ? "ok" : "bad"}>{active ? "Connected" : "Session ended"}</Pill> : undefined}>
-        {!status ? <p className="text-xs text-[#8a7f72]">Loading…</p> : status.connected ? (
+        {!status ? <p className="text-xs text-[#6b6157]">Loading…</p> : status.connected ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs">
             <dt className="text-[#756b60]">GSTIN</dt><dd className="font-mono text-[#1a1a1a]">{status.gstin}</dd>
             <dt className="text-[#756b60]">Portal user</dt><dd className="text-[#1a1a1a]">{status.username}</dd>
@@ -133,12 +133,18 @@ export function ConnectView({ scope }: { scope: GstScopeInput }) {
       )}
       {message && <Alert>{message}</Alert>}
       {status?.snapshots && status.snapshots.length > 0 && (
-        <Panel title="Saved GST returns" sub="Reused on the next run, so they cost nothing again">
+        <Panel title="Saved GST returns">
           <div className="overflow-x-auto"><table className="w-full min-w-[420px] text-left text-xs">
-            <thead><tr className="text-[10.5px] font-bold uppercase tracking-[0.04em] text-[#8a7f72]"><th className="pb-2 font-bold">Return</th><th className="pb-2 font-bold">Month</th><th className="pb-2 font-bold">Fetched</th><th className="pb-2 font-bold">Status</th></tr></thead>
+            <thead><tr className="text-[11.5px] font-bold text-[#6b6157]"><th className="pb-2 font-bold">Month</th><th className="pb-2 font-bold">GSTR-2B</th><th className="pb-2 font-bold">GSTR-3B</th><th className="pb-2 font-bold">GSTR-2A</th></tr></thead>
             <tbody>
-              {status.snapshots.map((s) => (
-                <tr key={`${s.returnType}${s.period}`} className="border-t border-[#ece6dc]"><td className="py-2 font-medium uppercase text-[#1a1a1a]">{s.returnType.replace("gstr", "GSTR-")}</td><td className="py-2">{s.period}</td><td className="py-2">{ago(s.fetchedAt)}</td><td className="py-2">{s.isFinal ? <Pill tone="ok">Final</Pill> : <Pill>Provisional</Pill>}</td></tr>
+              {Array.from(new Set(status.snapshots.map((s) => s.period))).sort().map((period) => (
+                <tr key={period} className="border-t border-[#ece6dc]">
+                  <td className="py-2 font-medium text-[#1a1a1a]">{period}</td>
+                  {(["gstr2b", "gstr3b", "gstr2a"] as const).map((rt) => {
+                    const snap = (status.snapshots ?? []).find((x) => x.period === period && x.returnType === rt);
+                    return <td key={rt} className="py-2">{snap ? <span className="text-[#065f46]">Saved {ago(snap.fetchedAt)}{snap.isFinal ? "" : " (provisional)"}</span> : <span className="text-[#b5a99a]">Not saved</span>}</td>;
+                  })}
+                </tr>
               ))}
             </tbody>
           </table></div>
@@ -154,7 +160,7 @@ export function SettingsView({ scope }: { scope: GstScopeInput }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   const [message, setMessage] = useState("");
   useEffect(() => { gstCall<Settings>("GET", "/api/gst/settings", scope).then(setSettings).catch((e: Error) => setMessage(e.message)); }, [scope]);
-  if (!settings) return <Panel><p className="text-xs text-[#8a7f72]">{message || "Loading…"}</p></Panel>;
+  if (!settings) return <Panel><p className="text-xs text-[#6b6157]">{message || "Loading…"}</p></Panel>;
 
   const num = (value: string) => Math.max(0, Number(value) || 0);
   const save = async () => {
@@ -163,7 +169,7 @@ export function SettingsView({ scope }: { scope: GstScopeInput }) {
   };
   const field = (label: string, hint: string, value: number, set: (n: number) => void) => (
     <label className="block text-xs">
-      <span className="font-medium text-[#3d3530]">{label}</span><span className="ml-2 text-[10.5px] text-[#8a7f72]">{hint}</span>
+      <span className="font-medium text-[#3d3530]">{label}</span><span className="ml-2 text-[11.5px] text-[#6b6157]">{hint}</span>
       <input className={`${inputCls} mt-1.5 block w-40`} type="number" min={0} value={value} onChange={(e) => set(num(e.target.value))} />
     </label>
   );

@@ -123,6 +123,9 @@ function voucherEntries(voucher) {
 export function parsePurchaseRegister(dayBookXml, { ledgers, groups, voucherTypes, period }) {
   const vouchers = [];
   const skipped = { noGstin: [], cancelled: 0 };
+  // Ledger names used by a counted voucher that the master maps do not know. A cached
+  // master copy that predates a new ledger shows up here and is then re-read from Tally.
+  const unknownLedgers = new Set();
   for (const block of blocks(dayBookXml, "VOUCHER")) {
     const typeName = field(block, "VOUCHERTYPENAME") || attribute(block, "VCHTYPE");
     const base = ancestor(voucherTypes, typeName, new Set(["purchase", "debit note"]));
@@ -144,7 +147,9 @@ export function parsePurchaseRegister(dayBookXml, { ledgers, groups, voucherType
 
     const tax = { taxable: 0, cgst: 0, sgst: 0, igst: 0, cess: 0 };
     for (const entry of voucherEntries(block)) {
-      const kind = ledgerKind(field(entry, "LEDGERNAME"), ledgers, groups);
+      const ledgerName = field(entry, "LEDGERNAME");
+      if (ledgerName && !ledgers.has(ledgerName.toLowerCase())) unknownLedgers.add(ledgerName);
+      const kind = ledgerKind(ledgerName, ledgers, groups);
       if (kind) tax[kind] += Math.abs(Number(field(entry, "AMOUNT")) || 0);
     }
     for (const key of Object.keys(tax)) tax[key] = round2(tax[key]);
@@ -170,26 +175,77 @@ export function parsePurchaseRegister(dayBookXml, { ledgers, groups, voucherType
       narration,
     });
   }
-  return { vouchers, skipped };
+  return { vouchers, skipped, unknownLedgers };
+}
+
+// Ledger and group masters barely change between months, yet reading them cold from a
+// large company took ~47 s. They come from, in order: the Local Agent's incremental
+// catalogue, a short in-memory copy from an earlier month in this run, then Tally.
+const MASTER_CACHE_MS = 15 * 60_000;
+const masterCache = new Map();
+
+export function clearRegisterMasterCache() {
+  masterCache.clear();
+}
+
+function localMasterMaps(localMasters) {
+  const ledgerRows = Array.isArray(localMasters?.ledgers) ? localMasters.ledgers : [];
+  const groupRows = Array.isArray(localMasters?.groups) ? localMasters.groups : [];
+  if (!ledgerRows.length || !groupRows.length) return null;
+  const toMap = (rows, extra) => {
+    const map = new Map();
+    for (const row of rows) {
+      const name = decode(row?.name);
+      if (name) map.set(name.toLowerCase(), { name, parent: decode(row.parent), ...(extra ? extra(row) : {}) });
+    }
+    return map;
+  };
+  return {
+    ledgers: toMap(ledgerRows, (row) => ({ gstin: String(row.gstin ?? "").trim().toUpperCase() })),
+    groups: toMap(groupRows),
+  };
 }
 
 // `exportXml(xml, label)` posts one request to Tally and returns the response text.
-export async function fetchPurchaseRegister({ exportXml, company, period }) {
+// `localMasters` is the Local Agent's cached `{ ledgers, groups }` when it has one.
+export async function fetchPurchaseRegister({ exportXml, company, period, localMasters = null, now = Date.now }) {
   if (!company) throw new Error("Purchase register read requires a Tally company.");
   const { from, to } = monthRange(period);
+  const cacheKey = company.trim().toLowerCase();
+
   // Tally answers one request at a time, so these run in sequence.
-  const ledgers = parseLedgerMasters(await exportXml(buildLedgerMasterXml(company), "GST register ledgers"));
-  const groups = parseGroups(await exportXml(buildGroupMasterXml(company), "GST register groups"));
+  const readMastersFromTally = async () => {
+    const ledgers = parseLedgerMasters(await exportXml(buildLedgerMasterXml(company), "GST register ledgers"));
+    const groups = parseGroups(await exportXml(buildGroupMasterXml(company), "GST register groups"));
+    masterCache.set(cacheKey, { at: now(), ledgers, groups });
+    return { ledgers, groups, source: "tally" };
+  };
+  const cached = masterCache.get(cacheKey);
+  let masters = localMasterMaps(localMasters)
+    ? { ...localMasterMaps(localMasters), source: "local_catalogue" }
+    : cached && now() - cached.at < MASTER_CACHE_MS
+      ? { ledgers: cached.ledgers, groups: cached.groups, source: "memory_cache" }
+      : await readMastersFromTally();
+
   const voucherTypes = parseVoucherTypes(await exportXml(buildVoucherTypeXml(company), "GST register voucher types"));
   let dayBook = await exportXml(buildVoucherCollectionXml(company, from, to), "GST register vouchers");
   if (!blocks(dayBook, "VOUCHER").length) dayBook = await exportXml(buildDayBookXml(company, from, to), "GST register day book");
-  const { vouchers, skipped } = parsePurchaseRegister(dayBook, { ledgers, groups, voucherTypes, period });
+
+  let parsed = parsePurchaseRegister(dayBook, { ledgers: masters.ledgers, groups: masters.groups, voucherTypes, period });
+  // A saved copy that predates a new ledger would misread that voucher's tax. If any
+  // voucher uses a ledger the saved copy lacks, re-read the masters from Tally and re-parse
+  // the voucher text already in hand; no second voucher read is needed.
+  if (masters.source !== "tally" && parsed.unknownLedgers.size) {
+    masters = await readMastersFromTally();
+    parsed = parsePurchaseRegister(dayBook, { ledgers: masters.ledgers, groups: masters.groups, voucherTypes, period });
+  }
   return {
     companyName: company,
     period,
     system: "Tally (live)",
     generatedAt: new Date().toISOString(),
-    vouchers,
-    skipped,
+    mastersSource: masters.source,
+    vouchers: parsed.vouchers,
+    skipped: parsed.skipped,
   };
 }

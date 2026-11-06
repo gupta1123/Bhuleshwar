@@ -3,7 +3,19 @@
 import { useCallback, useEffect, useState } from "react";
 import { Plug, Users } from "lucide-react";
 import { ago, gstCall, inr, type GstRun, type GstScopeInput } from "@/lib/gst-client";
-import { Alert, btn, btnPrimary, Empty, inputCls, Panel, Pill, td, th } from "./gst-ui";
+import { riskOf, SupplierPanel } from "./GstViews";
+import { ACTIONS_ENABLED, Alert, btn, btnPrimary, Empty, inputCls, Panel, Pill, td, th } from "./gst-ui";
+
+// The engine marks a supplier "non-filer" when even one invoice is unreported, which is wrong for a
+// supplier with most invoices matched. Show what the numbers actually say instead.
+function matchStatus(invoices: number, open: number, kind: "normal" | "notInTally" | "noGst" = "normal"): { label: string; tone: "ok" | "warn" | "bad" | "info" | "stone" } {
+  if (open === 0) return { label: "All matched", tone: "ok" };
+  // Nothing to match against: every invoice is missing from Tally, or the Tally vouchers carry no GST.
+  if (kind === "notInTally") return { label: "Not in Tally", tone: "info" };
+  if (kind === "noGst") return { label: "No GST in Tally", tone: "stone" };
+  if (open >= invoices) return { label: "Nothing matched", tone: "bad" };
+  return { label: `${invoices - open} of ${invoices} matched`, tone: "warn" };
+}
 
 type Supplier = { gstin: string; legalName: string | null; tradeName: string | null; status: string; taxpayerType: string; verifiedAt: string; warning: string | null };
 
@@ -11,8 +23,21 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
   const [profiles, setProfiles] = useState<Record<string, Supplier>>({});
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
-  const suppliers = run?.run.totals.suppliers ?? [];
+  const [openGstin, setOpenGstin] = useState<string | null>(null);
+  // Biggest money at risk first, then the biggest suppliers.
+  // ITC at risk is summed from the invoices, so amount differences count too (the engine's own total leaves them out).
+  const riskBy = new Map<string, number>();
+  for (const i of run?.items ?? []) riskBy.set(i.gstin, (riskBy.get(i.gstin) ?? 0) + riskOf(i));
+  const suppliers = (run?.run.totals.suppliers ?? []).map((s) => ({ ...s, atRisk: riskBy.get(s.gstin) ?? s.atRisk }))
+    .sort((a, b) => b.atRisk - a.atRisk || b.claimed - a.claimed);
   const gstins = suppliers.map((s) => s.gstin).join(",");
+  const kindOf = (gstin: string): "normal" | "notInTally" | "noGst" => {
+    const mine = (run?.items ?? []).filter((i) => i.gstin === gstin);
+    if (mine.length && mine.every((i) => !i.books)) return "notInTally";
+    const tax = (i: (typeof mine)[number]) => (i.books ? i.books.tax.cgst + i.books.tax.sgst + i.books.tax.igst + i.books.tax.cess : 0);
+    if (mine.length && mine.every((i) => i.books && tax(i) < 1)) return "noGst";
+    return "normal";
+  };
 
   useEffect(() => {
     if (!gstins) return;
@@ -29,39 +54,43 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
     } catch (e) { setError(e instanceof Error ? e.message : "Lookup failed."); } finally { setBusy(""); }
   }
 
+  // Status checks are hidden while actions are off; a column of "Not checked" only adds noise.
+  const showStatus = ACTIONS_ENABLED || Object.keys(profiles).length > 0;
+  const rupees = (n: number) => inr(Math.round(n));
   if (!run) return <Empty icon={<Users className="h-7 w-7" />} title="No suppliers yet" text="Suppliers appear here after the first reconciliation." />;
   return (
     <div className="space-y-3">
-      <p className="text-[11.5px] text-[#6b6157]">A status check uses one GST call and is saved for 60 days. It runs only when you press Check.</p>
+      {ACTIONS_ENABLED && <p className="text-[11.5px] text-[#6b6157]">A status check uses one GST call and is saved for 60 days. It runs only when you press Check.</p>}
       {error && <Alert tone="bad">{error}</Alert>}
       <section className="overflow-hidden rounded-xl border border-[#ded8d0] bg-white">
         <div className="overflow-x-auto">
         <table className="w-full min-w-[820px] border-collapse text-left">
           <thead>
-            <tr><th className={th}>Supplier</th><th className={`${th} text-right`}>Invoices</th><th className={`${th} text-right`}>Open</th><th className={`${th} text-right`}>Claimed</th><th className={`${th} text-right`}>At risk</th><th className={th}>Filing</th><th className={th}>Portal status</th></tr>
+            <tr><th className={th}>Supplier</th><th className={`${th} text-right`}>Invoices</th><th className={`${th} text-right`}>Need action</th><th className={`${th} text-right`}>ITC in Tally</th><th className={`${th} text-right`}>ITC at risk</th><th className={th}>Matching</th>{showStatus && <th className={th}>GST registration</th>}</tr>
           </thead>
           <tbody>
             {suppliers.map((s) => {
               const profile = profiles[s.gstin];
               return (
-                <tr key={s.gstin} className="h-[52px] border-b border-[#ece6dc]">
-                  <td className={td}><span className="block max-w-[30ch] truncate text-[12.5px] font-medium text-[#1a1a1a]">{s.name || profile?.legalName || s.gstin}</span><span className="font-mono text-[11.5px] text-[#6b6157]">{s.gstin}</span></td>
-                  <td className={`${td} text-right tabular-nums`}>{s.invoices}</td><td className={`${td} text-right tabular-nums`}>{s.exceptions}</td><td className={`${td} text-right tabular-nums`}>{inr(s.claimed)}</td>
-                  <td className={`${td} text-right font-semibold tabular-nums ${s.atRisk ? "text-[#991b1b]" : "text-[#b5a99a]"}`}>{s.atRisk ? inr(s.atRisk) : "—"}</td>
-                  <td className={td}><Pill tone={s.filer === "regular" ? "ok" : s.filer === "irregular" ? "warn" : s.filer === "non-filer" ? "bad" : "stone"}>{s.filer ? s.filer.charAt(0).toUpperCase() + s.filer.slice(1) : "Unknown"}</Pill></td>
-                  <td className={td}>
+                <tr key={s.gstin} onClick={() => setOpenGstin(s.gstin)} tabIndex={0} onKeyDown={(e) => { if (e.key === "Enter") setOpenGstin(s.gstin); }}
+                  className="h-[52px] cursor-pointer border-b border-[#ece6dc] hover:bg-[rgba(237,230,217,0.42)] focus:bg-[rgba(237,230,217,0.42)] focus:outline-none">
+                  <td className={td}><span className="block min-w-[220px] max-w-[40ch] whitespace-normal break-words leading-snug text-[12.5px] font-medium text-[#1a1a1a]">{(s.name && s.name.toUpperCase() !== s.gstin.toUpperCase() ? s.name : "") || profile?.legalName || <span className="italic text-[#6b6157]">Name not in Tally</span>}</span><span className="font-mono text-[11.5px] text-[#6b6157]">{s.gstin}</span></td>
+                  <td className={`${td} text-right tabular-nums`}>{s.invoices}</td><td className={`${td} text-right tabular-nums`}>{s.exceptions}</td><td className={`${td} text-right tabular-nums`}>{rupees(s.claimed)}</td>
+                  <td className={`${td} text-right font-semibold tabular-nums ${s.atRisk ? "text-[#991b1b]" : "text-[#b5a99a]"}`}>{s.atRisk >= 1 ? rupees(s.atRisk) : "—"}</td>
+                  <td className={td}>{(() => { const m = matchStatus(s.invoices, s.exceptions, kindOf(s.gstin)); return <Pill tone={m.tone}>{m.label}</Pill>; })()}</td>
+                  {showStatus && <td className={td} onClick={(e) => e.stopPropagation()}>
                     {profile ? (
                       <div>
                         <Pill tone={profile.warning ? "bad" : "ok"}>{profile.status} · {profile.taxpayerType || "n/a"}</Pill>
                         <div className="mt-0.5 text-[11.5px] text-[#6b6157]">checked {ago(profile.verifiedAt)}</div>
                         {profile.warning && <div className="text-[11.5px] text-[#991b1b]">{profile.warning}</div>}
                       </div>
-                    ) : (
+                    ) : ACTIONS_ENABLED ? (
                       <button disabled={!!busy} onClick={() => check(s.gstin, false)} className={btn}>
                         {busy === s.gstin ? "Checking…" : "Check"}
                       </button>
-                    )}
-                  </td>
+                    ) : <span className="text-[12px] text-[#b5a99a]">Not checked</span>}
+                  </td>}
                 </tr>
               );
             })}
@@ -69,6 +98,13 @@ export function SuppliersView({ run, scope }: { run: GstRun | null; scope: GstSc
         </table>
         </div>
       </section>
+      {(() => {
+        const at = suppliers.findIndex((x) => x.gstin === openGstin);
+        if (at < 0) return null;
+        const cur = suppliers[at];
+        return <SupplierPanel run={run} gstin={cur.gstin} badge={matchStatus(cur.invoices, cur.exceptions, kindOf(cur.gstin))} onClose={() => setOpenGstin(null)}
+          onStep={{ pos: at + 1, total: suppliers.length, go: (d) => setOpenGstin(suppliers[at + d]?.gstin ?? openGstin) }} />;
+      })()}
     </div>
   );
 }
@@ -103,10 +139,10 @@ export function ConnectView({ scope }: { scope: GstScopeInput }) {
       <Panel title="GST account" action={status?.connected ? <Pill tone={active ? "ok" : "bad"}>{active ? "Connected" : "Session ended"}</Pill> : undefined}>
         {!status ? <p className="text-xs text-[#6b6157]">Loading…</p> : status.connected ? (
           <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1.5 text-xs">
-            <dt className="text-[#756b60]">GSTIN</dt><dd className="font-mono text-[#1a1a1a]">{status.gstin}</dd>
-            <dt className="text-[#756b60]">Portal user</dt><dd className="text-[#1a1a1a]">{status.username}</dd>
-            <dt className="text-[#756b60]">Session</dt><dd className="text-[#1a1a1a]">{active ? `Valid until ${new Date(status.sessionExpiry ?? "").toLocaleDateString("en-IN")}` : "Ended. Send a new OTP below."}</dd>
-            <dt className="text-[#756b60]">GST calls</dt><dd className="text-[#1a1a1a]">{status.callsLast24h} of {status.dailyCap} in the last 24 hours</dd>
+            <dt className="text-[#6b6157]">GSTIN</dt><dd className="font-mono text-[#1a1a1a]">{status.gstin}</dd>
+            <dt className="text-[#6b6157]">Portal user</dt><dd className="text-[#1a1a1a]">{status.username}</dd>
+            <dt className="text-[#6b6157]">Session</dt><dd className="text-[#1a1a1a]">{active ? `Valid until ${new Date(status.sessionExpiry ?? "").toLocaleDateString("en-IN")}` : "Ended. Send a new OTP below."}</dd>
+            <dt className="text-[#6b6157]">GST calls</dt><dd className="text-[#1a1a1a]">{status.callsLast24h} of {status.dailyCap} in the last 24 hours</dd>
           </dl>
         ) : <Empty icon={<Plug className="h-7 w-7" />} title="No GST account connected" text="Connect this company's GST portal login to fetch GSTR-2B, 2A and 3B." />}
       </Panel>
@@ -114,7 +150,7 @@ export function ConnectView({ scope }: { scope: GstScopeInput }) {
         <Panel title="Connect with OTP" sub="The OTP goes to the phone registered on the GST portal. One OTP keeps the connection alive for about a month.">
           <div className="flex flex-wrap items-center gap-2">
             {known && !editing ? (
-              <p className="text-xs text-[#756b60]">Account <span className="font-mono text-[#1a1a1a]">{known.gstin}</span> · {known.username} <button className="ml-1 underline" onClick={() => setEditing(true)}>Change</button></p>
+              <p className="text-xs text-[#6b6157]">Account <span className="font-mono text-[#1a1a1a]">{known.gstin}</span> · {known.username} <button className="ml-1 underline" onClick={() => setEditing(true)}>Change</button></p>
             ) : (<>
             <input className={inputCls} placeholder="GSTIN" value={gstin || known?.gstin || ""} onChange={(e) => setGstin(e.target.value.toUpperCase())} />
             <input className={inputCls} placeholder="GST portal username" value={username || known?.username || ""} onChange={(e) => setUsername(e.target.value)} />
@@ -185,7 +221,7 @@ export function SettingsView({ scope }: { scope: GstScopeInput }) {
     <Panel title="GST call limits" sub="Every call to the GST portal costs money" className="space-y-4">
       {field("Daily call limit", "stops runaway cost", settings.dailyCallCap, (n) => setSettings({ ...settings, dailyCallCap: n }))}
       {field("Minimum minutes between refreshes", "of the same return", settings.minRefreshMinutes, (n) => setSettings({ ...settings, minRefreshMinutes: n }))}
-      <div className="flex items-center gap-3"><button className={btnPrimary} onClick={save}>Save settings</button>{message && <span className="text-[11.5px] text-[#5a5046]">{message}</span>}</div>
+      <div className="flex items-center gap-3"><button className={btnPrimary} onClick={save}>Save settings</button>{message && <span className="text-[11.5px] text-[#3d3530]">{message}</span>}</div>
     </Panel>
     </div>
   );

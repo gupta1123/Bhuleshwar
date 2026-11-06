@@ -116,13 +116,23 @@ export const periodLabel = (period: string) => {
 
 export type GstMonth = {
   period: string;
-  books: { fetchedAt: string; voucherCount: number } | null;
+  books: { fetchedAt: string; voucherCount: number; skippedNoGstin?: number } | null;
   gstr2b: { fetchedAt: string; isFinal: boolean } | null;
   gstr2a: { fetchedAt: string; isFinal: boolean } | null;
   gstr3b: { fetchedAt: string; isFinal: boolean } | null;
 };
 
 export type GstTax = { taxable: number; cgst: number; sgst: number; igst: number; cess: number; total: number };
+// "2026-09-06" or "06-09-2026" -> "06 Sep 2026". Anything else is shown as it came.
+export function fmtDate(value: string | null | undefined) {
+  const s = String(value ?? "");
+  const iso = /^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  const dmy = /^(\d{2})-(\d{2})-(\d{4})$/.exec(s);
+  const [y, mo, d] = iso ? [iso[1], iso[2], iso[3]] : dmy ? [dmy[3], dmy[2], dmy[1]] : [];
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][Number(mo) - 1];
+  return y && month ? `${d} ${month} ${y}` : s;
+}
+
 export type GstSide = { invoiceNo: string; invoiceDate: string; voucherNumber?: string; supplierName?: string; tax: GstTax } | null;
 export type GstDecision = { decision: string; note: string | null; decided_by_name: string | null; decided_at: string } | null;
 

@@ -306,7 +306,8 @@ function reconcile(input) {
     let availableTax = portal && portal.itcAvailable === 'Y' ? sumTax(portal) : 0;
     if (duplicateClaim) availableTax = Math.min(availableTax, claimedTax);
 
-    const portalPeriods = [...new Set([...b2List, ...a2List].map((e) => e.period))];
+    // Blank periods (a return without its own period field) must not count as a second period.
+    const portalPeriods = [...new Set([...b2List, ...a2List].map((e) => e.period).filter(Boolean))];
     const row = {
       key,
       gstin: reference.gstin,

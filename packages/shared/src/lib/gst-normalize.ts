@@ -184,12 +184,13 @@ function fromBooks(payload) {
  * top level; 2A dates are `idt`/`nt_dt` with `itms[]`, 2B uses `dt` with
  * flat tax fields and `ntnum`/`typ` on notes.
  */
-function fromPortal(input, source) {
+function fromPortal(input, source, fallbackPeriod = '') {
   const payload = unwrap(input);
   if (!payload) return [];
   const docs = payload.docdata || (payload.b2b || payload.cdn || payload.cdnr ? payload : null);
   if (!docs) return [];
-  const period = periodFromReturn(payload.rtnprd || payload.fp) || '';
+  // Sandbox's GSTR-2A carries no period field, so the caller passes the month it asked for.
+  const period = periodFromReturn(payload.rtnprd || payload.fp) || fallbackPeriod || '';
   const out = [];
 
   for (const group of docs.b2b || []) {
@@ -283,8 +284,8 @@ function fromPortal(input, source) {
   return out;
 }
 
-const from2A = (payload) => fromPortal(payload, '2a');
-const from2B = (payload) => fromPortal(payload, '2b');
+const from2A = (payload, period = '') => fromPortal(payload, '2a', period);
+const from2B = (payload, period = '') => fromPortal(payload, '2b', period);
 
 /** Sum every tax head across a GSTR-3B table (an array of rows, or one row). */
 const sum3B = (rows) => round([].concat(rows || []).reduce(

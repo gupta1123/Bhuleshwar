@@ -83,7 +83,7 @@ export async function dataReadiness(scope: GstScope, periodsInput: unknown) {
   const [returns, books] = await Promise.all([
     gstin ? db.from('gst_return_snapshots').select('return_type,period,fetched_at,is_final')
       .eq('organization_id', scope.organizationId).eq('gstin', gstin).in('period', periods) : { data: [] },
-    db.from('tally_books_snapshots').select('period,fetched_at,voucher_count')
+    db.from('tally_books_snapshots').select('period,fetched_at,voucher_count,noGstin:payload->skipped->noGstin')
       .eq('organization_id', scope.organizationId).eq('company_key', scope.companyKey).in('period', periods),
   ]);
   return periods.map((period) => {
@@ -92,7 +92,7 @@ export async function dataReadiness(scope: GstScope, periodsInput: unknown) {
     const book = (books.data ?? []).find((row) => row.period === period);
     return {
       period,
-      books: book ? { fetchedAt: book.fetched_at, voucherCount: book.voucher_count } : null,
+      books: book ? { fetchedAt: book.fetched_at, voucherCount: book.voucher_count, skippedNoGstin: Array.isArray((book as { noGstin?: unknown }).noGstin) ? ((book as { noGstin: unknown[] }).noGstin).length : 0 } : null,
       gstr2b: pick('gstr2b') ? { fetchedAt: pick('gstr2b')!.fetched_at, isFinal: pick('gstr2b')!.is_final } : null,
       gstr2a: pick('gstr2a') ? { fetchedAt: pick('gstr2a')!.fetched_at, isFinal: pick('gstr2a')!.is_final } : null,
       gstr3b: pick('gstr3b') ? { fetchedAt: pick('gstr3b')!.fetched_at, isFinal: pick('gstr3b')!.is_final } : null,
@@ -126,8 +126,8 @@ export async function runReconcile(scope: GstScope, input: Obj) {
 
     const key = (returnType: 'gstr2a' | 'gstr2b' | 'gstr3b') => ({ organizationId: scope.organizationId, gstin, returnType, period });
     const [r2b, r2a, r3b] = await Promise.all([store.readSnapshot(key('gstr2b')), store.readSnapshot(key('gstr2a')), store.readSnapshot(key('gstr3b'))]);
-    if (r2b) { b2.push(...N.from2B(r2b.payload)); versions[`gstr2b:${period}`] = r2b.fetchedAt; } else missing.push({ kind: 'gstr2b', period });
-    if (r2a) { a2.push(...N.from2A(r2a.payload)); versions[`gstr2a:${period}`] = r2a.fetchedAt; }
+    if (r2b) { b2.push(...N.from2B(r2b.payload, period)); versions[`gstr2b:${period}`] = r2b.fetchedAt; } else missing.push({ kind: 'gstr2b', period });
+    if (r2a) { a2.push(...N.from2A(r2a.payload, period)); versions[`gstr2a:${period}`] = r2a.fetchedAt; }
     if (r3b) { const parsed = N.from3B(r3b.payload); if (parsed) g3b.push(parsed); versions[`gstr3b:${period}`] = r3b.fetchedAt; }
   }
   // Books and GSTR-2B are the two sides of the match; 2A and 3B only add detail.

@@ -28,8 +28,8 @@ const SUPPLIERS = [
 const tax = (taxable: number, rate: number, inter: boolean): GstTax => {
   const gst = Math.round(taxable * rate) / 100;
   return inter
-    ? { taxable, cgst: 0, sgst: 0, igst: gst, cess: 0, total: taxable + gst }
-    : { taxable, cgst: gst / 2, sgst: gst / 2, igst: 0, cess: 0, total: taxable + gst };
+    ? { taxable, cgst: 0, sgst: 0, igst: gst, cess: 0, total: gst }
+    : { taxable, cgst: gst / 2, sgst: gst / 2, igst: 0, cess: 0, total: gst };
 };
 const itc = (t: GstTax) => t.cgst + t.sgst + t.igst + t.cess;
 

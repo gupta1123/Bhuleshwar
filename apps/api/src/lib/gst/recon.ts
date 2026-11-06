@@ -64,17 +64,19 @@ export async function saveSettings(scope: GstScope, input: Obj) {
   return readSettings(scope);
 }
 
-function validPeriods(value: unknown) {
+// A reconcile run is capped at 12 months; the readiness check only reads what is saved,
+// so the screen can ask about several years at once.
+function validPeriods(value: unknown, max = 12) {
   const periods = Array.isArray(value) ? value.map(String) : [];
-  if (!periods.length || periods.length > 12 || periods.some((p) => !/^\d{4}-(0[1-9]|1[0-2])$/.test(p))) {
-    throw new ReconError('Choose between 1 and 12 months (YYYY-MM).', 400);
+  if (!periods.length || periods.length > max || periods.some((p) => !/^\d{4}-(0[1-9]|1[0-2])$/.test(p))) {
+    throw new ReconError(`Choose between 1 and ${max} months (YYYY-MM).`, 400);
   }
   return [...new Set(periods)].sort();
 }
 
 // What is saved for each month, so the screen can show what is missing before spending any calls.
 export async function dataReadiness(scope: GstScope, periodsInput: unknown) {
-  const periods = validPeriods(periodsInput);
+  const periods = validPeriods(periodsInput, 48);
   const db = createSupabaseAdminClient();
   const connection = await loadConnection(db, scope);
   const gstin = connection?.gstin ?? '';

@@ -41,6 +41,11 @@ async function applySeed(db: Db, scope: GstScope, existing: { id: string; sessio
   const seed = seedFromEnv();
   if (!seed || (seed.organizationId && seed.organizationId !== scope.organizationId)) return false;
   if (existing && existing.session_expiry && Date.parse(existing.session_expiry) >= seed.sessionExpiry) return false;
+  // The saved connection is unique per organization + GSTIN, not per company key. A new connector
+  // pairing changes the company key, so "no row for this key" does not mean "no connection": the
+  // GSTIN row may hold a session the keep-alive has refreshed since the seed was made. Never replace it.
+  const { data: sameGstin } = await db.from('gst_connections').select('id').eq('organization_id', scope.organizationId).eq('gstin', seed.gstin).limit(1).maybeSingle();
+  if (sameGstin) return false;
   const now = new Date().toISOString();
   const { data, error } = await db.from('gst_connections').upsert({
     organization_id: scope.organizationId, company_key: scope.companyKey, gstin: seed.gstin, gst_username: seed.username,
@@ -52,11 +57,29 @@ async function applySeed(db: Db, scope: GstScope, existing: { id: string; sessio
   return !error && !!data;
 }
 
+// A connector pairing is part of the legacy company key (legacy:<connector id>:<company name>), so
+// re-pairing the same Tally company produces a new key. Find that company's connection under its
+// older key instead of reporting "not connected". Only an unambiguous single match is used, and
+// nothing is written.
+async function connectionUnderEarlierPairing(db: Db, scope: GstScope) {
+  const name = /^legacy:[^:]+:(.+)$/.exec(scope.companyKey)?.[1];
+  if (!name) return null;
+  const escaped = name.replace(/[\\%_]/g, (c) => `\\${c}`);
+  const { data } = await db.from('gst_connections').select('*')
+    .eq('organization_id', scope.organizationId).like('company_key', `legacy:%:${escaped}`)
+    .order('updated_at', { ascending: false }).limit(2);
+  return data && data.length === 1 ? data[0] : null;
+}
+
 export async function loadConnection(db: Db, scope: GstScope) {
   const { data, error } = await db.from('gst_connections').select('*')
     .eq('organization_id', scope.organizationId).eq('company_key', scope.companyKey)
     .order('updated_at', { ascending: false }).limit(1).maybeSingle();
   if (error) throw new Error('Could not read the GST connection. Ensure the gst_reconciliation migration has been applied.');
+  if (!data) {
+    const earlier = await connectionUnderEarlierPairing(db, scope);
+    if (earlier) return earlier;
+  }
   if (await applySeed(db, scope, data)) {
     const seeded = await db.from('gst_connections').select('*').eq('organization_id', scope.organizationId).eq('company_key', scope.companyKey).order('updated_at', { ascending: false }).limit(1).maybeSingle();
     if (seeded.data) return seeded.data;
@@ -70,13 +93,26 @@ export async function loadPolicy(db: Db, scope: GstScope): Promise<PullPolicy> {
   return data ? { dailyCap: data.daily_call_cap, minRefreshMinutes: data.min_refresh_minutes } : DEFAULT_PULL_POLICY;
 }
 
-async function saveSession(db: Db, connectionId: string, session: TaxpayerSession) {
-  const { error } = await db.from('gst_connections').update({
+// Saves a new session. When `previous` (the stored token being replaced) is given, the write only
+// happens if the row still holds that token, so two refreshers cannot overwrite each other, and the
+// replaced token is kept in prev_* as a safety copy. Returns false when someone else saved first.
+async function saveSession(db: Db, connectionId: string, session: TaxpayerSession, previous?: { tokenEnc: string; tokenExpiry: string }) {
+  const now = new Date().toISOString();
+  const fields = {
     status: 'active', session_token_enc: encryptSecret(session.token),
     session_expiry: new Date(session.sessionExpiry).toISOString(), token_expiry: new Date(session.tokenExpiry).toISOString(),
-    verified_at: new Date().toISOString(), last_error: null, updated_at: new Date().toISOString(),
-  }).eq('id', connectionId);
-  if (error) throw new Error('Could not save the refreshed GST session.');
+    verified_at: now, last_error: null, updated_at: now,
+  };
+  const attempt = async (extra: Record<string, unknown>) => {
+    let query = db.from('gst_connections').update({ ...fields, ...extra }).eq('id', connectionId);
+    if (previous) query = query.eq('session_token_enc', previous.tokenEnc);
+    return query.select('id');
+  };
+  let result = await attempt(previous ? { prev_session_token_enc: previous.tokenEnc, prev_token_expiry: previous.tokenExpiry, prev_token_saved_at: now } : {});
+  // The safety-copy columns come from a migration; keep saving even where it has not been applied yet.
+  if (result.error && /prev_(session_token_enc|token_expiry|token_saved_at)/.test(result.error.message)) result = await attempt({});
+  if (result.error) throw new Error('Could not save the refreshed GST session.');
+  return (result.data ?? []).length > 0;
 }
 
 // The client's GSTIN and portal username live in env, so nobody types them in.
@@ -128,14 +164,16 @@ export async function pullGstReturn(scope: GstScope, input: { returnType: GstRet
     };
     try {
       const { session, refreshed } = await client.ensureSession(stored);
-      if (refreshed) await saveSession(db, connection.id, session);
+      if (refreshed) await saveSession(db, connection.id, session, { tokenEnc: connection.session_token_enc, tokenExpiry: connection.token_expiry });
       if (returnType === 'gstr2b') return await client.getGstr2b(session, period);
       if (returnType === 'gstr3b') return await client.getGstr3b(session, period);
       return await client.getGstr2a(session, period, ['b2b', 'cdn']);
     } catch (error) {
       if (error instanceof SandboxError && error.kind === 'session') {
         console.error('[gst] portal rejected the session:', error.message);
-        await db.from('gst_connections').update({ status: 'expired', last_error: error.message, updated_at: new Date().toISOString() }).eq('id', connection.id);
+        // Record the reason only. One rejected call must not switch the connection off: the keep-alive
+        // job decides when a session is really gone (its expiry date has passed).
+        await db.from('gst_connections').update({ last_error: error.message, updated_at: new Date().toISOString() }).eq('id', connection.id);
         throw new GstServiceError('The GST session has expired. A new OTP is needed.', 'session_expired', 409);
       }
       throw error;
@@ -189,30 +227,33 @@ export async function verifyGstOtp(scope: GstScope, input: { gstin: string; user
 export async function keepGstSessionsAlive(marginMinutes = 240) {
   const db = createSupabaseAdminClient();
   const client = sandboxClientFromEnv();
-  const { data, error } = await db.from('gst_connections').select('id,gstin,session_token_enc,session_expiry,token_expiry').eq('status', 'active');
+  const { data, error } = await db.from('gst_connections').select('id,gstin,status,session_token_enc,session_expiry,token_expiry').in('status', ['active', 'expired']);
   if (error) throw new Error('Could not read GST connections.');
   const results: Array<{ gstin: string; result: 'fresh' | 'refreshed' | 'expired' | 'failed' }> = [];
   for (const row of data ?? []) {
     const result = async (): Promise<'fresh' | 'refreshed' | 'expired' | 'failed'> => {
-      if (!row.session_token_enc || Date.parse(row.session_expiry) <= Date.now()) return 'expired';
-      if (Date.parse(row.token_expiry) - Date.now() > marginMinutes * 60_000) return 'fresh';
+      if (!row.session_token_enc || Date.parse(row.session_expiry) <= Date.now()) {
+        if (row.status === 'active') await db.from('gst_connections').update({ status: 'expired', last_error: 'The 30-day GST session has ended.', updated_at: new Date().toISOString() }).eq('id', row.id);
+        return 'expired';
+      }
+      // A connection wrongly marked expired heals itself: it is still tried while its session date is ahead.
+      if (row.status === 'active' && Date.parse(row.token_expiry) - Date.now() > marginMinutes * 60_000) return 'fresh';
       try {
         const session = await client.refreshSession({
           token: decryptSecret(row.session_token_enc),
           sessionExpiry: Date.parse(row.session_expiry), tokenExpiry: Date.parse(row.token_expiry),
         });
-        await saveSession(db, row.id, session);
+        const saved = await saveSession(db, row.id, session, { tokenEnc: row.session_token_enc, tokenExpiry: row.token_expiry });
+        if (!saved) { console.log('[gst] keep-alive: the session was already refreshed by another caller; left as is.'); return 'fresh'; }
         console.log('[gst] keep-alive refreshed; token until', new Date(session.tokenExpiry).toISOString(), 'session until', new Date(session.sessionExpiry).toISOString());
         return 'refreshed';
       } catch (err) {
         const message = err instanceof Error ? err.message : 'refresh failed';
         console.error('[gst] keep-alive refresh failed:', message);
-        if (err instanceof SandboxError && err.kind === 'session') {
-          await db.from('gst_connections').update({ status: 'expired', last_error: message, updated_at: new Date().toISOString() }).eq('id', row.id);
-          return 'expired';
-        }
+        // Record the reason and try again on the next run. The status only changes once the session's
+        // own expiry date passes (handled above), so one rejected refresh never switches it off.
         await db.from('gst_connections').update({ last_error: message, updated_at: new Date().toISOString() }).eq('id', row.id);
-        return 'failed';
+        return err instanceof SandboxError && err.kind === 'session' ? 'expired' : 'failed';
       }
     };
     results.push({ gstin: row.gstin, result: await result() });

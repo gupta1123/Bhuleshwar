@@ -363,9 +363,9 @@ function getTermsIssueStatus(mismatch: SavedCaseDetail["mismatches"][number]) {
 
 function getClearTermsStatus() {
   return {
-    label: "No issue flagged",
-    className: "border-emerald-200 bg-emerald-50 text-emerald-700",
-    icon: CheckCircle2,
+    label: "Extracted ? not assessed",
+    className: "border-slate-200 bg-slate-50 text-slate-600",
+    icon: FileText,
   };
 }
 
@@ -2465,15 +2465,15 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
 
     const termsContent = (
       <div className={styles.redesignDataContent}>
-        <div className={styles.redesignDataGroupLabel}>Purchase-order terms</div>
+        <div className={styles.redesignDataGroupLabel}>Document terms</div>
         <div className={styles.redesignTermsList}>
           {activeTermsChecklistRows.map((row) => (
             <article
               key={row.key}
             >
               <span><strong>{row.label}</strong><small>{row.value}</small></span>
-              <em className={row.issue ? styles.redesignTermIssue : styles.redesignTermClear}>
-                {row.issue ? "Needs review" : "Fulfilled"}
+              <em className={row.status.label === "Fulfilled" ? styles.redesignTermClear : styles.redesignTermIssue}>
+                {row.status.label}
               </em>
             </article>
           ))}
@@ -2528,8 +2528,8 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
       <div className={styles.redesignComplianceList}>
         {activeTermsChecklistRows.length > 0 ? activeTermsChecklistRows.map((row) => (
           <article key={row.key}>
-            <div><strong>{row.label}</strong><span className={row.issue ? styles.redesignComplianceIssue : styles.redesignComplianceClear}>
-              {row.issue ? <TriangleAlert /> : <CheckCircle2 />} {row.issue ? "Needs review" : "Fulfilled"}
+            <div><strong>{row.label}</strong><span className={row.status.label === "Fulfilled" ? styles.redesignComplianceClear : styles.redesignComplianceIssue}>
+              <row.status.icon /> {row.status.label}
             </span></div>
             <p>{row.value}</p>
             {row.evidence ? <small>{row.evidence}</small> : null}

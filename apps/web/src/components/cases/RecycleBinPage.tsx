@@ -148,6 +148,8 @@ export function RecycleBinPage() {
   const [totalPages, setTotalPages] = useState(1);
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [isMutating, setIsMutating] = useState(false);
+  const [reloadKey, setReloadKey] = useState(0);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -172,6 +174,7 @@ export function RecycleBinPage() {
       signal: controller.signal,
     })
       .then((payload) => {
+        if (controller.signal.aborted) return;
         setCases(payload.cases);
         setTotalCount(payload.totalCount ?? payload.cases.length);
         setTotalPages(payload.totalPages ?? 1);
@@ -188,7 +191,7 @@ export function RecycleBinPage() {
     return () => {
       controller.abort();
     };
-  }, [currentPage, debouncedQuery, pageSize]);
+  }, [currentPage, debouncedQuery, pageSize, reloadKey]);
 
   async function handleConfirmAction() {
     if (!pendingAction) return;
@@ -196,6 +199,7 @@ export function RecycleBinPage() {
     try {
       setIsMutating(true);
       setError(null);
+      setNotice(null);
 
       if (pendingAction.type === "restore") {
         await restoreCase(pendingAction.item.id);
@@ -213,6 +217,7 @@ export function RecycleBinPage() {
       if (currentPage > nextTotalPages) {
         setCurrentPage(nextTotalPages);
       }
+      setNotice(pendingAction.type === "restore" ? "Case restored." : "Case permanently deleted.");
       setPendingAction(null);
     } catch (mutationError) {
       setError(
@@ -273,6 +278,7 @@ export function RecycleBinPage() {
 
           {/* ── Cardless Table Area (Matches CasesPage) ── */}
           <div className="w-full pt-1">
+            {notice && <p role="status" className="mb-3 text-xs font-medium text-emerald-800">{notice}</p>}
             {status === "loading" && (
               <div className="space-y-3 py-4">
                 {Array.from({ length: 8 }).map((_, i) => (
@@ -290,6 +296,7 @@ export function RecycleBinPage() {
             {status === "error" && (
               <div className="rounded-lg border border-rose-200 bg-rose-50 p-4 text-xs font-medium text-rose-700">
                 {error}
+                <button type="button" className="ml-3 underline" onClick={() => setReloadKey((key) => key + 1)}>Try again</button>
               </div>
             )}
 
@@ -497,6 +504,8 @@ export function RecycleBinPage() {
           confirmLabel={pendingAction?.type === "restore" ? "Restore case" : "Delete forever"}
           variant={pendingAction?.type === "restore" ? "default" : "danger"}
           loading={isMutating}
+          error={pendingAction ? error : null}
+          footnote={pendingAction?.type === "restore" ? null : "Permanently deleted cases cannot be restored."}
           onConfirm={handleConfirmAction}
         />
       </div>

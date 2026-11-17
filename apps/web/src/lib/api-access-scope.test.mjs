@@ -1,13 +1,14 @@
 import test from 'node:test';import assert from 'node:assert/strict';import vm from 'node:vm';
 import {readFile} from 'node:fs/promises';import ts from 'typescript';
+import {fetchWithReadRetry} from './api-read-retry.ts';
 const source=await readFile(new URL('./api-client.ts',import.meta.url),'utf8');
 const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const deferred=()=>{let resolve;const promise=new Promise(r=>{resolve=r;});return {promise,resolve};};
 function fixture(){
  const session=deferred(),refresh=deferred(),calls=[];let org='org-a',epoch=0;
  const client={auth:{onAuthStateChange(){},getSession:()=>session.promise,refreshSession:()=>refresh.promise}};
- const exports={};const imports={'@/lib/supabase/client':{createSupabaseBrowserClient:()=>client},'@/lib/access-cache':{accessCacheEpoch:()=>epoch}};
- vm.runInNewContext(code,{exports,require:name=>{if(!(name in imports))throw Error(name);return imports[name];},process:{env:{}},Headers,Date,performance,DOMException,queueMicrotask,Event,
+ const exports={};const imports={'@/lib/supabase/client':{createSupabaseBrowserClient:()=>client},'@/lib/access-cache':{accessCacheEpoch:()=>epoch},'./api-read-retry':{fetchWithReadRetry}};
+ vm.runInNewContext(code,{exports,require:name=>{if(!(name in imports))throw Error(name);return imports[name];},process:{env:{}},Headers,Date,performance,DOMException,queueMicrotask,Event,crypto,
   sessionStorage:{getItem:()=>org},window:{dispatchEvent(){}},fetch:async(url,init)=>{calls.push({url,headers:init.headers});return Response.json({}, {status:calls.length===1?401:200});}});
  return {apiFetch:exports.apiFetch,calls,session,refresh,change(){org='org-b';epoch++;}};
 }

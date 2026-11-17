@@ -5664,7 +5664,10 @@ function buildMismatchCopy(mismatch: Omit<Mismatch, "analysis" | "fixPlan">): Pi
       .filter((value): value is { raw: string; kg: number } => Boolean(value));
 
     if (normalizedWeights.length >= 2) {
-      const [first, second] = normalizedWeights;
+      // The first two documents may agree while a later receipt differs.
+      const ordered = [...normalizedWeights].sort((left, right) => left.kg - right.kg);
+      const first = ordered[0];
+      const second = ordered[ordered.length - 1];
       const difference = Math.abs(first.kg - second.kg);
       return {
         analysis:

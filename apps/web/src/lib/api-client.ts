@@ -2,6 +2,7 @@
 
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 import {accessCacheEpoch} from '@/lib/access-cache';
+import { fetchWithReadRetry } from './api-read-retry';
 
 const API_BASE_URL = (process.env.NEXT_PUBLIC_API_BASE_URL || "").replace(/\/+$/, "");
 const USE_CROSS_ORIGIN_API =
@@ -116,6 +117,7 @@ async function authenticatedFetch(path: string, init?: RequestInit) {
   // an old screen's mutation into a newly selected organization.
   const organization=typeof window!=='undefined'?sessionStorage.getItem('kalika-access-organization'):null;
   const requestId=crypto.randomUUID();
+  const requestEpoch=accessCacheEpoch();
   const accessToken = await readAccessToken();
   const apiUrl = buildApiUrl(path);
 
@@ -129,11 +131,11 @@ async function authenticatedFetch(path: string, init?: RequestInit) {
       headers.set("Authorization", `Bearer ${token}`);
     }
 
-    return fetch(apiUrl, {
+    return fetchWithReadRetry(() => fetch(apiUrl, {
       ...init,
       headers,
       credentials: USE_CROSS_ORIGIN_API ? "omit" : (init?.credentials ?? "same-origin"),
-    });
+    }), init, () => requestEpoch === accessCacheEpoch());
   }
 
   const response = await sendRequest(accessToken);

@@ -51,7 +51,8 @@ export function mergeOverlappingPageGroups<T extends Group>(groups: T[]): T[] {
     const match = result.find((previous) => {
       if (previous.documentType !== group.documentType) return false;
       const identicalRange = previous.pageStart === group.pageStart && previous.pageEnd === group.pageEnd;
-      if (identicalRange && identity(previous.documentNumber) && identity(previous.documentNumber) === identity(group.documentNumber)) return true;
+      const physicalReceipt = ["Weighment Slip", "Receiving Record"].includes(group.documentType);
+      if (physicalReceipt && identicalRange && identity(previous.documentNumber) && identity(previous.documentNumber) === identity(group.documentNumber)) return true;
       const keys = ["documentNumber", "primaryPartyName", "vehicleNumber"] as const;
       if (keys.some((key) => identity(previous[key]) && identity(group[key]) && identity(previous[key]) !== identity(group[key]))) return false;
       const overlaps = previous.pageStart <= group.pageEnd && group.pageStart <= previous.pageEnd;

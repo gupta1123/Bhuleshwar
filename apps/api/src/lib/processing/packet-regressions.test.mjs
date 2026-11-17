@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 const {normalisePacketEvidence,shipmentMassChecks,evidenceTimestamp,arithmeticChecks,hasRelevantPacketTerms}=await import('@autodealer/shared/lib/packet-evidence');
 const {verifyCaseDocuments,verifyGroupedCaseDocuments,getSellerChainRoleSelection}=await import('../../services/verification.ts');
-const {enrichProcessedDocuments,applyExtractionReviewCorrections,mapFields}=await import('./pipeline.ts');
+const {enrichProcessedDocuments,applyExtractionReviewCorrections,mapFields,verifyProcessedDocuments}=await import('./pipeline.ts');
 const {mergeOverlappingPageGroups}=await import('./image-request-budget.ts');
 const options={considerFormatting:false};
 const doc=(id,type,fields={},extra={})=>({id,type,title:type,fields,lineItems:[],md:'',sourceFileName:'packet.pdf',sourceHint:`page ${id}`,pages:1,...extra});
@@ -16,8 +16,23 @@ test('receiving evidence restores roles, reference, weight and timed arrival',()
 test('mass compares invoice quantities to receipt weights across units',()=>{
  const r=shipmentMassChecks([invoice(),doc('r','Weighment Slip',{netWeight:'31000 kg'})]);assert.equal(r.checks[0].status,'failed');assert.equal(r.mismatches[0].field,'netWeight');assert.match(r.checks[0].detail,/1000.00 kg/);
 });
+
+test('flattened Trishul evidence keeps reviewed values and restores their tonne convention',()=>{
+ const receipt=doc('r','Receiving Record',{grossWeight:'43.24',tareWeight:'13.68',netWeight:'29.56'},{md:'## Visible Text\nBhuleshwar Steel & Alloys Pvt Ltd (Trishul) Transaction ID: 20241 Vehicle Entry Date: 2026-11-04 08:42:17 Gross Weight: 43.24 Tare Weight: 13.68 Net Weight: 29.56'});
+ const [r]=normalisePacketEvidence([receipt]);
+ assert.equal(r.fields.netWeight,'29.56 MT');assert.equal(r.fields.grossWeight,'43.24 MT');assert.equal(r.fields.tareWeight,'13.68 MT');
+ assert.equal(shipmentMassChecks([invoice(),{...r,fields:{...r.fields,netWeight:'30.14 MT'}}]).checks[0].status,'passed');
+ assert.equal(normalisePacketEvidence([{...receipt,fields:{netWeight:'30.14'}}])[0].fields.netWeight,'30.14 MT');
+ assert.equal(normalisePacketEvidence([{...receipt,fields:{netWeight:'29560 kg'}}])[0].fields.netWeight,'29560 kg');
+ assert.equal(normalisePacketEvidence([{...receipt,md:'## Visible Text\nReceiving Record Transaction ID: G1 Net Weight: 29.56'}])[0].fields.netWeight,'29.56');
+});
 test('small 140 kg variance stays within the established tolerance',()=>{
  const r=shipmentMassChecks([invoice(),doc('r','Receiving Record',{netWeight:'30.14 MT'})]);assert.equal(r.mismatches.length,0);assert.match(r.checks[0].detail,/tolerance 150.00 kg/);
+});
+
+test('weight mismatch copy includes the divergent third observation',()=>{
+ const r=verifyProcessedDocuments([doc('l','Lorry Receipt',{netWeight:'29.54 MT'}),doc('w','Weighment Slip',{netWeight:'29540 kg'}),doc('r','Receiving Record',{netWeight:'31 MT'})],options);
+ assert.match(r.mismatches.find(m=>m.field==='netWeight').analysis,/Difference: 1460 kg/);
 });
 test('missing units never produce a passed mass check',()=>assert.equal(shipmentMassChecks([invoice(),doc('r','Weighment Slip',{netWeight:'31000'})]).checks[0].status,'not_checked'));
 test('only explicitly identified partial receipts are summed once',()=>{

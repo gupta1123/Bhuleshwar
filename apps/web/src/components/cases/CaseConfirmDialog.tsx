@@ -18,6 +18,7 @@ type CaseConfirmDialogProps = {
   description: string;
   confirmLabel: string;
   loading?: boolean;
+  error?: string | null;
   variant?: "danger" | "default";
   /** Overrides the case-specific footnote; pass null to hide it. */
   footnote?: string | null;
@@ -31,6 +32,7 @@ export function CaseConfirmDialog({
   description,
   confirmLabel,
   loading = false,
+  error,
   variant = "danger",
   footnote,
   onOpenChange,
@@ -57,6 +59,7 @@ export function CaseConfirmDialog({
         </div>
 
         <div className="border-t border-[#f0ece4] bg-[#fbfaf8] px-6 py-4">
+          {error && <p role="alert" className="mb-3 text-xs text-rose-700">{error}</p>}
           <DialogFooter className="flex flex-row justify-end gap-2 sm:gap-2.5">
             <Button
               type="button"

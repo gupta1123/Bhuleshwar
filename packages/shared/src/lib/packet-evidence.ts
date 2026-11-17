@@ -39,6 +39,13 @@ export function restoreReceivingEvidence(doc: CaseDoc): CaseDoc {
   // Trishul's exported gross/tare/net columns are metric tonnes. Other layouts must state a unit.
   const trishul = /\btrishul\b/i.test(text);
   for (const [key, label] of [['grossWeight','Gross'],['tareWeight','Tare'],['netWeight','Net']] as const) {
+    // Review may retain a corrected number while removing the separate unit.
+    // Preserve that number and apply the recognized export's unit convention,
+    // including when OCR flattened the source labels onto one line.
+    const current = fields[key];
+    if (trishul && current && /^\d[\d,.]*$/.test(String(current).trim())) {
+      fields[key] = `${String(current).trim()} MT`;
+    }
     const value = labelled(text, `${label}\\s*Weight`);
     if (value && /^\d[\d,.]*(?:\s*(?:kg|mt|t|tonnes?))?$/i.test(value)) {
       put(key, trishul && !/[a-z]/i.test(value) ? `${value} MT` : value);

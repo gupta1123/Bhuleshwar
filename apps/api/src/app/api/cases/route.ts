@@ -1,3 +1,4 @@
+import {withRequestTiming,timeRequestStep} from '@/lib/api/request-timing';
 import { withTeamAccess } from '@/lib/access/route-boundary';
 import { newResourceScope } from '@/lib/access/new-resource';
 import { jsonWithCors, optionsWithCors } from "@/lib/api/cors";
@@ -1390,30 +1391,30 @@ async function POSTHandler(request: Request) {
   let caseId = "";
 
   try {
-    const user = await requireRequestUser(request);
+    const user = await timeRequestStep(request,"auth",()=>requireRequestUser(request));
     if (!user) {
       return jsonWithCors(request, { error: "Unauthorized" }, { status: 401 });
     }
 
     supabase = createSupabaseAdminClient();
     const formData = (await request.formData()) as unknown as WebFormData;
-    const resourceScope = await newResourceScope(request, formData.get('accessCompanyId'), 'purchases.prepare');
+    const resourceScope = await timeRequestStep(request,"access",()=>newResourceScope(request,formData.get('accessCompanyId'),'purchases.prepare'));
     const mode = typeof formData.get("mode") === "string" ? formData.get("mode") : null;
     const allowDuplicateUpload = readBooleanFormValue(formData.getAll("allowDuplicate")[0]);
     const files = formData.getAll("files").filter(isFileEntry);
-    const preparedFiles = await prepareUploadFiles(files);
+    const preparedFiles = await timeRequestStep(request,"prepareFiles",()=>prepareUploadFiles(files));
     appendPacketUploadAiLog(
       `[packet-upload-ai-flow] case-create mode=${mode ?? "processed"}; files=${preparedFiles.length}; allow_duplicate=${allowDuplicateUpload}`
     );
     const uploadFingerprint = await getUploadFingerprint(preparedFiles);
     if (!allowDuplicateUpload) {
-      const duplicateCase = await findDuplicateCaseForUpload({
+      const duplicateCase = await timeRequestStep(request,"duplicateLookup",()=>findDuplicateCaseForUpload({
         scope: resourceScope,
-        supabase,
+        supabase: supabase!,
         ownerUserId: user.id,
         files: preparedFiles,
         uploadFingerprint,
-      });
+      }));
       if (duplicateCase) {
         return duplicateCaseResponse(request, duplicateCase);
       }
@@ -1435,15 +1436,15 @@ async function POSTHandler(request: Request) {
       const displayName = formatDraftName(firstFileName);
       const slug = `${slugifyDraftName(displayName, "draft-case")}-${caseId.slice(0, 8)}`;
 
-      const fileRows = [];
+      const fileRows: Record<string,unknown>[] = [];
       for (const file of preparedFiles) {
-        const asset = await ensureStorageAsset({
-          supabase,
+        const asset = await timeRequestStep(request,"storage",()=>ensureStorageAsset({
+          supabase: supabase!,
           ownerUserId: user.id,
           storageBucket: STORAGE_BUCKET,
           bytes: file.bytes,
           contentType: file.contentType,
-        });
+        }));
         if (asset.createdObject) {
           uploadedPaths.push({
             storageAssetId: asset.id,
@@ -1489,24 +1490,24 @@ async function POSTHandler(request: Request) {
         },
       };
 
-      const { data: insertedCase, error: caseError } = await supabase
+      const { data: insertedCase, error: caseError } = await timeRequestStep(request,"saveCase",async()=>await supabase!
         .from("packet_cases")
         .insert({...caseRow,...resourceScope})
         .select(
           "id, slug, display_name, buyer_name, po_number, invoice_number, status, risk_score, upload_count, document_count, mismatch_count, created_at, processing_meta"
         )
-        .single();
+        .single());
 
       if (caseError) {
         if (isDuplicateUploadConstraintError(caseError)) {
           await cleanupUploadedFiles(supabase, uploadedPaths);
-          const duplicate = await findDuplicateCaseForUpload({
+          const duplicate = await timeRequestStep(request,"duplicateLookup",()=>findDuplicateCaseForUpload({
             scope: resourceScope,
-            supabase,
+            supabase: supabase!,
             ownerUserId: user.id,
             files: preparedFiles,
             uploadFingerprint,
-          });
+          }));
           if (duplicate) {
             return duplicateCaseResponse(request, duplicate);
           }
@@ -1514,7 +1515,7 @@ async function POSTHandler(request: Request) {
         throw caseError;
       }
 
-      const { error: fileInsertError } = await supabase.from("packet_case_files").insert(fileRows);
+      const { error: fileInsertError } = await timeRequestStep(request,"saveFiles",async()=>await supabase!.from("packet_case_files").insert(fileRows));
       if (fileInsertError) {
         throw fileInsertError;
       }
@@ -1554,15 +1555,15 @@ async function POSTHandler(request: Request) {
     const displayName = await resolveCaseDisplayNameWithAI(documents, summary);
     caseId = crypto.randomUUID();
 
-    const fileRows = [];
+    const fileRows: Record<string,unknown>[] = [];
     for (const file of preparedFiles) {
-      const asset = await ensureStorageAsset({
-        supabase,
+      const asset = await timeRequestStep(request,"storage",()=>ensureStorageAsset({
+        supabase: supabase!,
         ownerUserId: user.id,
         storageBucket: STORAGE_BUCKET,
         bytes: file.bytes,
         contentType: file.contentType,
-      });
+      }));
       if (asset.createdObject) {
         uploadedPaths.push({
           storageAssetId: asset.id,
@@ -1610,24 +1611,24 @@ async function POSTHandler(request: Request) {
       },
     };
 
-    const { data: insertedCase, error: caseError } = await supabase
+    const { data: insertedCase, error: caseError } = await timeRequestStep(request,"saveCase",async()=>await supabase!
       .from("packet_cases")
       .insert({...caseRow,...resourceScope})
       .select(
         "id, slug, display_name, buyer_name, po_number, invoice_number, status, risk_score, upload_count, document_count, mismatch_count, created_at, processing_meta"
       )
-      .single();
+      .single());
 
     if (caseError) {
       if (isDuplicateUploadConstraintError(caseError)) {
         await cleanupUploadedFiles(supabase, uploadedPaths);
-        const duplicate = await findDuplicateCaseForUpload({
+        const duplicate = await timeRequestStep(request,"duplicateLookup",()=>findDuplicateCaseForUpload({
           scope: resourceScope,
-          supabase,
+          supabase: supabase!,
           ownerUserId: user.id,
           files: preparedFiles,
           uploadFingerprint,
-        });
+        }));
         if (duplicate) {
           return duplicateCaseResponse(request, duplicate);
         }
@@ -1636,7 +1637,7 @@ async function POSTHandler(request: Request) {
     }
 
     if (fileRows.length) {
-      const { error: fileInsertError } = await supabase.from("packet_case_files").insert(fileRows);
+      const { error: fileInsertError } = await timeRequestStep(request,"saveFiles",async()=>await supabase!.from("packet_case_files").insert(fileRows));
       if (fileInsertError) {
         throw fileInsertError;
       }
@@ -1704,4 +1705,4 @@ export async function OPTIONS(request: Request) {
 }
 
 export const GET = withTeamAccess(GETHandler);
-export const POST = withTeamAccess(POSTHandler);
+export const POST = withRequestTiming(withTeamAccess(POSTHandler));

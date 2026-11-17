@@ -162,6 +162,9 @@ export type PurchaseEwayBill = {
   documentDate: string;
   transporterId: string;
   vehicleType: string;
+  toAddress?: string;
+  consolidatedNumber?: string;
+  consolidatedDate?: string;
 };
 
 type PurchasePostingSourceLine = PurchasePostingReviewLine & {
@@ -964,7 +967,7 @@ function stateNameFromGstin(value: unknown) {
 function splitEwayAddress(address: string) {
   const pincode = address.match(/\b(\d{6})\b(?!.*\b\d{6}\b)/)?.[1] ?? "";
   const state = stateInText(address);
-  const parts = address.split(",").map((part) => part.replace(/-?\s*\d{6}\s*$/, "").trim()).filter(Boolean);
+  const parts = address.split(",").map((part) => part.replace(/-?\s*\d{6}\s*$/, "").replace(state ? new RegExp(state.replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"ig") : /$^/, "").replace(/[-;]+$/," ").trim()).filter(Boolean);
   const place = [...parts].reverse().find((part) => !stateInText(part) && /^[A-Za-z .]{3,40}$/.test(part)) ?? "";
   return { pincode, state, place: place.replace(/\s+/g, " ") };
 }
@@ -1001,22 +1004,22 @@ function packetPartyDetails(
     const document = documents.find((candidate) => pattern.test(candidate.document_type));
     return document ? fieldsOf(document) : {};
   };
-  const weighment = first(/weigh(?:ment|bridge)/i);
+  const receipt = first(/receiving\s*record|delivery\s*(?:challan|note)|^receipt$/i);
   const lorry = first(/lorry\s*receipt/i);
   const order = first(/purchase\s*order/i);
   const transporter = text(lorry.transporterName) || context.ewayBill?.transporterName || "";
   const details: PurchasePartyDetails = {
-    receiptNote: text(weighment.weighmentNumber),
-    receiptNoteDate: parseDate(text(weighment.weighmentDate || weighment.date).split(/\s+/)[0]),
+    receiptNote: text(receipt.receiptNumber || receipt.deliveryNoteNumber),
+    receiptNoteDate: parseDate(text(receipt.receiptDate || receipt.documentDate)),
     carrierName: transporter,
-    receiptDocNo: text(weighment.weighmentNumber),
+    receiptDocNo: text(receipt.receiptDocNumber || receipt.deliveryNoteNumber || receipt.receiptNumber),
     dispatchedThrough: text(lorry.transporterName) || context.ewayBill?.transporterName || "",
     destination: text(lorry.routeTo) || context.ewayBill?.toPlace || "",
-    lrNumber: text(lorry.lorryReceiptNumber),
-    lrDate: parseDate(text(lorry.documentDate).split(/\s+/)[0]),
+    lrNumber: text(lorry.lorryReceiptNumber || receipt.lorryReceiptNumber) || context.ewayBill?.documentNumber || "",
+    lrDate: parseDate(text(lorry.transportDocumentDate || lorry.documentDate || receipt.transportDocumentDate)) || context.ewayBill?.documentDate || "",
     motorVehicleNo: context.vehicleNumber || context.ewayBill?.vehicleNumber || "",
     paymentTerms: text(order.paymentTerms),
-    otherReferences: text(order.poNumber) || text(context.invoiceFields.referencePoNumber),
+    otherReferences: [text(order.poNumber) || text(context.invoiceFields.referencePoNumber), context.ewayBill?.consolidatedNumber ? `Consolidated EWB ${context.ewayBill.consolidatedNumber}${context.ewayBill.consolidatedDate ? ` / ${context.ewayBill.consolidatedDate}` : ""}` : ""].filter(Boolean).join("; "),
     termsOfDelivery: text(order.freightTerms),
   };
   const filled = Object.fromEntries(Object.entries(details).filter(([, value]) => value));
@@ -1043,8 +1046,8 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
   const pageFromAddress = pageText.match(/\bFrom\s+(?!GSTIN\b)(.{8,200}?)\s+To\s+(?:GSTIN\b|\S)/i)?.[1]?.trim() ?? "";
   const pageToAddress =
     pageText.match(/\bTo\s+(?!GSTIN\b)(.{8,200}?)\s+(?:Document\s+No|Vehicle|Valid|Transport|Item|Mode)\b/i)?.[1]?.trim() ?? "";
-  const dispatchFrom = text(fields.dispatchFrom) || pageFromAddress;
-  const shipTo = text(fields.shipTo) || pageToAddress;
+  const dispatchFrom = text(fields.supplierAddress || fields.dispatchFrom) || pageFromAddress;
+  const shipTo = text(fields.buyerAddress || fields.shipTo) || pageToAddress;
   const from = splitEwayAddress(dispatchFrom);
   const to = splitEwayAddress(shipTo);
   const distance =
@@ -1072,22 +1075,25 @@ function packetEwayBill(invoiceFields: Record<string, unknown>, documents: Purch
       pageDate(String.raw`E-?way\s*bill\s*date`) ||
       pageDate(String.raw`Document\s*date`),
     fromAddress: dispatchFrom,
-    fromPlace: from.place || text(lorryFields.routeFrom),
+    fromPlace: text(fields.fromPlace || lorryFields.routeFrom) || from.place,
     fromPincode: from.pincode,
     fromState: from.state || stateInText(dispatchFrom) || stateNameFromGstin(fields.supplierGstin),
-    toPlace: to.place,
+    toPlace: text(fields.toPlace || lorryFields.routeTo) || to.place,
+    toAddress: shipTo,
+    consolidatedNumber: text(fields.consolidatedEwayNumber),
+    consolidatedDate: parseDate(text(fields.consolidatedEwayDate)),
     toPincode: to.pincode,
     toState: to.state || stateInText(shipTo) || stateNameFromGstin(fields.buyerGstin),
     transportMode: modeCode,
     vehicleNumber: text(fields.vehicleNumber).replace(/\s+/g, "").toUpperCase(),
     distanceKm: distance,
-    consignorName: "",
+    consignorName: text(fields.vendorName || invoiceFields.vendorName),
     consignorGstin: normalizeGstin(fields.supplierGstin),
-    consigneeName: "",
+    consigneeName: text(fields.shipToName || fields.buyerName || invoiceFields.buyerName),
     consigneeGstin: normalizeGstin(fields.buyerGstin),
     transporterName: text(fields.transporterName || lorryFields.transporterName),
     documentNumber: text(fields.lorryReceiptNumber || lorryFields.lorryReceiptNumber),
-    documentDate: pageDate(String.raw`Transport\s*Doc(?:ument)?\s*Date`),
+    documentDate: parseDate(text(fields.transportDocumentDate || lorryFields.transportDocumentDate || lorryFields.documentDate)) || pageDate(String.raw`(?:Transport\s*Doc(?:ument)?|LR|Lorry\s*Receipt|Bill\s*of\s*Lading)\s*Date`),
     transporterId: normalizeGstin(fields.transporterId) || normalizeGstin(pageText.match(/\bTransporter\s*ID\s*:?\s*([0-9A-Z]{15})\b/i)?.[1]),
     // The portal does not print a vehicle type; Tally's default for a road vehicle is Regular.
     vehicleType: /^(over|odc)/i.test(vehicleTypeText) ? "Over Dimensional Cargo" : vehicleTypeText || fields.vehicleNumber ? "Regular" : "",

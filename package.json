@@ -31,7 +31,7 @@
     "typecheck:api": "npm run typecheck --workspace @autodealer/api",
     "typecheck": "npm run typecheck:web && npm run typecheck:api",
     "test:cash-discount": "node --test --experimental-strip-types apps/api/src/lib/cash-discount-narration.test.mjs",
-    "test:tally-bridge": "node --test apps/tally-bridge/src/bridge.test.mjs",
+    "test:tally-bridge": "node --test apps/tally-bridge/src/bridge.test.mjs apps/tally-bridge/src/purchase-evidence.test.mjs",
     "test:local-agent": "node --test apps/tally-bridge/src/agent/local-agent.test.mjs",
     "test:cash-discount-gateway": "node --check apps/case-tally-gateway/src/server.mjs && node --test apps/web/src/lib/cash-discount-live.test.mjs apps/web/src/lib/cash-discount-live-access.test.mjs",
     "test:purchase-posting": "node --test apps/api/src/lib/tally/purchase-posting.test.mjs",

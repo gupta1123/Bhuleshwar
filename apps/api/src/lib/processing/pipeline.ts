@@ -1,3 +1,4 @@
+import { normalisePacketEvidence, hasRelevantPacketTerms } from '@autodealer/shared/lib/packet-evidence';
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -12,6 +13,7 @@ import { summarizeCase } from "@/lib/case-summary";
 import { DEFAULT_COMPARISON_OPTIONS, normalizeComparableValue, readComparisonOptions } from "@/lib/comparison";
 import {
   ACTIVE_FIELD_DEFINITIONS,
+  FIELD_DEFINITIONS,
   FIELD_LABELS,
   getFieldKeysForDocType,
   omitIgnoredFields,
@@ -105,17 +107,17 @@ const TEXT_HANDWRITTEN_EXTRACTION_INSTRUCTION =
 const AMOUNT_EXTRACTION_INSTRUCTION =
   "Copy financial amounts exactly as printed, preserving digit count and decimal placement after removing separators. Do not add or drop zeros. Cross-check quantity x rate, taxable amount + tax amount, and subtotal + tax amount before returning totals; if arithmetic conflicts with a visually uncertain amount, prefer the arithmetically consistent value visible in the row/summary. Extract visible GST/tax percentage fields as taxRate, cgstRate, sgstRate, and igstRate; do not put tax percentages into taxAmount. For invoices, extract printed total GST as taxAmount and separately extract freightAmount and freightGstRate; normal income-tax TDS under section 194Q as tds194qAmount and tds194qRate; goods-transport TDS as transportTdsAmount and transportTdsRate; GST withholding as cgstTdsAmount, sgstTdsAmount, igstTdsAmount, and gstTdsRate; and TCS and round-off as tcsAmount and roundOffAmount. Keep deductions separate and never infer an amount that is absent. Use tdsAmount and tdsRate only when the document does not identify the TDS type. Use GSTIN state codes for GST type: same-state or state code 27 means CGST+SGST split, while different-state/non-27 means IGST. ";
 const CONSIGNEE_EXTRACTION_INSTRUCTION =
-  "If a party is labelled Consignee, Ship To, or Recipient, map it to buyerName/buyerGstin only when that party is Kalika or Kalika Steel Alloys. If the consignee/ship-to/recipient is any other party, do not use that value as buyerName or buyerGstin; keep it only in visibleText or address fields when applicable. ";
+  "Map Bill To / Buyer to buyerName/buyerGstin. Preserve a different physical Consignee / Ship To in shipToName/shipToGstin. Never substitute ship-to for a clearly labelled legal buyer. ";
 const CONSIGNEE_NAME_ALIASES = new Set(["consigneeName", "consignee", "shipToName", "recipientName"]);
 const CONSIGNEE_GSTIN_ALIASES = new Set(["consigneeGstin", "shipToGstin", "recipientGstin"]);
-const INTERNAL_CONSIGNEE_GSTINS = new Set(["27AACCK1502A1ZD"]);
+const INTERNAL_CONSIGNEE_GSTINS = new Set(["27AAACB2203M1ZZ", "27AACCK1502A1ZD"]);
 const CONSIGNEE_CONTEXT_PATTERN = /\b(?:consignee|ship\s*to|ship-to|recipient)\b/i;
 const DIRECT_BUYER_CONTEXT_PATTERN = /\b(?:buyer|bill\s*to|bill-to|customer|purchaser)\b/i;
 const STORE_EVIDENCE_DOC_TYPES = new Set<DocType>(["Invoice", "Tax Invoice", "Delivery Challan", "Delivery Note"]);
 const STAMP_SIGNATURE_EXTRACTION_INSTRUCTION =
   "For stamp/signature presence fields, return only Yes, No, or Unclear. Use Yes only when the mark is visibly present, No only when the relevant area is visible and clearly absent, otherwise Unclear. For invoice/delivery receiving evidence, a buyer or receiver stamp block such as Kalika, SMS Division, Store, Gate, or Security with Date and Name & Sign lines means hasStoreStamp=Yes; if handwritten marks or signatures appear on those Name & Sign lines, hasStoreSignature=Yes. Do not confuse the supplier Authorized Signatory with store signature. ";
 const CLASSIFICATION_EVIDENCE_INSTRUCTION =
-  "Classify from the visible document layout, labels, and purpose. Use the filename only as a fallback when document evidence is missing or inconclusive. If the visible document type conflicts with the filename, trust the visible document. Never invent a document type from the filename alone. ";
+  "Gate/Trishul records with Transaction ID, Vehicle Entry Date and gross/tare/net weights are Receiving Record, never Invoice. Classify from the visible document layout, labels, and purpose. Use the filename only as a fallback when document evidence is missing or inconclusive. If the visible document type conflicts with the filename, trust the visible document. Never invent a document type from the filename alone. ";
 const EXTRACTION_EVIDENCE_INSTRUCTION =
   "Extract only values clearly visible in this document. Evidence priority is: explicitly labelled value on the current page, clearly visible content on the current document, then another page belonging to the same physical document. Do not copy values from other documents during first-pass extraction; cross-document enrichment happens later in the application. Do not infer values from filenames, arithmetic, expectations, or nearby documents. If a value is partly visible or uncertain, omit the structured field and preserve the uncertainty in visibleText. For document-level fields, prefer a clearly labelled header, primary-page, or total-section value and do not replace it with a weaker unlabelled value from another page. ";
 
@@ -186,6 +188,7 @@ const SUPPORTED_DOC_TYPES: DocType[] = [
   "Invoice",
   "Tax Invoice",
   "E-Way Bill",
+  "Receiving Record",
   "Weighment Slip",
   "Lorry Receipt",
   "Vehicle Registration Certificate",
@@ -204,13 +207,13 @@ const SUPPORTED_DOC_TYPES: DocType[] = [
   "Unknown",
 ];
 
-const ALL_ALLOWED_FIELD_KEYS = ACTIVE_FIELD_DEFINITIONS.map((field) => field.key);
+const ALL_ALLOWED_FIELD_KEYS = FIELD_DEFINITIONS.map((field) => field.key);
 
 const FIELD_MAPPINGS: Partial<Record<FieldKey, string[]>> = {
   vendorName: ["vendorName", "sellerName", "supplierName", "vendor", "seller", "supplier", "consignorName", "issuerName"],
   supplierGstin: ["supplierGstin", "vendorGstin", "sellerGstin", "gstin", "gstinUin"],
-  buyerName: ["buyerName", "customerName", "consigneeName", "buyer", "customer", "consignee", "billToName", "shipToName", "recipientName", "purchaserName"],
-  buyerGstin: ["buyerGstin", "customerGstin", "consigneeGstin", "shipToGstin", "billToGstin", "recipientGstin", "purchaserGstin"],
+  buyerName: ["buyerName", "billToName", "customerName", "buyer", "customer", "recipientName", "purchaserName"],
+  buyerGstin: ["buyerGstin", "billToGstin", "customerGstin", "recipientGstin", "purchaserGstin"],
   poNumber: ["poNumber", "purchaseOrderNumber"],
   poAmendmentNumber: ["poAmendmentNumber", "amendmentNumber", "poVersion", "revisionNumber"],
   invoiceNumber: ["invoiceNumber", "billNumber"],
@@ -377,6 +380,7 @@ function getLineItemExtractionInstruction(docType: DocType) {
 }
 
 function getDocumentSpecificExtractionInstruction(docType: DocType) {
+  if (docType === "Receiving Record") return "A receiving/gate record is receiver evidence, not an invoice. Extract supplier from Company Name, receiving company as buyer, invoice as referenceInvoiceNumber, transaction ID, gross/tare/net weights with units, Vehicle Entry Date as arrivalDate, exit as departureDate, driver and receipt fields. Trishul export weights are metric tonnes. Do not invent a second invoice. ";
   switch (docType) {
     case "Purchase Order":
     case "Amended Purchase Order":
@@ -548,7 +552,7 @@ function normalizeCompanySignal(value: string) {
 }
 
 function isInternalConsigneeName(value?: string) {
-  return Boolean(value && normalizeCompanySignal(value).split(/\s+/).includes("kalika"));
+  return Boolean(value && /\b(?:bhuleshwar|kalika)\b/i.test(value));
 }
 
 function normalizeGstinSignal(value?: string) {
@@ -586,32 +590,7 @@ function applyConsigneeBuyerGuard(
   fields: Partial<Record<FieldKey, string>>,
   visibleText: string
 ) {
-  if (!visibleText.trim()) return fields;
-
-  const next = { ...fields };
-  let changed = false;
-  let droppedConsigneeBuyerName = false;
-
-  if (
-    next.buyerName &&
-    !isInternalConsigneeName(next.buyerName) &&
-    isConsigneeOnlyContext(visibleText, next.buyerName)
-  ) {
-    delete next.buyerName;
-    droppedConsigneeBuyerName = true;
-    changed = true;
-  }
-
-  if (
-    next.buyerGstin &&
-    !isInternalConsigneeGstin(next.buyerGstin) &&
-    (droppedConsigneeBuyerName || isConsigneeOnlyContext(visibleText, next.buyerGstin))
-  ) {
-    delete next.buyerGstin;
-    changed = true;
-  }
-
-  return changed ? next : fields;
+  return fields;
 }
 
 function isIndentNumberMasqueradingAsPo(value: string, visibleText: string) {
@@ -693,13 +672,11 @@ function applyInvoicePoReferenceFallback(
 ) {
   if (!isInvoiceDocType(docType) || !visibleText.trim()) return fields;
 
-  const candidate = findBestInternalPoReference(visibleText);
-  if (!candidate) return fields;
+  if (fields.referencePoNumber && fields.referencePoNumber !== fields.invoiceNumber) return fields;
+  const labelled = visibleText.match(/\b(?:P\.?\s*O\.?\s*(?:No\.?|Number)?|Purchase\s+Order\s*(?:No\.?|Number)?|Order\s+No\.?)\s*[:#-]?\s*(?:\n\s*)?([A-Z0-9][A-Z0-9/-]{2,})/i)?.[1];
+  if (!labelled || labelled === fields.invoiceNumber) return fields;
+  return { ...fields, referencePoNumber: labelled };
 
-  const current = fields.referencePoNumber;
-  if (current && isInternalPoReference(current)) return fields;
-
-  return { ...fields, referencePoNumber: candidate };
 }
 
 const PO_TERMS_FIELD_KEYS: FieldKey[] = [
@@ -1159,9 +1136,9 @@ export async function assessCaseTermsComplianceDetailed(documents: CaseDoc[]): P
   if (!assessableDocuments.length) return { mismatches: [], checklist: [] };
 
   const hasExplicitTerms = assessableDocuments.some((doc) => {
-    if (TERMS_FIELD_KEYS.some((field) => Boolean(doc.fields[field]?.trim()))) {
-      return true;
-    }
+    const structuredTerms = TERMS_FIELD_KEYS.map(field=>doc.fields[field] || "").join(" ");
+    if (!hasRelevantPacketTerms(`${getVisibleTextFromMarkdown(doc.md)} ${structuredTerms}`)) return false;
+    if (structuredTerms.trim()) return true;
     const visibleText = getVisibleTextFromMarkdown(doc.md);
     return /\b(?:terms?\s*(?:&|and)\s*conditions?|payment\s+terms?|delivery\s+terms?|freight\s+terms?|commercial\s+terms?|special\s+terms?|warranty|guarantee|inspection\s+terms?)\b/i.test(
       visibleText
@@ -1438,7 +1415,7 @@ function applyExtractionReviewCorrections(
     }
 
     for (const field of normalizeReviewFieldList(correction.unsetFields)) {
-      if (!allowedFields.has(field)) continue;
+      if (!allowedFields.has(field) || changedFields.includes(field)) continue;
       const originalValue = nextDoc.fields[field];
       if (!originalValue) continue;
       delete nextDoc.fields[field];
@@ -1453,7 +1430,7 @@ function applyExtractionReviewCorrections(
     }
 
     for (const entry of normalizeReviewQuarantineFields(correction.quarantineFields)) {
-      if (!allowedFields.has(entry.field)) continue;
+      if (!allowedFields.has(entry.field) || changedFields.includes(entry.field)) continue;
       const originalValue = nextDoc.fields[entry.field];
       if (!originalValue) continue;
       delete nextDoc.fields[entry.field];
@@ -1582,7 +1559,7 @@ export async function reviewAndCorrectExtractedDocuments(
             "E-Way Bill numbers must be exactly 12 digits. If an extracted eWayBillNumber is not 12 digits, remove it. " +
             "Do not automatically move an invalid e-way value into referenceInvoiceNumber unless the visible page explicitly labels it as Doc No, Document No, Invoice No, Tax Invoice No, or Delivery Challan No for that same document. " +
             "If a page is a PASS OUT DOCUMENT, delivery summary, logistics summary, or contains multiple delivery refs such as EM5032/EM5033, avoid creating a strong invoice reference unless the label and line amounts clearly support that exact invoice. " +
-            "For consignee/ship-to/recipient, buyerName/buyerGstin may be Kalika only; non-Kalika consignee values must not become buyer fields. " +
+            "Preserve legal Bill To buyer separately from physical ship-to/consignee; retain each explicitly labelled legal buyer. " +
             "For GST, preserve visible tax percentages separately from tax amounts. Same Maharashtra/Kalika state code 27 means CGST+SGST split unless the document explicitly shows IGST. " +
             "Return JSON shape: {\"corrections\":[{\"docId\":\"...\",\"documentType\":\"Invoice\",\"fields\":{\"fieldKey\":\"value or null\"},\"unsetFields\":[\"fieldKey\"],\"quarantineFields\":[{\"field\":\"fieldKey\",\"reason\":\"...\"}],\"lineItems\":[...],\"reason\":\"concise evidence\"}],\"notes\":[\"...\"]}. " +
             "Use null in fields or quarantineFields to remove unsupported values. Use empty corrections when extraction is already strong.",
@@ -1636,7 +1613,7 @@ function mapFields(fields: Record<string, unknown>, docType?: DocType): Partial<
     const aliases =
       fieldKey === "referenceInvoiceNumber" && (docType === "Invoice" || docType === "Tax Invoice")
         ? ["referenceInvoiceNumber", "invoiceReference"]
-        : FIELD_MAPPINGS[fieldKey] ?? [];
+        : FIELD_MAPPINGS[fieldKey] ?? [fieldKey];
     for (const alias of aliases) {
       const value = fields[alias];
       const normalizedValue = normalizeFieldValue(value);
@@ -2381,8 +2358,18 @@ function extractEWayDate(text: string, labelPattern: string) {
   const direct = text.match(new RegExp(`\\b${labelPattern}\\s*:?\\s*(${EWAY_DATE_PATTERN})`, "i"))?.[1];
   if (direct) return cleanEWayDateValue(direct);
 
+  // Two-column PDF text can place both labels before either date. Bind the
+  // second value to Valid Upto rather than reusing the generation timestamp.
+  if (/Valid/.test(labelPattern)) {
+    const paired = text.match(/Generated\s+Date\s*:?([\s\S]{0,250}?)Valid\s*(?:Upto|Up\s*To|Until|Till)\b([\s\S]{0,160})/i);
+    if (paired && !new RegExp(EWAY_DATE_PATTERN, "i").test(paired[1])) {
+      const values = [...paired[2].matchAll(new RegExp(EWAY_DATE_PATTERN, "gi"))];
+      if (values.length === 2) return cleanEWayDateValue(values[1][0]);
+    }
+  }
   const context = text.match(new RegExp(`\\b${labelPattern}\\b([\\s\\S]{0,140})`, "i"))?.[1];
-  return cleanEWayDateValue(context);
+  // Only an adjacent value is safe when the layout cannot be disambiguated.
+  return context && /^\s*:?\s*\d/.test(context) ? cleanEWayDateValue(context) : undefined;
 }
 
 function normalizeEWayAmount(value?: string) {
@@ -2522,8 +2509,8 @@ function applyEWayBillAddressFallback(
   const vehicleNumber = formatEWayVehicleNumber(fields.vehicleNumber) ?? transport.vehicleNumber;
   const documentDate = extractEWayDate(text, "(?:Generated\\s+Date|E-?Way\\s+Bill\\s+Date|Way\\s+Bill\\s+Date)");
   const validityDate =
-    cleanEWayDateValue(fields.validityDate) ??
-    extractEWayDate(text, "(?:Valid\\s*(?:Upto|Up\\s*To|Until|Till))");
+    extractEWayDate(text, "(?:Valid\\s*(?:Upto|Up\\s*To|Until|Till))") ??
+    cleanEWayDateValue(fields.validityDate);
   return {
     ...fields,
     ...(fields.vendorName || !parties.vendorName ? {} : { vendorName: parties.vendorName }),
@@ -3111,31 +3098,9 @@ function isCorrectableGstinOcrValue(current: string | undefined, consensus: stri
 }
 
 function enrichGstinConsensusValues(documents: CaseDoc[]) {
-  const consensusByField = Object.fromEntries(
-    GSTIN_CONSENSUS_FIELDS.map((field) => [field, getGstinConsensus(documents, field)])
-  ) as Partial<Record<(typeof GSTIN_CONSENSUS_FIELDS)[number], string>>;
+  // Differing identifiers are evidence, never silently repaired by a cross-document vote.
+  return documents;
 
-  if (!Object.values(consensusByField).some(Boolean)) return documents;
-
-  return documents.map((doc) => {
-    const fields = { ...doc.fields };
-    let changed = false;
-
-    for (const field of GSTIN_CONSENSUS_FIELDS) {
-      const consensus = consensusByField[field];
-      const current = normalizeGstinForDisplay(fields[field], field);
-      if (
-        consensus &&
-        current !== consensus &&
-        (visibleTextSupportsGstin(doc, consensus) || isCorrectableGstinOcrValue(current, consensus))
-      ) {
-        fields[field] = consensus;
-        changed = true;
-      }
-    }
-
-    return changed ? { ...doc, fields } : doc;
-  });
 }
 
 function normalizeEWayBillNumberForDisplay(value: string | undefined) {
@@ -3319,7 +3284,7 @@ function cleanVisibleItemCodeCandidate(value: string, hsnSac?: string) {
   if (/^\d{1,2}$/.test(compact)) return null;
   if (/^\d{1,2}%$/.test(cleaned)) return null;
   if (/^\d{1,3}(?:,\d{3})+(?:\.\d+)?$/.test(cleaned) || /^\d+\.\d{2}$/.test(cleaned)) return null;
-  if (/^(?:hsn|sac|gst|qty|unit|nos|inr|rate|total|value)$/i.test(cleaned)) return null;
+  if (/\b(?:hsn|sac|cgst|sgst|igst|gst|qty|unit|inr|rate|total|taxable|amount)\b/i.test(cleaned)) return null;
 
   return cleaned;
 }
@@ -4044,7 +4009,7 @@ function applyConsigneeBuyerGuardToDocuments(documents: CaseDoc[]) {
 }
 
 export function enrichProcessedDocuments(documents: CaseDoc[]) {
-  const withFastag = enrichFastagContinuationDocs(documents);
+  const withFastag = enrichFastagContinuationDocs(normalisePacketEvidence(documents));
   const withGstin = enrichGstinConsensusValues(withFastag);
   const withPoCore = enrichPurchaseOrderCoreFields(withGstin);
   const withEWayCore = enrichEWayBillCoreFields(withPoCore);
@@ -4066,6 +4031,7 @@ function buildProcessedVerificationResult(
 
   return {
     verificationGroups: verificationResult.groups,
+    verificationChecks: verificationResult.checks,
     mismatches,
   };
 }
@@ -4129,6 +4095,7 @@ function hasStrongFilenameTypeHint(fileName: string, docType: DocType) {
 
 function normaliseDocType(raw?: string): DocType {
   if (!raw) return "Unknown";
+  if (/receiving\s*record|gate\s*(?:record|entry)/i.test(raw)) return "Receiving Record";
   const value = raw.toLowerCase();
   if (value.includes("amended purchase order")) return "Amended Purchase Order";
   if (value.includes("material test") || value.includes("test certificate") || value.includes("quality certificate") || value.includes("mill test")) return "Material Test Certificate";
@@ -4764,7 +4731,7 @@ function normalizePdfDocumentGroups(
   }
 
   const seen = new Set<string>();
-  const normalized = parsedGroups.filter((group) => {
+  const normalized = mergeOverlappingPageGroups(parsedGroups).filter((group) => {
     const key = [
       group.documentType,
       group.pageStart,
@@ -5193,6 +5160,7 @@ async function extractPdfDocumentGroups(params: {
     }
 
     document = applyVisibleDocTypeRefinement(document, groupTextPages);
+    document.id = `${params.fileName}:pages-${group.pageStart}-${group.pageEnd}:${group.documentType}:${group.documentNumber || index}`;
     document.sourceHint = sourceHint;
     document.sourceFileName = params.fileName;
     document.pages = Math.max(1, group.pageEnd - group.pageStart + 1);

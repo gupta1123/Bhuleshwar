@@ -115,11 +115,13 @@ async function authenticatedFetch(path: string, init?: RequestInit) {
   // Pin organization before asynchronous token refresh. A retry must not move
   // an old screen's mutation into a newly selected organization.
   const organization=typeof window!=='undefined'?sessionStorage.getItem('kalika-access-organization'):null;
+  const requestId=crypto.randomUUID();
   const accessToken = await readAccessToken();
   const apiUrl = buildApiUrl(path);
 
   async function sendRequest(token: string | null) {
     const headers = new Headers(init?.headers);
+    if(!headers.has("X-Request-Id"))headers.set("X-Request-Id",requestId);
     if (path.startsWith('/api/') && typeof window !== 'undefined' && !headers.has('X-Kalika-Organization')) {
       if (organization) headers.set('X-Kalika-Organization', organization);
     }

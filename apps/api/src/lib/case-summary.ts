@@ -69,6 +69,7 @@ const RECEIVER_FIELD_PRIORITY_BY_DOC_TYPE: Record<DocType, FieldKey[]> = {
   "Delivery Note": ["buyerName"],
   "Delivery Challan": ["buyerName"],
   "E-Way Bill": ["buyerName"],
+  "Receiving Record": ["buyerName"],
   "Weighment Slip": [],
   "Lorry Receipt": ["buyerName"],
   "Vehicle Registration Certificate": [],
@@ -100,6 +101,7 @@ const CASE_CATEGORY_BY_DOC_TYPE: Record<DocType, string> = {
   "Delivery Note": "Logistics packet",
   "Delivery Challan": "Logistics packet",
   "E-Way Bill": "Logistics packet",
+  "Receiving Record": "Receiving packet",
   "Weighment Slip": "Weight packet",
   "Lorry Receipt": "Logistics packet",
   "Vehicle Registration Certificate": "Vehicle KYC packet",
@@ -139,6 +141,7 @@ function normalizeMatchKey(value: string) {
 }
 
 const INTERNAL_PARTY_NAME_HINTS = [
+  "bhuleshwar",
   "kalika",
   "kalika steel",
   "kalika steels",
@@ -287,6 +290,9 @@ function getVendorCounterpartyWeight(document: CaseDoc) {
 }
 
 function derivePreferredCounterpartyName(documents: CaseDoc[]) {
+  const purchaseLeg=documents.filter(doc=>['Invoice','Tax Invoice'].includes(doc.type) && isInternalPartyName(doc.fields.buyerName || ''));
+  const suppliers=rankWeightedDocumentValues(purchaseLeg,doc=>firstDocumentPartyValue(doc,['vendorName']),getVendorCounterpartyWeight).filter(candidate=>!isInternalPartyName(candidate.value));
+  if (suppliers.length===1) return suppliers[0].value;
   const buyerCandidates = rankWeightedDocumentValues(
     documents,
     (document) => firstDocumentPartyValue(document, ["buyerName"]),

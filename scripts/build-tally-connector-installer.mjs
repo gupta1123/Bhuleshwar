@@ -1,0 +1,27 @@
+import {execFileSync} from 'node:child_process';
+import {createRequire} from 'node:module';
+import {readFileSync,existsSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import path from 'node:path';
+const root=fileURLToPath(new URL('../',import.meta.url));
+const app=path.join(root,'apps/tally-bridge/electron-app');
+const require=createRequire(path.join(app,'package.json'));
+const version=JSON.parse(readFileSync(path.join(app,'package.json'),'utf8')).version;
+if(!process.argv.includes('--validate'))execFileSync(process.execPath,[require.resolve('electron-builder/cli.js'),'--win','nsis','--x64','--publish','never'],{cwd:app,stdio:'inherit',windowsHide:true});
+const asar=require('@electron/asar');
+const output=path.join(root,'apps/tally-bridge/output');
+const archive=path.join(output,'win-unpacked/resources/app.asar');
+const files=asar.listPackage(archive);
+const bundled=name=>{
+ const entry=files.find(file=>file.replaceAll('\\','/').endsWith(`/node_modules/${name}`));
+ if(!entry)throw new Error(`Installer is missing ${name}`);
+ return asar.extractFile(archive,entry.slice(1)).toString();
+};
+if(!bundled('@autodealer/tally-bridge/src/agent/protocol.mjs').includes(`AGENT_VERSION = "${version}"`))throw new Error('Installer protocol version differs from package version');
+bundled('@autodealer/tally-bridge/src/bridge.mjs');
+for(const name of ['better-sqlite3-multiple-ciphers','@zvec/zvec','@firecrawl/anydoc','ws'])bundled(`${name}/package.json`);
+const executable=path.join(output,'win-unpacked','Bhuleshwar Local Agent.exe');
+const nativeCheck="const path=require('path');const root=path.resolve('resources/app.asar/node_modules');const Database=require(path.join(root,'better-sqlite3-multiple-ciphers'));const db=new Database(':memory:');if(db.prepare('select 1 as ok').get().ok!==1)process.exit(1);db.close();require(path.join(root,'ws'));console.log('Packaged SQLite and WebSocket load successfully');";
+process.stdout.write(execFileSync(executable,['-e',nativeCheck],{cwd:path.dirname(executable),env:{...process.env,ELECTRON_RUN_AS_NODE:'1'},windowsHide:true,encoding:'utf8',timeout:30000}));
+if(!existsSync(path.join(output,`BhuleshwarLocalAgent-${version}-x64.exe`)))throw new Error('Installer artifact is missing');
+console.log(`Validated connector ${version}`);

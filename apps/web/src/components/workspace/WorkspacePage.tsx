@@ -118,7 +118,7 @@ import {
   getFieldKeysForDocType,
   shouldConsiderFieldKey,
 } from "@/lib/document-schema";
-import { SAMPLE_DOCS, matchSampleByIndex } from "@/services/templates";
+import { SAMPLE_DOCS } from "@/services/templates";
 
 // ------------------------------------------------------------
 // Dummy data & types
@@ -503,12 +503,14 @@ export function WorkspacePage() {
   const [duplicateUploadConflicts, setDuplicateUploadConflicts] = useState<DuplicateUploadConflict[]>([]);
   const [duplicateCaseNotice, setDuplicateCaseNotice] = useState<DuplicateCaseReference | null>(null);
   const [caseDraftCreated, setCaseDraftCreated] = useState(false);
+  const [recentCreatedCaseId,setRecentCreatedCaseId]=useState<string|null>(null);
+  useEffect(()=>{try{const saved=JSON.parse(window.localStorage.getItem("bhuleshwar:last-created-case") || "null");if(saved?.id)setRecentCreatedCaseId(saved.id);}catch{}},[]);
   const [draftCaseStatus, setDraftCaseStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [draftCaseError, setDraftCaseError] = useState<string | null>(null);
   const [caseDecisionStatus, setCaseDecisionStatus] = useState<"idle" | "updating" | "error">("idle");
   const [caseDecisionError, setCaseDecisionError] = useState<string | null>(null);
   const [analysisOptionsOpen, setAnalysisOptionsOpen] = useState(false);
-  const [pendingAnalysisMode, setPendingAnalysisMode] = useState<CaseAnalysisMode>("standard");
+  useEffect(()=>{try{const saved=JSON.parse(window.localStorage.getItem("bhuleshwar:comparison-options") || "null");if(typeof saved?.considerFormatting === "boolean")setComparisonOptions(saved);}catch{}},[]);
   const [comparisonOptions, setComparisonOptions] = useState<ComparisonOptions>(
     DEFAULT_COMPARISON_OPTIONS
   );
@@ -1034,11 +1036,7 @@ export function WorkspacePage() {
       onSelect={(nextOptions) => {
         setComparisonOptions(nextOptions);
         setAnalysisOptionsOpen(false);
-        if (pendingAnalysisMode === "smart_split") {
-          void startSmartSplitAnalysis(nextOptions);
-          return;
-        }
-        void startStandardAnalysis(nextOptions);
+        try{window.localStorage.setItem("bhuleshwar:comparison-options",JSON.stringify(nextOptions));}catch{}
       }}
     />
   );
@@ -1072,6 +1070,8 @@ export function WorkspacePage() {
       if(teamAccess.enforcementRequired&&!selectedAccessCompany)throw new Error('Select the company for this case.');
       const created = await createDraftCase({ uploads: queuedUploads,accessCompanyId:selectedAccessCompany });
       updateSavedCase(created.case);
+      setRecentCreatedCaseId(created.case.id);
+      try{window.localStorage.setItem("bhuleshwar:last-created-case",JSON.stringify({id:created.case.id}));}catch{}
       setCaseDraftCreated(true);
       setDraftCaseStatus("saved");
     } catch (createError) {
@@ -1109,14 +1109,12 @@ export function WorkspacePage() {
 
   const handleAnalyzeRequest = () => {
     if (!hasUploads || draftCaseStatus === "saving") return;
-    setPendingAnalysisMode("standard");
-    setAnalysisOptionsOpen(true);
+    void startStandardAnalysis(comparisonOptions);
   };
 
   const handleSmartSplitAnalyzeRequest = () => {
     if (!hasUploads || draftCaseStatus === "saving") return;
-    setPendingAnalysisMode("smart_split");
-    setAnalysisOptionsOpen(true);
+    void startSmartSplitAnalysis(comparisonOptions);
   };
 
   const startSmartSplitAnalysis = async (nextOptions: ComparisonOptions) => {
@@ -1131,6 +1129,8 @@ export function WorkspacePage() {
         if(teamAccess.enforcementRequired&&!selectedAccessCompany)throw new Error('Select the company for this case.');
         const created = await createDraftCase({ uploads: queuedUploads,accessCompanyId:selectedAccessCompany });
         updateSavedCase(created.case);
+      setRecentCreatedCaseId(created.case.id);
+      try{window.localStorage.setItem("bhuleshwar:last-created-case",JSON.stringify({id:created.case.id}));}catch{}
         caseRecord = created.case;
       }
 
@@ -1177,6 +1177,8 @@ export function WorkspacePage() {
           accessCompanyId: selectedAccessCompany,
         });
         updateSavedCase(created.case);
+      setRecentCreatedCaseId(created.case.id);
+      try{window.localStorage.setItem("bhuleshwar:last-created-case",JSON.stringify({id:created.case.id}));}catch{}
         caseRecord = created.case;
       }
 
@@ -1251,22 +1253,22 @@ export function WorkspacePage() {
             <Files className="h-3 w-3" />
           </div>
           <span className="text-xs font-semibold uppercase tracking-wider text-[#2b1a10]">
-            Queued Documents
+            {persistence.savedCase ? "Case documents" : "Selected files"}
           </span>
           <span className="flex h-5 items-center rounded-full bg-[#ede6d9] px-2 text-[11px] font-semibold text-[#5b4b3d]">
             {queuedUploads.length}
           </span>
         </div>
         <span className="text-[11px] font-medium text-[#8a7f72]">
-          Ready for case creation
+          {draftCaseStatus === "saving" ? "Checking duplicates and saving files…" : persistence.savedCase ? "Saved to case" : "Files are selected on this device"}
+          <button type="button" className="ml-2 underline" onClick={()=>setAnalysisOptionsOpen(true)}>{getComparisonModeLabel(comparisonOptions)}</button>
         </span>
       </div>
 
       {/* Grid of uploaded document cards */}
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         {queuedUploads.map((upload, index) => {
-          const fallbackTemplate = matchSampleByIndex(index);
-          const inferredType = upload.resultDoc?.type ?? upload.classifiedType ?? fallbackTemplate.type;
+          const inferredType = upload.resultDoc?.type ?? upload.classifiedType ?? "Awaiting classification";
           const imageUrls = imagePreviewUrls.get(upload.id);
           const pageCount = getQueuedUploadPageCount(upload);
           const isImage = Boolean(imageUrls?.length);
@@ -1562,6 +1564,7 @@ export function WorkspacePage() {
             </div>
           )}
           {duplicateCaseNoticePanel}
+          {recentCreatedCaseId && !persistence.savedCase ? <Link className="mt-3 inline-block text-xs font-semibold underline" href={`/cases/${recentCreatedCaseId}`}>Open last created case</Link>:null}
 
           {hasUploads && (
             <motion.div
@@ -1575,7 +1578,7 @@ export function WorkspacePage() {
               <div className="mt-4 flex w-full justify-end">
                 <Button
                   size="default"
-                  disabled={draftCaseStatus === "saving"}
+                  disabled={draftCaseStatus === "saving" || duplicateUploadConflicts.length > 0}
                   className="h-10 rounded-lg bg-[#2b1a10] px-5 text-xs font-semibold text-white shadow-xs hover:bg-[#3b271a] disabled:opacity-50 transition-colors"
                   onClick={handleCreateCaseDraft}
                 >
@@ -1587,7 +1590,7 @@ export function WorkspacePage() {
                   ) : (
                     <span className="flex items-center gap-2">
                       <FolderPlus className="h-3.5 w-3.5" />
-                      Create case
+                      Create case and upload
                       <ArrowRight className="h-3.5 w-3.5 text-white/70 ml-0.5" />
                     </span>
                   )}
@@ -1617,7 +1620,7 @@ export function WorkspacePage() {
         <div className="mx-auto flex w-full max-w-[1540px] flex-col gap-6">
           <PageHeader
             title="Upload & Verify"
-            subtitle="Review uploaded documents and analyze"
+            subtitle="Standard analysis treats each file as one document. Use Multi-doc for PDFs containing several documents."
             badge={
               <div className="flex items-center gap-1.5 rounded-lg border border-[#e6ded2] bg-[#fbfaf8] px-2.5 py-1 text-xs font-medium text-[#5b4b3d] shadow-sm">
                 <Shield className="h-3 w-3 text-[#8a7f72]" />
@@ -1690,7 +1693,7 @@ export function WorkspacePage() {
 
               <Popover>
                 <PopoverTrigger asChild>
-                  <Button variant="outline" disabled={draftCaseStatus === "saving"} className="h-9 rounded-lg border-[#ded8d0] bg-white px-4 text-xs font-medium text-[#3d3530] shadow-sm transition hover:bg-[#faf8f4] hover:text-[#111827]">
+                  <Button variant="outline" disabled={draftCaseStatus === "saving" || duplicateUploadConflicts.length > 0} className="h-9 rounded-lg border-[#ded8d0] bg-white px-4 text-xs font-medium text-[#3d3530] shadow-sm transition hover:bg-[#faf8f4] hover:text-[#111827]">
                     <Plus className="mr-1.5 h-3.5 w-3.5 text-[#8a7f72]" /> Add documents
                   </Button>
                 </PopoverTrigger>

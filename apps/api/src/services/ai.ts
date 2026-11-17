@@ -1,6 +1,7 @@
+import {restoreReceivingEvidence} from '@autodealer/shared/lib/packet-evidence';
 import type { CaseDoc, DocType, FieldKey, Mismatch } from "@/types/pipeline";
 import {
-  ACTIVE_FIELD_DEFINITIONS,
+  FIELD_DEFINITIONS,
   FIELD_LABELS,
   getFieldKeysForDocType,
   omitIgnoredFields,
@@ -46,6 +47,7 @@ const SUPPORTED_DOC_TYPES: DocType[] = [
   "Invoice",
   "Tax Invoice",
   "E-Way Bill",
+  "Receiving Record",
   "Weighment Slip",
   "Lorry Receipt",
   "Vehicle Registration Certificate",
@@ -148,7 +150,7 @@ async function callOpenRouter(messages: OpenRouterMessage[], label: string, expe
   throw lastError instanceof Error ? lastError : new Error(`OpenRouter ${label} failed`);
 }
 
-const ALL_ALLOWED_FIELD_KEYS = ACTIVE_FIELD_DEFINITIONS.map((field) => field.key);
+const ALL_ALLOWED_FIELD_KEYS = FIELD_DEFINITIONS.map((field) => field.key);
 
 const FIELD_MAPPINGS: Partial<Record<FieldKey, string[]>> = {
   vendorName: [
@@ -633,20 +635,18 @@ function applyInvoicePoReferenceFallback(
 ) {
   if (!isInvoiceDocType(docType) || !visibleText.trim()) return fields;
 
-  const candidate = findBestInternalPoReference(visibleText);
-  if (!candidate) return fields;
+  if (fields.referencePoNumber && fields.referencePoNumber !== fields.invoiceNumber) return fields;
+  const labelled = visibleText.match(/\b(?:P\.?\s*O\.?\s*(?:No\.?|Number)?|Purchase\s+Order\s*(?:No\.?|Number)?|Order\s+No\.?)\s*[:#-]?\s*(?:\n\s*)?([A-Z0-9][A-Z0-9/-]{2,})/i)?.[1];
+  if (!labelled || labelled === fields.invoiceNumber) return fields;
+  return { ...fields, referencePoNumber: labelled };
 
-  const current = fields.referencePoNumber;
-  if (current && isInternalPoReference(current)) return fields;
-
-  return { ...fields, referencePoNumber: candidate };
 }
 
 function getOrderedFieldKeysForDocument(doc: CaseDoc): FieldKey[] {
   const orderedKeys = [...getAllowedFieldKeysForDocType(doc.type)];
   const seen = new Set<FieldKey>(orderedKeys);
 
-  for (const { key } of ACTIVE_FIELD_DEFINITIONS) {
+  for (const { key } of FIELD_DEFINITIONS) {
     if (doc.fields[key] && !seen.has(key)) {
       orderedKeys.push(key);
       seen.add(key);
@@ -1509,7 +1509,7 @@ export async function extractDataFromImages(params: {
               eWayBillExtractionInstruction +
               "For stamp/signature presence fields, return only Yes, No, or Unclear. Use Yes only when the mark is visibly present, No only when the relevant area is visible and clearly absent, otherwise Unclear. " +
               "For FASTag Toll Proof documents, extract statement reference, customer ID/name, statement period/date, vehicle number, tag account number, trip count, opening/credit/debit/closing balances, recharge/payment amount, toll plaza, and a compact toll transaction summary using the canonical FASTag keys. " +
-              "For party roles on seller-issued documents, vendorName is the issuing supplier/seller/consignor and buyerName is strictly the billed buyer or bill-to customer. Put a different delivery recipient in shipToName and shipToGstin; never replace the billed buyer with a ship-to party or consignee. " +
+              "Gate/Trishul vehicle-entry records are Receiving Record, not invoices: capture referenceInvoiceNumber, transactionReference, arrivalDate/departureDate timestamps, gross/tare/net weight with units, driver name and phone. Preserve explicit transport/receipt and consolidated e-way references. For party roles on seller-issued documents, vendorName is the issuing supplier/seller/consignor and buyerName is strictly the billed buyer or bill-to customer. Put a different delivery recipient in shipToName and shipToGstin; never replace the billed buyer with a ship-to party or consignee. " +
               "For Purchase Order or Amended Purchase Order documents, vendorName is the supplier/vendor receiving the order and buyerName is the purchaser issuing the order. Never swap these roles. " +
               "Omit any field that is not visible or not applicable to this document type. If structured fields are hard to identify, still return visibleText. Do not hallucinate.",
             },
@@ -1604,7 +1604,7 @@ export async function extractDataFromImages(params: {
     };
     caseDoc.md = buildMarkdown(caseDoc, visibleTextPages);
 
-    return { doc: caseDoc, extractedDocuments: [] };
+    return { doc: restoreReceivingEvidence(caseDoc), extractedDocuments: [] };
   } catch (error) {
     if (isQuotaOrRateLimitError(error)) {
       markAiUnavailable(error);

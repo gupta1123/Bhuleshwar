@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./lib/packet-evidence": "./src/lib/packet-evidence.ts",
     "./lib/followup-pipeline": "./src/lib/followup-pipeline.ts",
     "./lib/reminder-preset": "./src/lib/reminder-preset.ts",
     "./lib/access": "./src/lib/access.ts",

@@ -1,3 +1,4 @@
+import {compareAgentVersions} from '@/lib/tally/agent-updates';
 import { withTeamAccess } from '@/lib/access/route-boundary';
 import { requireResourceAccess } from '@/lib/access/resources';
 import { AccessError } from '@/lib/access/server';
@@ -867,7 +868,7 @@ function prepareLoadedContext(
   const selectedSourceReference = selectedSourceFile
     ? `${webBase}/cases/${context.caseRow.id}?sourceFileId=${encodeURIComponent(selectedSourceFile.id)}`
     : null;
-  return preparePurchasePosting({
+  const prepared=preparePurchasePosting({
     documents: context.documents,
     masters: context.masters,
     mappings: context.mappings,
@@ -892,6 +893,12 @@ function prepareLoadedContext(
     duplicateExists,
     accountingSettings: context.purchaseAccountingSettings,
   });
+  if (context.connection && compareAgentVersions(context.connection.agent_version || context.connection.bridge_version,'1.2.49')<0) {
+    prepared.blockers.push({code:'CONNECTOR_UPDATE_REQUIRED',label:'Update the Tally connector',message:'Install Local Agent 1.2.49 or newer to verify the approved transport, receipt and party details.',scope:'company'});
+    prepared.suggestedStatus='correction_required';
+    prepared.tallyPayload=null;
+  }
+  return prepared;
 }
 
 async function prepareContext(
@@ -1147,7 +1154,7 @@ async function PATCHHandler(request: Request, contextParam: { params: Promise<{ 
       revision: nextRevision,
       duplicate_key: duplicate,
       idempotency_key: null,
-      review_patch: compactPurchasePostingReview(defaults.review, prepared.review),
+      review_patch: {...compactPurchasePostingReview(defaults.review, prepared.review),__validation:{at:new Date().toISOString(),companyName:context.selectedCompanyName,connectionId:context.connection?.id || null,masterValidation:context.liveMasterValidation || null,blockers:prepared.blockers.map(issue=>({code:issue.code,label:issue.label})),warnings:prepared.warnings.map(issue=>({code:issue.code,label:issue.label}))}},
       approved_payload_hash: null,
       approved_at: null,
       queued_at: null,

@@ -2,8 +2,8 @@ import {
   getEnabledCorePacketGroups,
   isDocTypeEnabled,
   type PacketFieldConfiguration,
-} from "@/lib/document-schema";
-import type { CaseDoc, DocType, FieldKey, Mismatch } from "@/types/pipeline";
+} from "./document-schema";
+import type { CaseDoc, DocType, FieldKey, Mismatch } from "../types/pipeline";
 
 export type CaseSummary = {
   slug: string;
@@ -69,6 +69,7 @@ const RECEIVER_FIELD_PRIORITY_BY_DOC_TYPE: Record<DocType, FieldKey[]> = {
   "Delivery Note": ["buyerName"],
   "Delivery Challan": ["buyerName"],
   "E-Way Bill": ["buyerName"],
+  "Receiving Record": ["buyerName"],
   "Weighment Slip": [],
   "Lorry Receipt": ["buyerName"],
   "Vehicle Registration Certificate": [],
@@ -100,6 +101,7 @@ const CASE_CATEGORY_BY_DOC_TYPE: Record<DocType, string> = {
   "Delivery Note": "Logistics packet",
   "Delivery Challan": "Logistics packet",
   "E-Way Bill": "Logistics packet",
+  "Receiving Record": "Receiving packet",
   "Weighment Slip": "Weight packet",
   "Lorry Receipt": "Logistics packet",
   "Vehicle Registration Certificate": "Vehicle KYC packet",
@@ -136,6 +138,22 @@ function normalizePartyName(value?: string | null) {
 
 function normalizeMatchKey(value: string) {
   return value.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+const INTERNAL_PARTY_NAME_HINTS = [
+  "bhuleshwar",
+  "kalika",
+  "kalika steel",
+  "kalika steels",
+  "kalika steel alloys",
+  "kalika steel alloys pvt ltd",
+  "kalika steel alloys private limited",
+].map(normalizeMatchKey);
+
+function isInternalPartyName(value?: string | null) {
+  const key = normalizeMatchKey(normalizeValue(value));
+  if (!key) return false;
+  return INTERNAL_PARTY_NAME_HINTS.some((hint) => hint && key.includes(hint));
 }
 
 function currencyishToNumber(value?: string) {
@@ -272,18 +290,49 @@ function getVendorCounterpartyWeight(document: CaseDoc) {
 }
 
 function derivePreferredCounterpartyName(documents: CaseDoc[]) {
-  const buyerCandidate = rankWeightedDocumentValues(
+  const purchaseLeg=documents.filter(doc=>['Invoice','Tax Invoice'].includes(doc.type) && isInternalPartyName(doc.fields.buyerName || ''));
+  const suppliers=rankWeightedDocumentValues(purchaseLeg,doc=>firstDocumentPartyValue(doc,['vendorName']),getVendorCounterpartyWeight).filter(candidate=>!isInternalPartyName(candidate.value));
+  if (suppliers.length===1) return suppliers[0].value;
+  const buyerCandidates = rankWeightedDocumentValues(
     documents,
     (document) => firstDocumentPartyValue(document, ["buyerName"]),
     getBuyerCounterpartyWeight
-  )[0];
+  );
 
-  const vendorCandidate = rankWeightedDocumentValues(
+  const vendorCandidates = rankWeightedDocumentValues(
     documents,
     (document) => firstDocumentPartyValue(document, ["vendorName"]),
     getVendorCounterpartyWeight
-  )[0];
+  );
 
+  const externalBuyerCandidate = buyerCandidates.find((candidate) => !isInternalPartyName(candidate.value));
+  const externalVendorCandidate = vendorCandidates.find((candidate) => !isInternalPartyName(candidate.value));
+
+  if (
+    externalBuyerCandidate &&
+    externalVendorCandidate &&
+    normalizeMatchKey(externalBuyerCandidate.value) !== normalizeMatchKey(externalVendorCandidate.value)
+  ) {
+    const buyerStrength = externalBuyerCandidate.score + externalBuyerCandidate.count;
+    const vendorStrength = externalVendorCandidate.score + externalVendorCandidate.count;
+
+    if (buyerStrength !== vendorStrength) {
+      return buyerStrength > vendorStrength ? externalBuyerCandidate.value : externalVendorCandidate.value;
+    }
+
+    return externalVendorCandidate.value;
+  }
+
+  if (externalVendorCandidate) {
+    return externalVendorCandidate.value;
+  }
+
+  if (externalBuyerCandidate) {
+    return externalBuyerCandidate.value;
+  }
+
+  const buyerCandidate = buyerCandidates[0];
+  const vendorCandidate = vendorCandidates[0];
   if (
     buyerCandidate &&
     vendorCandidate &&
@@ -522,6 +571,62 @@ export function resolveStoredCaseDisplayName(params: {
   return category;
 }
 
+export function resolveCaseDisplayName(params: {
+  storedDisplayName?: string | null;
+  receiverName?: string | null;
+  invoiceNumber?: string | null;
+  poNumber?: string | null;
+  category?: string | null;
+  status?: string | null;
+}) {
+  const storedDisplayName = normalizeValue(params.storedDisplayName);
+  const receiverName = normalizeValue(params.receiverName);
+  const storedLooksInternal = isInternalPartyName(storedDisplayName);
+  const receiverLooksExternal = Boolean(receiverName && !isInternalPartyName(receiverName));
+  if (
+    params.status !== "draft" &&
+    storedDisplayName &&
+    !isGeneratedCaptureDisplayName(storedDisplayName) &&
+    !(storedLooksInternal && receiverLooksExternal)
+  ) {
+    return storedDisplayName;
+  }
+
+  return resolveStoredCaseDisplayName(params);
+}
+
+function hasMeaningfulFieldValue(document: CaseDoc, field: FieldKey) {
+  return Boolean(normalizeValue(document.fields[field]));
+}
+
+function hasPurchaseOrderEvidence(document: CaseDoc) {
+  return hasMeaningfulFieldValue(document, "poNumber") || hasMeaningfulFieldValue(document, "referencePoNumber");
+}
+
+function hasEWayBillEvidence(document: CaseDoc) {
+  return hasMeaningfulFieldValue(document, "eWayBillNumber");
+}
+
+function isCorePacketGroupCovered(
+  group: { label: string; types: DocType[] },
+  documents: CaseDoc[],
+  presentTypes: Set<DocType>
+) {
+  if (group.types.some((type) => presentTypes.has(type))) {
+    return true;
+  }
+
+  if (group.label === "Purchase Order") {
+    return documents.some(hasPurchaseOrderEvidence);
+  }
+
+  if (group.label === "E-Way Bill") {
+    return documents.some(hasEWayBillEvidence);
+  }
+
+  return false;
+}
+
 export function summarizeCase(
   documents: CaseDoc[],
   mismatches: Mismatch[],
@@ -548,7 +653,7 @@ export function summarizeCase(
       .filter((type) => isDocTypeEnabled(type, fieldConfiguration))
   );
   const missingDocTypes = getEnabledCorePacketGroups(fieldConfiguration)
-    .filter((group) => !group.types.some((type) => presentTypes.has(type)))
+    .filter((group) => !isCorePacketGroupCovered(group, documents, presentTypes))
     .map((group) => group.label);
 
   const riskScore = Math.min(

@@ -21,6 +21,7 @@ const PURCHASE_ORDER_DOC_TYPES = new Set<DocType>(["Purchase Order", "Amended Pu
 const VEHICLE_REGISTRATION_DOC_TYPES = new Set<DocType>(["Vehicle Registration Certificate"]);
 
 const COMPARISON_FIELD_ALIASES: Partial<Record<FieldKey, FieldKey>> = {
+  totalTaxableAmount: "subtotal",
   referencePoNumber: "poNumber",
   referenceInvoiceNumber: "invoiceNumber",
   registrationNumber: "vehicleNumber",
@@ -439,6 +440,7 @@ export function getComparisonFieldKey(fieldKey: FieldKey) {
 }
 
 export function isPrimaryComparisonField(fieldKey: string) {
+  if (fieldKey === "validityDate") return true;
   const canonicalField = getComparisonFieldKey(fieldKey as FieldKey);
   return PRIMARY_COMPARISON_FIELD_SET.has(canonicalField);
 }

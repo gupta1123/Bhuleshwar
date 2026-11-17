@@ -53,6 +53,8 @@ type CaseDetailRedesignProps = {
   decisionUpdating: boolean;
   decisionError: string | null;
   onDecision: (decision: "accepted" | "rejected") => void;
+  canReanalyse?: boolean;
+  onReanalyse?: () => void;
   documents: RedesignedDocumentCard[];
   comparisonFieldLabel?: string | null;
   activeDocumentId: string | null;
@@ -107,6 +109,8 @@ export function CaseDetailRedesign({
   decisionUpdating,
   decisionError,
   onDecision,
+  canReanalyse,
+  onReanalyse,
   documents,
   comparisonFieldLabel,
   activeDocumentId,
@@ -264,6 +268,7 @@ export function CaseDetailRedesign({
           </nav>
 
           <div className={styles.redesignHeaderActions}>
+            {canReanalyse ? <button type="button" className={styles.redesignButtonOutline} onClick={onReanalyse}><RotateCw />Re-analyse packet</button>:null}
             {mismatchCount > 0 || canReviewTally ? (
               <Link
                 href={`/cases/${caseId}/mismatches`}

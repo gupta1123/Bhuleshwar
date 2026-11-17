@@ -1,4 +1,19 @@
 export type FieldKey =
+  | "arrivalDate"
+  | "departureDate"
+  | "driverPhone"
+  | "transporterId"
+  | "transportDocumentDate"
+  | "consolidatedEwayNumber"
+  | "consolidatedEwayDate"
+  | "receiptDocNumber"
+  | "receiptDate"
+  | "receiptStatus"
+  | "fromPlace"
+  | "toPlace"
+  | "supplierAddress"
+  | "buyerAddress"
+
   | "vendorName"
   | "supplierGstin"
   | "buyerName"
@@ -115,6 +130,7 @@ export type DocType =
   | "Delivery Note"
   | "Delivery Challan"
   | "E-Way Bill"
+  | "Receiving Record"
   | "Weighment Slip"
   | "Lorry Receipt"
   | "Vehicle Registration Certificate"
@@ -210,6 +226,7 @@ export interface ExtractedDocument {
 export interface MismatchValue {
   value: string | number | null | undefined;
   docId: string;
+  lineIndex?: number;
 }
 
 export interface Mismatch {

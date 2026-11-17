@@ -1,3 +1,4 @@
+import {withRequestTiming,timeRequestStep} from '@/lib/api/request-timing';
 import { listAccessPredicate } from '@/lib/access/list-scope';
 import {requireAccessContext} from '@/lib/access/server';
 import { withTeamAccess } from '@/lib/access/route-boundary';
@@ -216,15 +217,13 @@ async function POSTHandler(
 ) {
   try {
     const { id } = await context.params;
-    const user = await requireRequestUser(request);
+    const user = await timeRequestStep(request,"auth",()=>requireRequestUser(request));
     if (!user) {
       return applyCorsHeaders(NextResponse.json({ error: "Unauthorized" }, { status: 401 }), request);
     }
 
     const supabase = createSupabaseAdminClient();
-    const fieldConfiguration = await getPersistedPacketFieldConfiguration(
-      process.env.TEAM_ACCESS_ENFORCEMENT==='true'?(await requireAccessContext(request)).organizationId:undefined
-    );
+
     const formData = await request.formData();
     const analysisMode = parseAnalysisMode(formData.get("analysisMode"));
     const comparisonOptions = parseComparisonOptions(formData.get("comparisonOptions"));
@@ -292,8 +291,12 @@ async function POSTHandler(
       return NextResponse.json({ error: "Case not found." }, { status: 404 });
     }
 
+    if (["accepted","rejected"].includes(existing.status || "")) return applyCorsHeaders(NextResponse.json({error:"This case has a final decision. Reopen it before re-analysis."},{status:409}),request);
+    const posting = await supabase.from("purchase_invoice_tally_postings").select("status").eq("case_id",id).in("status",["approved","queued","creating","created","verification_required"]).limit(1);
+    if(posting.error)throw posting.error;
+    if(posting.data?.length)return applyCorsHeaders(NextResponse.json({error:"This case has an approved or posted Tally voucher. Re-analysis is locked to preserve its evidence."},{status:409}),request);
     if (!rawDocuments) {
-      const latestJob = await getLatestProcessingJob(id);
+      const latestJob = await timeRequestStep(request,"latestJob",()=>getLatestProcessingJob(id));
       if (latestJob && (latestJob.status === "queued" || latestJob.status === "running")) {
         const nextCase = {
           ...existing,
@@ -389,6 +392,7 @@ async function POSTHandler(
           result: {
             analysisMode,
             comparisonOptions,
+            requestId: request.headers.get("x-request-id"),
           },
         })
         .select("*")
@@ -407,6 +411,7 @@ async function POSTHandler(
       );
     }
 
+    const fieldConfiguration = await getPersistedPacketFieldConfiguration(process.env.TEAM_ACCESS_ENFORCEMENT==='true'?(await requireAccessContext(request)).organizationId:undefined);
     const documents = sanitizeDocumentsForStorage(rawDocuments, fieldConfiguration);
     const baseMismatches = sanitizeMismatchesForStorage(
       rawMismatches ?? [],
@@ -583,4 +588,4 @@ export async function OPTIONS(request: Request) {
   return optionsWithCors(request);
 }
 
-export const POST = withTeamAccess(POSTHandler);
+export const POST = withRequestTiming(withTeamAccess(POSTHandler));

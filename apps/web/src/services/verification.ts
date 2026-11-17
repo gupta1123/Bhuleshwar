@@ -1,3 +1,4 @@
+import { normalisePacketEvidence, shipmentMassChecks, arithmeticChecks, evidenceTimestamp } from '@autodealer/shared/lib/packet-evidence';
 import type { CaseDoc, CommercialLineItem, FieldKey, Mismatch, MismatchValue } from "@/types/pipeline";
 import { getFieldKeysForDocType, shouldConsiderFieldKey } from "@/lib/document-schema";
 import {
@@ -27,6 +28,7 @@ const WEIGHT_FIELDS = new Set<FieldKey>(["grossWeight", "tareWeight", "netWeight
 const PARTY_NAME_FIELDS = new Set<FieldKey>(["vendorName", "buyerName", "transporterName", "ownerName", "driverName", "holderName"]);
 const PURCHASE_ORDER_TOTAL_FIELDS = new Set<FieldKey>(["subtotal", "taxAmount", "totalAmount"]);
 const EWAY_VALIDITY_RELATED_DOC_TYPES = new Set<CaseDoc["type"]>([
+  "Receiving Record",
   "Invoice",
   "Tax Invoice",
   "Delivery Challan",
@@ -108,8 +110,44 @@ const LINE_ITEM_REFERENCE_PRIORITY: Partial<Record<CaseDoc["type"], number>> = {
   "Weighment Slip": 5,
   "Material Test Certificate": 6,
 };
+const GROUP_REFERENCE_FIELDS: FieldKey[] = [
+  "poNumber",
+  "invoiceNumber",
+  "referenceInvoiceNumber",
+  "deliveryNoteNumber",
+  "eWayBillNumber",
+  "lorryReceiptNumber",
+  "weighmentNumber",
+  "fastagReference",
+  "transactionReference",
+  "vehicleNumber",
+];
+
+export interface VerificationGroup {
+  groupId: string;
+  label: string;
+  reason: "shared_reference" | "source_file" | "single_document";
+  documentIds: string[];
+  sourceFileNames: string[];
+  referenceKeys: string[];
+  roleSelection?: VerificationRoleSelection;
+}
+
+export interface GroupedVerificationResult {
+  groups: VerificationGroup[];
+  mismatches: Omit<Mismatch, "analysis" | "fixPlan">[];
+  checks: ReturnType<typeof shipmentMassChecks>["checks"];
+}
+
+export interface VerificationRoleSelection {
+  strategy: "seller_chain";
+  primaryDocumentIds: string[];
+  contextDocumentIds: string[];
+  note: string;
+}
 
 function shouldExpectField(doc: CaseDoc, field: FieldKey) {
+  if (doc.type === "Receiving Record" && ["invoiceNumber","poNumber"].includes(field)) return false;
   if (PURCHASE_DOC_TYPES.has(doc.type) && PURCHASE_ORDER_TOTAL_FIELDS.has(field)) {
     return false;
   }
@@ -200,7 +238,7 @@ function getSingleKnownVehicle(docs: CaseDoc[], comparisonOptions: ComparisonOpt
   const vehicles = [
     ...new Set(
       docs
-        .map((doc) => normalizeGroupValue(getComparableFieldValue(doc, "vehicleNumber"), comparisonOptions, "vehicleNumber"))
+        .map((doc) => getVehicleReference(doc, comparisonOptions))
         .filter((value): value is string => Boolean(value))
     ),
   ];
@@ -221,7 +259,7 @@ function splitWeighmentNetContext(docs: CaseDoc[], comparisonOptions: Comparison
   const weighmentVehicles = [
     ...new Set(
       weighmentEntries
-        .map((entry) => normalizeGroupValue(getComparableFieldValue(entry.doc, "vehicleNumber"), comparisonOptions, "vehicleNumber"))
+        .map((entry) => getVehicleReference(entry.doc, comparisonOptions))
         .filter((value): value is string => Boolean(value))
     ),
   ];
@@ -401,6 +439,182 @@ function getNumericDocumentFieldValue(doc: CaseDoc, field: FieldKey) {
   }
 
   return null;
+}
+
+type PartyIdentity = {
+  gstin: string | null;
+  name: string | null;
+};
+
+function getPartyIdentity(
+  doc: CaseDoc,
+  comparisonOptions: ComparisonOptions,
+  gstinField: "supplierGstin" | "buyerGstin",
+  nameField: "vendorName" | "buyerName"
+): PartyIdentity {
+  return {
+    gstin: normalizeGroupValue(doc.fields[gstinField], comparisonOptions, gstinField),
+    name: normalizeGroupValue(doc.fields[nameField], comparisonOptions, nameField),
+  };
+}
+
+function hasPartyIdentity(identity: PartyIdentity) {
+  return Boolean(identity.gstin || identity.name);
+}
+
+function partyIdentitiesMatch(left: PartyIdentity, right: PartyIdentity) {
+  if (left.gstin && right.gstin) return left.gstin === right.gstin;
+  if (left.name && right.name) return left.name === right.name || arePartyNamesEffectivelyEqual(left.name, right.name);
+  return false;
+}
+
+function partyIdentityMatchesAny(identity: PartyIdentity, candidates: PartyIdentity[]) {
+  return hasPartyIdentity(identity) && candidates.some((candidate) => partyIdentitiesMatch(identity, candidate));
+}
+
+function uniquePartyIdentities(identities: PartyIdentity[]) {
+  const unique: PartyIdentity[] = [];
+  for (const identity of identities) {
+    if (!hasPartyIdentity(identity)) continue;
+    if (unique.some((existing) => partyIdentitiesMatch(existing, identity))) continue;
+    unique.push(identity);
+  }
+  return unique;
+}
+
+function getInvoiceReference(doc: CaseDoc, comparisonOptions: ComparisonOptions) {
+  return normalizeDocReference(doc, "invoiceNumber", comparisonOptions);
+}
+
+function getSellerChainRoleSelection(
+  docs: CaseDoc[],
+  comparisonOptions: ComparisonOptions
+): VerificationRoleSelection | null {
+  const invoices = docs.filter((doc) => INVOICE_DOC_TYPES.has(doc.type));
+  if (invoices.length < 2) return null;
+
+  const purchaseDocs = docs.filter((doc) => PURCHASE_DOC_TYPES.has(doc.type));
+  // A legal buyer/supplier graph can establish a chain even when the PO is absent.
+  const inferredPrimary = !purchaseDocs.length ? invoices.filter(invoice => {
+    const supplier = getPartyIdentity(invoice, comparisonOptions, "supplierGstin", "vendorName");
+    return invoices.some(other => other.id !== invoice.id && partyIdentitiesMatch(getPartyIdentity(other, comparisonOptions, "buyerGstin", "buyerName"),supplier));
+  }) : [];
+  if (!purchaseDocs.length && inferredPrimary.length) {
+    const supplierIds = inferredPrimary.map(invoice=>getPartyIdentity(invoice,comparisonOptions,"supplierGstin","vendorName"));
+    const upstream = invoices.filter(invoice=>!inferredPrimary.includes(invoice) && partyIdentityMatchesAny(getPartyIdentity(invoice,comparisonOptions,"buyerGstin","buyerName"),supplierIds));
+    const refs = new Set(upstream.map(invoice=>getInvoiceReference(invoice,comparisonOptions)).filter(Boolean));
+    const context = docs.filter(doc=>upstream.includes(doc) || (getInvoiceBranchReference(doc,comparisonOptions) && refs.has(getInvoiceBranchReference(doc,comparisonOptions))));
+    if (inferredPrimary.length === 1 && upstream.length && !upstream.some(invoice=>partyIdentitiesMatch(getPartyIdentity(inferredPrimary[0],comparisonOptions,"buyerGstin","buyerName"),getPartyIdentity(invoice,comparisonOptions,"supplierGstin","vendorName")))) return {strategy:"seller_chain",primaryDocumentIds:inferredPrimary.map(doc=>doc.id),contextDocumentIds:context.map(doc=>doc.id),note:"Legal bill-to chain identified; upstream invoices are supporting evidence."};
+  }
+  if (!purchaseDocs.length) return null;
+
+  const purchaseBuyers = uniquePartyIdentities(
+    purchaseDocs.map((doc) => getPartyIdentity(doc, comparisonOptions, "buyerGstin", "buyerName"))
+  );
+  const purchaseVendors = uniquePartyIdentities(
+    purchaseDocs.map((doc) => getPartyIdentity(doc, comparisonOptions, "supplierGstin", "vendorName"))
+  );
+  if (!purchaseBuyers.length && !purchaseVendors.length) return null;
+
+  const primaryInvoices = invoices.filter((invoice) => {
+    const buyer = getPartyIdentity(invoice, comparisonOptions, "buyerGstin", "buyerName");
+    const supplier = getPartyIdentity(invoice, comparisonOptions, "supplierGstin", "vendorName");
+    const buyerIsFinalBuyer = partyIdentityMatchesAny(buyer, purchaseBuyers);
+    const buyerIsPoVendor = partyIdentityMatchesAny(buyer, purchaseVendors);
+    const supplierIsPoVendor = partyIdentityMatchesAny(supplier, purchaseVendors);
+    return buyerIsFinalBuyer || (supplierIsPoVendor && !buyerIsPoVendor);
+  });
+  if (!primaryInvoices.length) return null;
+
+  const primarySuppliers = uniquePartyIdentities([
+    ...purchaseVendors,
+    ...primaryInvoices.map((invoice) => getPartyIdentity(invoice, comparisonOptions, "supplierGstin", "vendorName")),
+  ]);
+
+  const upstreamInvoices = invoices.filter((invoice) => {
+    if (primaryInvoices.some((primary) => primary.id === invoice.id)) return false;
+    const buyer = getPartyIdentity(invoice, comparisonOptions, "buyerGstin", "buyerName");
+    const facesFinalBuyer = partyIdentityMatchesAny(buyer, purchaseBuyers);
+    return !facesFinalBuyer && partyIdentityMatchesAny(buyer, primarySuppliers);
+  });
+  if (!upstreamInvoices.length) return null;
+
+  const upstreamInvoiceRefs = new Set(
+    upstreamInvoices
+      .map((invoice) => getInvoiceReference(invoice, comparisonOptions))
+      .filter((value): value is string => Boolean(value))
+  );
+  const contextDocumentIds = new Set(upstreamInvoices.map((invoice) => invoice.id));
+
+  for (const doc of docs) {
+    if (contextDocumentIds.has(doc.id)) continue;
+    const reference = getInvoiceBranchReference(doc, comparisonOptions);
+    if (reference && upstreamInvoiceRefs.has(reference)) {
+      contextDocumentIds.add(doc.id);
+    }
+  }
+
+  return {
+    strategy: "seller_chain",
+    primaryDocumentIds: primaryInvoices.map((invoice) => invoice.id),
+    contextDocumentIds: [...contextDocumentIds],
+    note: "Seller-chain role selection applied: Bhuleshwar-facing invoice was reconciled; upstream seller invoices were kept as context.",
+  };
+}
+
+function documentsForRoleSelectedComparison(
+  docs: CaseDoc[],
+  roleSelection: VerificationRoleSelection | null
+) {
+  if (!roleSelection?.contextDocumentIds.length) return docs;
+  const contextIds = new Set(roleSelection.contextDocumentIds);
+  const comparableDocs = docs.filter((doc) => !contextIds.has(doc.id));
+  return comparableDocs.length >= 2 ? comparableDocs : docs;
+}
+
+function getSellerChainSourceDocumentIds(
+  sourceDocs: CaseDoc[],
+  comparisonOptions: ComparisonOptions
+) {
+  const roleSelection = getSellerChainRoleSelection(sourceDocs, comparisonOptions);
+  if (!roleSelection) return null;
+
+  const chainDocumentIds = new Set([
+    ...roleSelection.primaryDocumentIds,
+    ...roleSelection.contextDocumentIds,
+  ]);
+  const primaryInvoices = sourceDocs.filter((doc) => roleSelection.primaryDocumentIds.includes(doc.id));
+  const chainInvoiceRefs = new Set(
+    sourceDocs
+      .filter((doc) => chainDocumentIds.has(doc.id) && INVOICE_DOC_TYPES.has(doc.type))
+      .map((doc) => getInvoiceReference(doc, comparisonOptions))
+      .filter((value): value is string => Boolean(value))
+  );
+
+  for (const doc of sourceDocs) {
+    if (chainDocumentIds.has(doc.id)) continue;
+
+    if (PURCHASE_DOC_TYPES.has(doc.type)) {
+      const purchaseBuyer = getPartyIdentity(doc, comparisonOptions, "buyerGstin", "buyerName");
+      const purchaseVendor = getPartyIdentity(doc, comparisonOptions, "supplierGstin", "vendorName");
+      const anchorsPrimaryInvoice = primaryInvoices.some((invoice) => {
+        const invoiceBuyer = getPartyIdentity(invoice, comparisonOptions, "buyerGstin", "buyerName");
+        const invoiceSupplier = getPartyIdentity(invoice, comparisonOptions, "supplierGstin", "vendorName");
+        return partyIdentitiesMatch(invoiceBuyer, purchaseBuyer) || partyIdentitiesMatch(invoiceSupplier, purchaseVendor);
+      });
+      if (anchorsPrimaryInvoice) {
+        chainDocumentIds.add(doc.id);
+      }
+      continue;
+    }
+
+    const invoiceReference = getInvoiceBranchReference(doc, comparisonOptions);
+    if (invoiceReference && chainInvoiceRefs.has(invoiceReference)) {
+      chainDocumentIds.add(doc.id);
+    }
+  }
+
+  return chainDocumentIds;
 }
 
 function normalizedInvoicePartyField(doc: CaseDoc, field: FieldKey, comparisonOptions: ComparisonOptions) {
@@ -678,6 +892,15 @@ function normalizeGroupValue(
   return normalizeComparableValue(value, comparisonOptions, field) || null;
 }
 
+function normalizeSourceName(value?: string) {
+  return value?.trim().toLowerCase().replace(/\s+/g, " ") || null;
+}
+
+function normalizeAmountValue(value: string | number | null | undefined) {
+  const parsed = parseNumber(value);
+  return parsed === null ? null : Math.round(parsed * 100).toString();
+}
+
 const MONTH_NAME_TO_INDEX: Record<string, number> = {
   jan: 1,
   january: 1,
@@ -748,10 +971,10 @@ function parseDocumentDay(value: string | number | null | undefined) {
 }
 
 function getDocumentDateForValidity(doc: CaseDoc) {
-  const candidates: FieldKey[] = ["documentDate", "ackDate", "transactionDate"];
+  const candidates: FieldKey[] = ["arrivalDate", "documentDate", "ackDate", "transactionDate"];
   for (const field of candidates) {
     const value = doc.fields[field];
-    const stamp = parseDocumentDay(value);
+    const stamp = evidenceTimestamp(value);
     if (stamp !== null) return { field, value, stamp };
   }
   return null;
@@ -764,9 +987,9 @@ function verifyEWayBillValidity(docs: CaseDoc[]): Omit<Mismatch, "analysis" | "f
 
   for (const eWayBill of eWayBills) {
     const validUntilValue = eWayBill.fields.validityDate;
-    const validUntilStamp = parseDocumentDay(validUntilValue);
+    const validUntilStamp = evidenceTimestamp(validUntilValue, true);
     const generatedValue = eWayBill.fields.documentDate;
-    const generatedStamp = parseDocumentDay(generatedValue);
+    const generatedStamp = evidenceTimestamp(generatedValue);
 
     if (validUntilStamp !== null && generatedStamp !== null && validUntilStamp < generatedStamp) {
       mismatches.push({
@@ -797,6 +1020,437 @@ function verifyEWayBillValidity(docs: CaseDoc[]): Omit<Mismatch, "analysis" | "f
   }
 
   return mismatches;
+}
+
+function getVendorIdentity(doc: CaseDoc, comparisonOptions: ComparisonOptions) {
+  return (
+    normalizeGroupValue(doc.fields.supplierGstin, comparisonOptions, "supplierGstin") ||
+    normalizeGroupValue(doc.fields.vendorName, comparisonOptions, "vendorName") ||
+    normalizeGroupValue(doc.fields.transporterName, comparisonOptions, "transporterName") ||
+    null
+  );
+}
+
+function isUsefulInvoiceReference(value: string | null) {
+  if (!value) return false;
+  return value.length >= 4 || /[a-z]/i.test(value);
+}
+
+function isValidEWayBillReference(value: string | null) {
+  return Boolean(value && /^\d{12}$/.test(value));
+}
+
+function isUsefulVehicleReference(value: string | null) {
+  if (!value) return false;
+  return /^[a-z]{2}\d{1,2}[a-z]{1,3}\d{3,4}$/i.test(value);
+}
+
+function getVehicleReference(doc: CaseDoc, comparisonOptions: ComparisonOptions) {
+  return normalizeGroupValue(getComparableFieldValue(doc, "vehicleNumber"), comparisonOptions, "vehicleNumber");
+}
+
+function getPacketReferenceKeys(doc: CaseDoc, comparisonOptions: ComparisonOptions) {
+  const keys: string[] = [];
+  const vendorIdentity = getVendorIdentity(doc, comparisonOptions);
+
+  const poNumber = normalizeGroupValue(getComparableFieldValue(doc, "poNumber"), comparisonOptions, "poNumber");
+  if (poNumber) keys.push(`po:${poNumber}`);
+
+  const invoiceNumber = normalizeGroupValue(
+    getComparableFieldValue(doc, "invoiceNumber"),
+    comparisonOptions,
+    "invoiceNumber"
+  );
+  if (isUsefulInvoiceReference(invoiceNumber)) {
+    if (vendorIdentity) {
+      keys.push(`invoice-party:${invoiceNumber}:${vendorIdentity}`);
+    } else if (poNumber) {
+      keys.push(`invoice-po:${invoiceNumber}:${poNumber}`);
+    } else {
+      keys.push(`invoice:${invoiceNumber}`);
+      keys.push(`document:${invoiceNumber}`);
+    }
+  }
+
+  const eWayBillNumber = normalizeGroupValue(doc.fields.eWayBillNumber, comparisonOptions, "eWayBillNumber");
+  if (isValidEWayBillReference(eWayBillNumber)) keys.push(`eway:${eWayBillNumber}`);
+
+  const deliveryNoteNumber = normalizeGroupValue(
+    doc.fields.deliveryNoteNumber,
+    comparisonOptions,
+    "deliveryNoteNumber"
+  );
+  if (isUsefulInvoiceReference(deliveryNoteNumber)) {
+    keys.push(`delivery:${deliveryNoteNumber}`);
+    keys.push(`document:${deliveryNoteNumber}`);
+  }
+
+  const lorryReceiptNumber = normalizeGroupValue(
+    doc.fields.lorryReceiptNumber,
+    comparisonOptions,
+    "lorryReceiptNumber"
+  );
+  if (lorryReceiptNumber) {
+    keys.push(`lr:${lorryReceiptNumber}`);
+    keys.push(`document:${lorryReceiptNumber}`);
+  }
+
+  const weighmentNumber = normalizeGroupValue(doc.fields.weighmentNumber, comparisonOptions, "weighmentNumber");
+  if (weighmentNumber && vendorIdentity) keys.push(`weighment-party:${weighmentNumber}:${vendorIdentity}`);
+
+  const fastagReference = normalizeGroupValue(doc.fields.fastagReference, comparisonOptions, "fastagReference");
+  if (fastagReference) keys.push(`fastag:${fastagReference}`);
+
+  const transactionReference = normalizeGroupValue(
+    doc.fields.transactionReference,
+    comparisonOptions,
+    "transactionReference"
+  );
+  if (transactionReference) keys.push(`transaction:${transactionReference}`);
+
+  const vehicleNumber = getVehicleReference(doc, comparisonOptions);
+  if (isUsefulVehicleReference(vehicleNumber)) keys.push(`vehicle:${vehicleNumber}`);
+
+  return [...new Set(keys)];
+}
+
+function getSharedReferenceKeys(left: CaseDoc, right: CaseDoc, comparisonOptions: ComparisonOptions) {
+  const leftKeys = new Set(getPacketReferenceKeys(left, comparisonOptions));
+  return getPacketReferenceKeys(right, comparisonOptions).filter((key) => leftKeys.has(key));
+}
+
+function shareCommercialIdentity(left: CaseDoc, right: CaseDoc, comparisonOptions: ComparisonOptions) {
+  const leftAmount = normalizeAmountValue(getComparableFieldValue(left, "totalAmount"));
+  const rightAmount = normalizeAmountValue(getComparableFieldValue(right, "totalAmount"));
+  if (!leftAmount || !rightAmount || leftAmount !== rightAmount) {
+    return false;
+  }
+
+  const leftVendor = getVendorIdentity(left, comparisonOptions);
+  const rightVendor = getVendorIdentity(right, comparisonOptions);
+  if (leftVendor && rightVendor && leftVendor === rightVendor) {
+    return true;
+  }
+
+  const leftBuyerGstin = normalizeGroupValue(left.fields.buyerGstin, comparisonOptions, "buyerGstin");
+  const rightBuyerGstin = normalizeGroupValue(right.fields.buyerGstin, comparisonOptions, "buyerGstin");
+  const leftSupplierGstin = normalizeGroupValue(left.fields.supplierGstin, comparisonOptions, "supplierGstin");
+  const rightSupplierGstin = normalizeGroupValue(right.fields.supplierGstin, comparisonOptions, "supplierGstin");
+
+  return Boolean(
+    leftSupplierGstin &&
+      rightSupplierGstin &&
+      leftSupplierGstin === rightSupplierGstin &&
+      leftBuyerGstin &&
+      rightBuyerGstin &&
+      leftBuyerGstin === rightBuyerGstin
+  );
+}
+
+function isStrongDocumentReferenceKey(key: string) {
+  return (
+    key.startsWith("po:") ||
+    key.startsWith("invoice:") ||
+    key.startsWith("invoice-po:") ||
+    key.startsWith("invoice-party:") ||
+    key.startsWith("document:") ||
+    key.startsWith("delivery:") ||
+    key.startsWith("eway:") ||
+    key.startsWith("lr:")
+  );
+}
+
+function isFulfillmentDocumentReferenceKey(key: string) {
+  return (
+    key.startsWith("invoice:") ||
+    key.startsWith("invoice-po:") ||
+    key.startsWith("invoice-party:") ||
+    key.startsWith("document:") ||
+    key.startsWith("delivery:") ||
+    key.startsWith("eway:") ||
+    key.startsWith("lr:")
+  );
+}
+
+function isWeakLogisticsReferenceKey(key: string) {
+  return (
+    key.startsWith("vehicle:") ||
+    key.startsWith("fastag:") ||
+    key.startsWith("transaction:") ||
+    key.startsWith("weighment-party:")
+  );
+}
+
+function getStrongDocumentReferenceKeys(doc: CaseDoc, comparisonOptions: ComparisonOptions) {
+  return getPacketReferenceKeys(doc, comparisonOptions).filter(isStrongDocumentReferenceKey);
+}
+
+function getFulfillmentDocumentReferenceKeys(doc: CaseDoc, comparisonOptions: ComparisonOptions) {
+  return getPacketReferenceKeys(doc, comparisonOptions).filter(isFulfillmentDocumentReferenceKey);
+}
+
+function hasCommercialComparisonSignal(doc: CaseDoc) {
+  return Boolean(
+    doc.fields.subtotal ||
+      doc.fields.totalTaxableAmount ||
+      doc.fields.taxAmount ||
+      doc.fields.totalAmount ||
+      (doc.lineItems?.length ?? 0) > 0 ||
+      COMMERCIAL_LINE_ITEM_COMPARISON_DOC_TYPES.has(doc.type)
+  );
+}
+
+function hasSharedStrongDocumentReference(
+  left: CaseDoc,
+  right: CaseDoc,
+  comparisonOptions: ComparisonOptions
+) {
+  const leftKeys = new Set(getStrongDocumentReferenceKeys(left, comparisonOptions));
+  return getStrongDocumentReferenceKeys(right, comparisonOptions).some((key) => leftKeys.has(key));
+}
+
+function hasSharedFulfillmentDocumentReference(
+  left: CaseDoc,
+  right: CaseDoc,
+  comparisonOptions: ComparisonOptions
+) {
+  const leftKeys = new Set(getFulfillmentDocumentReferenceKeys(left, comparisonOptions));
+  return getFulfillmentDocumentReferenceKeys(right, comparisonOptions).some((key) => leftKeys.has(key));
+}
+
+function sourceHasMultipleFulfillmentReferenceComponents(
+  sourceDocs: CaseDoc[],
+  comparisonOptions: ComparisonOptions
+) {
+  const anchoredCommercialDocs = sourceDocs.filter(
+    (doc) => hasCommercialComparisonSignal(doc) && getFulfillmentDocumentReferenceKeys(doc, comparisonOptions).length > 0
+  );
+  if (anchoredCommercialDocs.length <= 1) return false;
+
+  const parent = anchoredCommercialDocs.map((_, index) => index);
+  const find = (index: number): number => {
+    if (parent[index] !== index) parent[index] = find(parent[index]);
+    return parent[index];
+  };
+  const union = (left: number, right: number) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) parent[rightRoot] = leftRoot;
+  };
+
+  for (let left = 0; left < anchoredCommercialDocs.length; left += 1) {
+    for (let right = left + 1; right < anchoredCommercialDocs.length; right += 1) {
+      if (
+        hasSharedFulfillmentDocumentReference(
+          anchoredCommercialDocs[left],
+          anchoredCommercialDocs[right],
+          comparisonOptions
+        ) ||
+        shareCommercialIdentity(anchoredCommercialDocs[left], anchoredCommercialDocs[right], comparisonOptions)
+      ) {
+        union(left, right);
+      }
+    }
+  }
+
+  return new Set(anchoredCommercialDocs.map((_, index) => find(index))).size > 1;
+}
+
+function shouldGroupBySourceFile(
+  left: CaseDoc,
+  right: CaseDoc,
+  sourceDocs: CaseDoc[],
+  comparisonOptions: ComparisonOptions
+) {
+  const leftStrongRefs = getStrongDocumentReferenceKeys(left, comparisonOptions);
+  const rightStrongRefs = getStrongDocumentReferenceKeys(right, comparisonOptions);
+  if (leftStrongRefs.length > 0 && rightStrongRefs.length > 0) {
+    return hasSharedStrongDocumentReference(left, right, comparisonOptions);
+  }
+
+  if (shareCommercialIdentity(left, right, comparisonOptions)) {
+    return true;
+  }
+
+  const sharedReferenceKeys = getSharedReferenceKeys(left, right, comparisonOptions);
+  if (sharedReferenceKeys.some(isStrongDocumentReferenceKey)) {
+    return true;
+  }
+
+  if (sourceHasMultipleFulfillmentReferenceComponents(sourceDocs, comparisonOptions)) {
+    return false;
+  }
+
+  const hasOnlyWeakLogisticsReference =
+    sharedReferenceKeys.length > 0 && sharedReferenceKeys.every(isWeakLogisticsReferenceKey);
+  const commercialSourceDocCount = sourceDocs.filter((doc) =>
+    COMMERCIAL_LINE_ITEM_COMPARISON_DOC_TYPES.has(doc.type)
+  ).length;
+  if (
+    hasOnlyWeakLogisticsReference &&
+    commercialSourceDocCount > 1 &&
+    (hasCommercialComparisonSignal(left) || hasCommercialComparisonSignal(right))
+  ) {
+    return false;
+  }
+
+  if (sharedReferenceKeys.length > 0) {
+    return true;
+  }
+
+  if (hasCommercialComparisonSignal(left) && hasCommercialComparisonSignal(right)) {
+    return false;
+  }
+
+  const invoiceCount = sourceDocs.filter((doc) => INVOICE_DOC_TYPES.has(doc.type)).length;
+  if (invoiceCount <= 1) {
+    return true;
+  }
+
+  const purchaseCount = sourceDocs.filter((doc) => PURCHASE_DOC_TYPES.has(doc.type)).length;
+  return invoiceCount === 0 && purchaseCount <= 1;
+}
+
+function packetReferenceLabel(doc: CaseDoc, comparisonOptions: ComparisonOptions) {
+  for (const field of GROUP_REFERENCE_FIELDS) {
+    const value = getComparableFieldValue(doc, field);
+    if (normalizeGroupValue(value, comparisonOptions, field)) {
+      return `${field}:${value}`;
+    }
+  }
+
+  return doc.sourceFileName || doc.sourceHint || doc.title || doc.id;
+}
+
+function makeVerificationGroup(
+  docs: CaseDoc[],
+  comparisonOptions: ComparisonOptions,
+  groupIndex: number,
+  roleSelection: VerificationRoleSelection | null = null
+): VerificationGroup {
+  const sourceFileNames = [...new Set(docs.map((doc) => doc.sourceFileName).filter((value): value is string => Boolean(value)))];
+  const referenceKeys = [...new Set(docs.flatMap((doc) => getPacketReferenceKeys(doc, comparisonOptions)))];
+  const labelReference =
+    docs
+      .map((doc) => packetReferenceLabel(doc, comparisonOptions))
+      .find((value) => value && !value.startsWith("sourceFileName:")) ?? sourceFileNames[0] ?? `Packet ${groupIndex + 1}`;
+  const singleSource = sourceFileNames.length === 1;
+
+  return {
+    groupId: `packet-group-${groupIndex + 1}`,
+    label: labelReference,
+    reason: docs.length <= 1 ? "single_document" : singleSource ? "source_file" : "shared_reference",
+    documentIds: docs.map((doc) => doc.id),
+    sourceFileNames,
+    referenceKeys,
+    ...(roleSelection ? { roleSelection } : {}),
+  };
+}
+
+export function groupDocumentsForVerification(
+  docs: CaseDoc[],
+  comparisonOptions: ComparisonOptions = DEFAULT_COMPARISON_OPTIONS
+) {
+  docs = normalisePacketEvidence(docs);
+  const parent = docs.map((_, index) => index);
+
+  const find = (index: number): number => {
+    if (parent[index] !== index) {
+      parent[index] = find(parent[index]);
+    }
+    return parent[index];
+  };
+
+  const union = (left: number, right: number) => {
+    const leftRoot = find(left);
+    const rightRoot = find(right);
+    if (leftRoot !== rightRoot) {
+      parent[rightRoot] = leftRoot;
+    }
+  };
+
+  const byReference = new Map<string, number[]>();
+  docs.forEach((doc, index) => {
+    getPacketReferenceKeys(doc, comparisonOptions)
+      .filter(isStrongDocumentReferenceKey)
+      .forEach((key) => {
+        byReference.set(key, [...(byReference.get(key) ?? []), index]);
+      });
+  });
+
+  byReference.forEach((indices) => {
+    const [first, ...rest] = indices;
+    rest.forEach((index) => union(first, index));
+  });
+
+  const bySource = new Map<string, number[]>();
+  docs.forEach((doc, index) => {
+    const source = normalizeSourceName(doc.sourceFileName);
+    if (!source) return;
+    bySource.set(source, [...(bySource.get(source) ?? []), index]);
+  });
+
+  bySource.forEach((indices) => {
+    const sourceDocs = indices.map((index) => docs[index]);
+    const sellerChainDocumentIds = getSellerChainSourceDocumentIds(sourceDocs, comparisonOptions);
+    if (sellerChainDocumentIds) {
+      const chainIndices = indices.filter((index) => sellerChainDocumentIds.has(docs[index].id));
+      if (chainIndices.length > 1) {
+        const [firstChainIndex, ...remainingChainIndices] = chainIndices;
+        remainingChainIndices.forEach((index) => union(firstChainIndex, index));
+      }
+    }
+
+    for (let left = 0; left < indices.length; left += 1) {
+      for (let right = left + 1; right < indices.length; right += 1) {
+        const leftIndex = indices[left];
+        const rightIndex = indices[right];
+        if (shouldGroupBySourceFile(docs[leftIndex], docs[rightIndex], sourceDocs, comparisonOptions)) {
+          union(leftIndex, rightIndex);
+        }
+      }
+    }
+  });
+
+  for (let left = 0; left < docs.length; left += 1) {
+    for (let right = left + 1; right < docs.length; right += 1) {
+      if (find(left) === find(right)) continue;
+      if (shareCommercialIdentity(docs[left], docs[right], comparisonOptions)) {
+        union(left, right);
+      }
+    }
+  }
+
+  const compactRef = (value: unknown) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  docs.forEach((doc,index)=>{
+    if (!["Receiving Record","Weighment Slip"].includes(doc.type)) return;
+    const vehicle = compactRef(doc.fields.vehicleNumber);
+    if (!vehicle) return;
+    const reference = compactRef(doc.fields.referenceInvoiceNumber);
+    const candidates = docs.flatMap((candidate,i)=>{
+      if ((!INVOICE_DOC_TYPES.has(candidate.type) && candidate.type!=="E-Way Bill") || !candidate.sourceFileName || candidate.sourceFileName!==doc.sourceFileName) return [];
+      if (!reference && compactRef(candidate.fields.vehicleNumber)!==vehicle) return [];
+      const invoice = compactRef(candidate.fields.invoiceNumber || candidate.fields.referenceInvoiceNumber);
+      if (reference && invoice!==reference && !(reference.length>=4 && invoice.endsWith(reference))) return [];
+      return [i];
+    });
+    const roots = new Set(candidates.map(find));
+    if (roots.size===1 && candidates.length) union(index,candidates[0]);
+  });
+
+  const grouped = new Map<number, CaseDoc[]>();
+  docs.forEach((doc, index) => {
+    const root = find(index);
+    grouped.set(root, [...(grouped.get(root) ?? []), doc]);
+  });
+
+  return [...grouped.values()].map((groupDocs, index) => {
+    const roleSelection = getSellerChainRoleSelection(groupDocs, comparisonOptions);
+    return {
+      group: makeVerificationGroup(groupDocs, comparisonOptions, index, roleSelection),
+      docs: groupDocs,
+    };
+  });
 }
 
 function areFieldValuesEqual(
@@ -1246,10 +1900,12 @@ function buildLineMismatch(
       {
         docId: referenceDoc.id,
         value: referenceLine ? `${lineLabel(referenceLine, index)}: ${referenceDetail}` : `No matching ${referenceDoc.type} line`,
+        lineIndex: referenceLine ? referenceDoc.lineItems?.indexOf(referenceLine) : undefined,
       },
       {
         docId: comparedDoc.id,
         value: `${lineLabel(comparedLine, index)}: ${comparedDetail}`,
+        lineIndex: comparedDoc.lineItems?.indexOf(comparedLine),
       },
     ],
   };
@@ -1309,6 +1965,14 @@ function getLineItemReferenceDoc(comparedDoc: CaseDoc, docsWithLineItems: CaseDo
   if (purchaseDoc && !PURCHASE_DOC_TYPES.has(comparedDoc.type)) return purchaseDoc;
 
   return getBestCandidateDoc(comparedDoc, candidateDocs, () => true);
+}
+
+function shouldSkipUnanchoredEWayInvoiceLineComparison(referenceDoc: CaseDoc, comparedDoc: CaseDoc) {
+  return (
+    comparedDoc.type === "E-Way Bill" &&
+    INVOICE_DOC_TYPES.has(referenceDoc.type) &&
+    !hasSharedLineItemReference(comparedDoc, referenceDoc)
+  );
 }
 
 function getBroadPurchaseLineReferenceDoc(
@@ -1645,6 +2309,7 @@ function verifyCommercialLineItems(docs: CaseDoc[]): Omit<Mismatch, "analysis" |
         getBroadPurchaseLineReferenceDoc(comparedDoc, docsWithLineItems, comparedLine) ??
         defaultReferenceDoc;
       if (!referenceDoc) continue;
+      if (shouldSkipUnanchoredEWayInvoiceLineComparison(referenceDoc, comparedDoc)) continue;
 
       const referenceLines = referenceDoc.lineItems ?? [];
       const referenceRole = formatLineDocRole(referenceDoc);
@@ -1663,7 +2328,17 @@ function verifyCommercialLineItems(docs: CaseDoc[]): Omit<Mismatch, "analysis" |
           continue;
         }
 
-        mismatches.push(buildLineMismatch("lineItems.unmatchedDocumentLine", referenceDoc, comparedDoc, null, comparedLine, index, `${comparedRole} line has no confident ${referenceRole} line match`));
+        mismatches.push(
+          buildLineMismatch(
+            "lineItems.unmatchedDocumentLine",
+            referenceDoc,
+            comparedDoc,
+            null,
+            comparedLine,
+            index,
+            `${comparedRole} line has no confident ${referenceRole} line match`
+          )
+        );
         continue;
       }
 
@@ -1701,14 +2376,38 @@ function verifyCommercialLineItems(docs: CaseDoc[]): Omit<Mismatch, "analysis" |
         !PURCHASE_DOC_TYPES.has(comparedDoc.type) &&
         comparedBaseQty > referenceBaseQty * 1.01
       ) {
-        mismatches.push(buildLineMismatch("lineItems.quantityExceeded", referenceDoc, comparedDoc, referenceLine, comparedLine, index, `${comparedRole} quantity ${comparedLine.quantity} exceeds ${referenceRole} quantity ${referenceLine.quantity}`, `${referenceRole} quantity ${referenceLine.quantity}`, `${comparedRole} quantity ${comparedLine.quantity}`));
+        mismatches.push(
+          buildLineMismatch(
+            "lineItems.quantityExceeded",
+            referenceDoc,
+            comparedDoc,
+            referenceLine,
+            comparedLine,
+            index,
+            `${comparedRole} quantity ${comparedLine.quantity} exceeds ${referenceRole} quantity ${referenceLine.quantity}`,
+            `${referenceRole} quantity ${referenceLine.quantity}`,
+            `${comparedRole} quantity ${comparedLine.quantity}`
+          )
+        );
       } else if (
         comparedBaseQty !== null &&
         referenceBaseQty !== null &&
         !PURCHASE_DOC_TYPES.has(referenceDoc.type) &&
         !nearlyEqual(comparedBaseQty, referenceBaseQty)
       ) {
-        mismatches.push(buildLineMismatch("lineItems.quantityMismatch", referenceDoc, comparedDoc, referenceLine, comparedLine, index, `${comparedRole} quantity ${comparedLine.quantity} differs from ${referenceRole} quantity ${referenceLine.quantity}`, `${referenceRole} quantity ${referenceLine.quantity}`, `${comparedRole} quantity ${comparedLine.quantity}`));
+        mismatches.push(
+          buildLineMismatch(
+            "lineItems.quantityMismatch",
+            referenceDoc,
+            comparedDoc,
+            referenceLine,
+            comparedLine,
+            index,
+            `${comparedRole} quantity ${comparedLine.quantity} differs from ${referenceRole} quantity ${referenceLine.quantity}`,
+            `${referenceRole} quantity ${referenceLine.quantity}`,
+            `${comparedRole} quantity ${comparedLine.quantity}`
+          )
+        );
       }
 
       const comparedRateValue = comparedLine.rate ?? comparedLine.netRate;
@@ -1720,19 +2419,55 @@ function verifyCommercialLineItems(docs: CaseDoc[]): Omit<Mismatch, "analysis" |
         !nearlyEqual(comparedRate, referenceRate) &&
         !isLikelyScaledOcrNumber(comparedRate, referenceRate)
       ) {
-        mismatches.push(buildLineMismatch("lineItems.rateMismatch", referenceDoc, comparedDoc, referenceLine, comparedLine, index, `${comparedRole} rate ${comparedRateValue} differs from ${referenceRole} rate ${referenceRateValue}`, `${referenceRole} rate ${referenceRateValue}`, `${comparedRole} rate ${comparedRateValue}`));
+        mismatches.push(
+          buildLineMismatch(
+            "lineItems.rateMismatch",
+            referenceDoc,
+            comparedDoc,
+            referenceLine,
+            comparedLine,
+            index,
+            `${comparedRole} rate ${comparedRateValue} differs from ${referenceRole} rate ${referenceRateValue}`,
+            `${referenceRole} rate ${referenceRateValue}`,
+            `${comparedRole} rate ${comparedRateValue}`
+          )
+        );
       }
 
       const comparedUnit = normalizeUnit(comparedLine.unit);
       const referenceUnit = normalizeUnit(referenceLine.unit);
       if (comparedUnit && referenceUnit && !areUnitsCompatible(comparedUnit, referenceUnit)) {
-        mismatches.push(buildLineMismatch("lineItems.unitMismatch", referenceDoc, comparedDoc, referenceLine, comparedLine, index, `${comparedRole} unit ${comparedLine.unit} differs from ${referenceRole} unit ${referenceLine.unit}`, `${referenceRole} unit ${referenceLine.unit}`, `${comparedRole} unit ${comparedLine.unit}`));
+        mismatches.push(
+          buildLineMismatch(
+            "lineItems.unitMismatch",
+            referenceDoc,
+            comparedDoc,
+            referenceLine,
+            comparedLine,
+            index,
+            `${comparedRole} unit ${comparedLine.unit} differs from ${referenceRole} unit ${referenceLine.unit}`,
+            `${referenceRole} unit ${referenceLine.unit}`,
+            `${comparedRole} unit ${comparedLine.unit}`
+          )
+        );
       }
 
       const comparedHsnSac = compactLineField(comparedLine.hsnSac);
       const referenceHsnSac = compactLineField(referenceLine.hsnSac);
       if (comparedHsnSac && referenceHsnSac && !areHsnSacValuesCompatible(comparedHsnSac, referenceHsnSac)) {
-        mismatches.push(buildLineMismatch("lineItems.hsnSacMismatch", referenceDoc, comparedDoc, referenceLine, comparedLine, index, `${comparedRole} HSN/SAC ${comparedLine.hsnSac} differs from ${referenceRole} HSN/SAC ${referenceLine.hsnSac}`, `${referenceRole} HSN/SAC ${referenceLine.hsnSac}`, `${comparedRole} HSN/SAC ${comparedLine.hsnSac}`));
+        mismatches.push(
+          buildLineMismatch(
+            "lineItems.hsnSacMismatch",
+            referenceDoc,
+            comparedDoc,
+            referenceLine,
+            comparedLine,
+            index,
+            `${comparedRole} HSN/SAC ${comparedLine.hsnSac} differs from ${referenceRole} HSN/SAC ${referenceLine.hsnSac}`,
+            `${referenceRole} HSN/SAC ${referenceLine.hsnSac}`,
+            `${comparedRole} HSN/SAC ${comparedLine.hsnSac}`
+          )
+        );
       }
 
       const shouldCompareLineAmount =
@@ -1744,7 +2479,19 @@ function verifyCommercialLineItems(docs: CaseDoc[]): Omit<Mismatch, "analysis" |
         shouldCompareLineAmount &&
         !lineAmountsAgree
       ) {
-        mismatches.push(buildLineMismatch("lineItems.amountMismatch", referenceDoc, comparedDoc, referenceLine, comparedLine, index, `${comparedRole} line amount ${comparedLineAmountValue} differs from ${referenceRole} line amount ${referenceLineAmountValue}`, `${referenceRole} line amount ${referenceLineAmountValue}`, `${comparedRole} line amount ${comparedLineAmountValue}`));
+        mismatches.push(
+          buildLineMismatch(
+            "lineItems.amountMismatch",
+            referenceDoc,
+            comparedDoc,
+            referenceLine,
+            comparedLine,
+            index,
+            `${comparedRole} line amount ${comparedLineAmountValue} differs from ${referenceRole} line amount ${referenceLineAmountValue}`,
+            `${referenceRole} line amount ${referenceLineAmountValue}`,
+            `${comparedRole} line amount ${comparedLineAmountValue}`
+          )
+        );
       }
     }
   }
@@ -1767,5 +2514,42 @@ export function verifyCaseDocuments(
     if (mismatch) mismatches.push(mismatch);
   }
 
-  return [...mismatches, ...verifyEWayBillValidity(docs), ...verifyCommercialLineItems(docs)];
+  return [...mismatches, ...verifyEWayBillValidity(docs), ...verifyCommercialLineItems(docs), ...shipmentMassChecks(docs).mismatches, ...arithmeticChecks(docs)];
+}
+
+function verificationCoverage(docs: CaseDoc[], options: ComparisonOptions) {
+  const checks: ReturnType<typeof shipmentMassChecks>["checks"] = [];
+  for (const field of PRIMARY_COMPARISON_FIELDS) {
+    const participants=docs.filter(doc=>shouldExpectField(doc,field) && isComparableFieldValue(field,getComparableFieldValue(doc,field),options));
+    if (!participants.length) continue;
+    const mismatch=participants.length>=2 ? buildMismatch(field,docs,options) : null;
+    checks.push({key:`field:${field}`,label:field,status:participants.length<2?'not_checked':mismatch?'failed':'passed',detail:participants.length<2?'Only one comparable observation is available.':mismatch?'Conflicting packet observations require review.':'Reconciled within this shipment and commercial leg.',documentIds:participants.map(doc=>doc.id)});
+  }
+  for (const eway of docs.filter(doc=>doc.type==='E-Way Bill')) {
+    const validity=evidenceTimestamp(eway.fields.validityDate,true);
+    const arrivals=docs.filter(doc=>['Receiving Record','Weighment Slip','Delivery Note','Delivery Challan'].includes(doc.type)).filter(doc=>evidenceTimestamp(doc.fields.arrivalDate || doc.fields.documentDate)!==null);
+    const failures=verifyEWayBillValidity(docs).filter(m=>m.values.some(v=>v.docId===eway.id));
+    checks.push({key:`expiry:${eway.id}`,label:'E-way validity at arrival',status:failures.length?'failed':validity===null || !arrivals.length?'not_checked':'passed',detail:failures.length?'Shipment evidence is later than expiry or generation is after expiry.':validity===null || !arrivals.length?'Validity or arrival evidence is missing or unclear.':'Arrival evidence is within the printed validity (IST unless an offset is printed).',documentIds:[eway.id,...arrivals.map(doc=>doc.id)]});
+  }
+  return [...checks,...shipmentMassChecks(docs).checks];
+}
+
+export function verifyGroupedCaseDocuments(
+  docs: CaseDoc[],
+  comparisonOptions: ComparisonOptions = DEFAULT_COMPARISON_OPTIONS
+): GroupedVerificationResult {
+  const groups = groupDocumentsForVerification(docs, comparisonOptions);
+  const mismatches = groups.flatMap(({ docs: groupDocs, group }) => {
+    const comparisonDocs = documentsForRoleSelectedComparison(groupDocs, group.roleSelection ?? null);
+    return verifyCaseDocuments(comparisonDocs, comparisonOptions).map((mismatch) => ({
+      ...mismatch,
+      id: `${group.groupId}-${mismatch.id}`,
+    }));
+  });
+
+  return {
+    groups: groups.map(({ group }) => group),
+    mismatches,
+    checks: groups.flatMap(({docs:groupDocs,group})=>verificationCoverage(documentsForRoleSelectedComparison(groupDocs,group.roleSelection || null),comparisonOptions).map(check=>({...check,key:`${group.groupId}:${check.key}`}))),
+  };
 }

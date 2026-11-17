@@ -73,6 +73,7 @@ type PreparedCaseGroup = {
   mismatches: Mismatch[];
   termsChecklist: unknown[];
   verificationGroups: unknown[];
+  verificationChecks: unknown[];
   summary: ReturnType<typeof summarizeCase>;
   displayName: string;
 };
@@ -188,7 +189,8 @@ async function insertCaseDocumentsAndMismatches(
   supabase: ReturnType<typeof createSupabaseAdminClient>,
   caseId: string,
   documents: CaseDoc[],
-  mismatches: Mismatch[]
+  mismatches: Mismatch[],
+  previousRows?: {documentIds:string[];mismatchIds:string[]}
 ) {
   const documentRows = documents.map((document) => ({
     case_id: caseId,
@@ -219,6 +221,15 @@ async function insertCaseDocumentsAndMismatches(
 
     const { error } = await supabase.from("packet_mismatches").insert(mismatchRows);
     if (error) throw error;
+  }
+  // Keep the previous completed evidence through extraction/review and failed
+  // inserts. Delete only the rows observed by this run after both new sets save.
+  if (previousRows) {
+    const results=await Promise.all([
+      previousRows.documentIds.length ? supabase.from("packet_documents").delete().in("id",previousRows.documentIds) : Promise.resolve({error:null}),
+      previousRows.mismatchIds.length ? supabase.from("packet_mismatches").delete().in("id",previousRows.mismatchIds) : Promise.resolve({error:null}),
+    ]);
+    for (const result of results) if(result.error) throw result.error;
   }
 }
 
@@ -422,6 +433,8 @@ export async function POST(
       extractionMs: 0,
       reviewMs: 0,
       finalizeMs: 0,
+      termsMs: 0,
+      persistenceMs: 0,
       totalMs: 0,
     };
     await updateCurrentJob({
@@ -468,12 +481,11 @@ export async function POST(
     const [
       { data: existingDocuments, error: existingDocumentsError },
       { data: caseFiles, error: caseFilesError },
-      { error: documentDeleteError },
-      { error: mismatchDeleteError },
+      { data: existingMismatches, error: existingMismatchesError },
     ] = await Promise.all([
       supabase
         .from("packet_documents")
-        .select("client_document_id, source_file_name, source_hint, document_type, title, extracted_fields")
+        .select("id, client_document_id, source_file_name, source_hint, document_type, title, extracted_fields")
         .eq("case_id", job.case_id),
       supabase
         .from("packet_case_files")
@@ -481,14 +493,13 @@ export async function POST(
           "id, original_name, storage_asset_id, content_sha256, storage_bucket, storage_path, mime_type, size_bytes"
         )
         .eq("case_id", job.case_id),
-      supabase.from("packet_documents").delete().eq("case_id", job.case_id),
-      supabase.from("packet_mismatches").delete().eq("case_id", job.case_id),
+      supabase.from("packet_mismatches").select("id").eq("case_id",job.case_id),
     ]);
 
     if (existingDocumentsError) throw existingDocumentsError;
     if (caseFilesError) throw caseFilesError;
-    if (documentDeleteError) throw documentDeleteError;
-    if (mismatchDeleteError) throw mismatchDeleteError;
+    if (existingMismatchesError) throw existingMismatchesError;
+    const previousRows={documentIds:(existingDocuments || []).map(row=>row.id),mismatchIds:(existingMismatches || []).map(row=>row.id)};
     const storedCaseFiles = (caseFiles ?? []) as StoredCaseFileRow[];
     const uploadCount = storedCaseFiles.length || caseRow.upload_count;
 
@@ -559,6 +570,7 @@ export async function POST(
           mismatches: groupMismatches,
           termsChecklist: groupTermsCompliance.checklist,
           verificationGroups: groupBaseVerified.verificationGroups,
+          verificationChecks: groupBaseVerified.verificationChecks,
           summary: groupSummary,
           displayName: groupDisplayName,
         });
@@ -588,6 +600,7 @@ export async function POST(
               ...existingMeta,
               draft: false,
               analyzedAt: new Date().toISOString(),
+            analysisHistory: [...(Array.isArray(existingMeta.analysisHistory)?existingMeta.analysisHistory:[]),{jobId:id,at:new Date().toISOString(),mode:analysisMode,documentCount:group.documents.length,mismatchCount:group.mismatches.length}].slice(-20),
               caseCategory: group.summary.category,
               packetCategory: group.summary.packetCategory,
               documentTypes: group.summary.documentTypes,
@@ -596,6 +609,7 @@ export async function POST(
               analysisMode,
               comparisonOptions: processed.comparisonOptions,
               verificationGroups: group.verificationGroups,
+              verificationChecks: group.verificationChecks,
               termsComplianceChecklist: group.termsChecklist,
               termsComplianceMismatchMode: TERMS_COMPLIANCE_MISMATCH_MODE,
               extractionReview: extractionReview.review,
@@ -635,6 +649,7 @@ export async function POST(
             ...(originalFingerprint ? { splitSourceUploadFingerprint: originalFingerprint } : {}),
             draft: false,
             analyzedAt: new Date().toISOString(),
+            analysisHistory: [...(Array.isArray(existingMeta.analysisHistory)?existingMeta.analysisHistory:[]),{jobId:id,at:new Date().toISOString(),mode:analysisMode,documentCount:group.documents.length,mismatchCount:group.mismatches.length}].slice(-20),
             caseCategory: group.summary.category,
             packetCategory: group.summary.packetCategory,
             documentTypes: group.summary.documentTypes,
@@ -643,6 +658,7 @@ export async function POST(
             analysisMode,
             comparisonOptions: processed.comparisonOptions,
             verificationGroups: group.verificationGroups,
+              verificationChecks: group.verificationChecks,
             termsComplianceChecklist: group.termsChecklist,
             termsComplianceMismatchMode: TERMS_COMPLIANCE_MISMATCH_MODE,
             extractionReview: extractionReview.review,
@@ -664,7 +680,7 @@ export async function POST(
       };
 
       const [primaryGroup, ...siblingGroups] = preparedGroups;
-      await insertCaseDocumentsAndMismatches(supabase, primaryGroup.caseId, primaryGroup.documents, primaryGroup.mismatches);
+      await insertCaseDocumentsAndMismatches(supabase, primaryGroup.caseId, primaryGroup.documents, primaryGroup.mismatches, previousRows);
       const { error: primaryUpdateError } = await updateCaseFromGroup(primaryGroup, uploadCount);
       if (primaryUpdateError) throw primaryUpdateError;
 
@@ -703,7 +719,10 @@ export async function POST(
     }
 
     const baseVerified = verifyProcessedDocuments(documents, processed.comparisonOptions);
+    await updateCurrentJob({stage:"Checking document terms",progress:96});
+    const termsStartedAt=Date.now();
     const termsCompliance = await assessCaseTermsComplianceDetailed(documents);
+    performance.termsMs=Date.now()-termsStartedAt;
     const verified = {
       ...baseVerified,
       mismatches: [...baseVerified.mismatches, ...termsCompliance.mismatches],
@@ -711,7 +730,9 @@ export async function POST(
     const summary = summarizeCase(documents, verified.mismatches, fieldConfiguration);
     const displayName = await resolveCaseDisplayNameWithAI(documents, summary);
 
-    await insertCaseDocumentsAndMismatches(supabase, job.case_id, documents, verified.mismatches);
+    await updateCurrentJob({stage:"Saving verified results",progress:98});
+    const savingStartedAt=Date.now();
+    await insertCaseDocumentsAndMismatches(supabase, job.case_id, documents, verified.mismatches, previousRows);
 
     await deleteDuplicateAnalysisRows(job.case_id);
     await assertCurrentRun();
@@ -741,6 +762,8 @@ export async function POST(
           analysisMode,
           comparisonOptions: processed.comparisonOptions,
           verificationGroups: verified.verificationGroups,
+          verificationChecks: verified.verificationChecks,
+          analysisHistory: [...(Array.isArray(existingMeta.analysisHistory)?existingMeta.analysisHistory:[]),{jobId:id,at:new Date().toISOString(),mode:analysisMode,documentCount:documents.length,mismatchCount:verified.mismatches.length}].slice(-20),
           termsComplianceChecklist: termsCompliance.checklist,
           termsComplianceMismatchMode: TERMS_COMPLIANCE_MISMATCH_MODE,
           extractionReview: extractionReview.review,
@@ -753,6 +776,7 @@ export async function POST(
       throw updateCaseError;
     }
 
+    performance.persistenceMs=Date.now()-savingStartedAt;
     performance.finalizeMs = Date.now() - finalizeStartedAt;
     performance.totalMs = Date.now() - runStartedAt;
     console.info("[packet-performance]", JSON.stringify({ jobId: id, caseId: job.case_id, analysisMode, ...performance }));

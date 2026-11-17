@@ -7,6 +7,21 @@ export type FieldDefinition = {
 };
 
 export const FIELD_DEFINITIONS: FieldDefinition[] = [
+  { key: 'arrivalDate', label: 'Vehicle Arrival / Gate Entry' },
+  { key: 'departureDate', label: 'Vehicle Exit' },
+  { key: 'driverPhone', label: 'Driver Phone' },
+  { key: 'transporterId', label: 'Transporter ID' },
+  { key: 'transportDocumentDate', label: 'Transport / LR Date' },
+  { key: 'consolidatedEwayNumber', label: 'Consolidated E-Way Bill Number' },
+  { key: 'consolidatedEwayDate', label: 'Consolidated E-Way Bill Date' },
+  { key: 'receiptDocNumber', label: 'Receipt Document Number' },
+  { key: 'receiptDate', label: 'Receipt Date / Time' },
+  { key: 'receiptStatus', label: 'Receipt Status' },
+  { key: 'fromPlace', label: 'Dispatch Place' },
+  { key: 'toPlace', label: 'Destination Place' },
+  { key: 'supplierAddress', label: 'Supplier Address' },
+  { key: 'buyerAddress', label: 'Buyer Address' },
+
   { key: 'poNumber', label: 'PO Number', important: true },
   { key: 'poAmendmentNumber', label: 'PO Amendment Number' },
   { key: 'invoiceNumber', label: 'Invoice Number', important: true },
@@ -125,14 +140,8 @@ export const FIELD_DEFINITIONS: FieldDefinition[] = [
 ];
 
 export const IGNORED_PACKET_FIELD_KEYS: readonly FieldKey[] = [
-  'certificateDate',
-  'documentDate',
-  'ackDate',
-  'transactionDate',
-  'validityDate',
   'dateOfBirth',
   'itemDescription',
-  'photoTimestamp',
 ];
 
 const IGNORED_PACKET_FIELD_KEY_SET = new Set<FieldKey>(IGNORED_PACKET_FIELD_KEYS);
@@ -140,10 +149,11 @@ const REMOVED_PACKET_FIELD_KEY_SET = new Set(["materialDescription"]);
 const DOC_TYPE_IGNORED_FIELD_EXCEPTIONS: Partial<Record<DocType, readonly FieldKey[]>> = {
   Invoice: ['documentDate'],
   'Tax Invoice': ['documentDate', 'ackDate'],
-  'Delivery Note': ['documentDate'],
-  'Delivery Challan': ['documentDate'],
-  'E-Way Bill': ['documentDate', 'validityDate'],
-  'Lorry Receipt': ['documentDate'],
+  'Delivery Note': ['referenceInvoiceNumber','supplierGstin','buyerGstin','receiptNumber','receiptDocNumber','receiptDate','receiptStatus','lorryReceiptNumber','transportDocumentDate','transporterName','supplierAddress','buyerAddress','documentDate'],
+  'Delivery Challan': ['referenceInvoiceNumber','supplierGstin','buyerGstin','receiptNumber','receiptDocNumber','receiptDate','receiptStatus','lorryReceiptNumber','transportDocumentDate','transporterName','supplierAddress','buyerAddress','documentDate'],
+  'E-Way Bill': ['shipToName','shipToGstin','transporterId','transportDocumentDate','consolidatedEwayNumber','consolidatedEwayDate','fromPlace','toPlace','supplierAddress','buyerAddress','documentDate', 'validityDate'],
+  'Lorry Receipt': ['supplierGstin','buyerGstin','transportDocumentDate','freightTerms','receiptNumber','receiptDocNumber','receiptDate','documentDate'],
+  'Receiving Record': ['referenceInvoiceNumber','transactionReference','vendorName','buyerName','supplierGstin','buyerGstin','vehicleNumber','grossWeight','tareWeight','netWeight','unit','arrivalDate','departureDate','driverName','driverPhone','receiptNumber','receiptDocNumber','receiptDate','receiptStatus','supplierAddress','buyerAddress'],
   'Weighment Slip': ['documentDate'],
 };
 
@@ -312,7 +322,7 @@ export const CORE_PACKET_GROUPS: Array<{ label: string; types: DocType[] }> = [
   },
   {
     label: 'Weight Proof',
-    types: ['Weighment Slip'],
+    types: ['Receiving Record', 'Weighment Slip'],
   },
 ];
 
@@ -484,7 +494,7 @@ export const DOC_TYPE_EXTRACTION_FIELDS: Record<DocType, FieldKey[]> = {
     'hasGateStamp',
   ],
   Receipt: ['receiptNumber', 'referenceInvoiceNumber', 'documentDate', 'paidAmount', 'currency'],
-  'Delivery Note': [
+  'Delivery Note': ['referenceInvoiceNumber','supplierGstin','buyerGstin','receiptNumber','receiptDocNumber','receiptDate','receiptStatus','lorryReceiptNumber','transportDocumentDate','transporterName','supplierAddress','buyerAddress',
     'deliveryNoteNumber',
     'referencePoNumber',
     'documentDate',
@@ -499,7 +509,7 @@ export const DOC_TYPE_EXTRACTION_FIELDS: Record<DocType, FieldKey[]> = {
     'hasStoreSignature',
     'hasGateStamp',
   ],
-  'Delivery Challan': [
+  'Delivery Challan': ['referenceInvoiceNumber','supplierGstin','buyerGstin','receiptNumber','receiptDocNumber','receiptDate','receiptStatus','lorryReceiptNumber','transportDocumentDate','transporterName','supplierAddress','buyerAddress',
     'deliveryNoteNumber',
     'referencePoNumber',
     'eWayBillNumber',
@@ -517,7 +527,7 @@ export const DOC_TYPE_EXTRACTION_FIELDS: Record<DocType, FieldKey[]> = {
     'hasStoreSignature',
     'hasGateStamp',
   ],
-  'E-Way Bill': [
+  'E-Way Bill': ['shipToName','shipToGstin','transporterId','transportDocumentDate','consolidatedEwayNumber','consolidatedEwayDate','fromPlace','toPlace','supplierAddress','buyerAddress',
     'eWayBillNumber',
     'referenceInvoiceNumber',
     'documentDate',
@@ -540,6 +550,7 @@ export const DOC_TYPE_EXTRACTION_FIELDS: Record<DocType, FieldKey[]> = {
     'igstRate',
     'totalAmount',
   ],
+  'Receiving Record': ['referenceInvoiceNumber','transactionReference','vendorName','buyerName','supplierGstin','buyerGstin','vehicleNumber','grossWeight','tareWeight','netWeight','unit','arrivalDate','departureDate','driverName','driverPhone','receiptNumber','receiptDocNumber','receiptDate','receiptStatus','supplierAddress','buyerAddress'],
   'Weighment Slip': [
     'weighmentNumber',
     'weighbridgeName',
@@ -551,7 +562,7 @@ export const DOC_TYPE_EXTRACTION_FIELDS: Record<DocType, FieldKey[]> = {
     'netWeight',
     'hasAuthorizedSignature',
   ],
-  'Lorry Receipt': [
+  'Lorry Receipt': ['supplierGstin','buyerGstin','transportDocumentDate','freightTerms','receiptNumber','receiptDocNumber','receiptDate',
     'lorryReceiptNumber',
     'eWayBillNumber',
     'documentDate',

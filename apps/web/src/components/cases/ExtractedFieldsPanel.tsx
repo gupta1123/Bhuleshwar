@@ -9,6 +9,7 @@ export type ExtractedFieldItem = {
   label: string;
   value: string;
   hasMismatch?: boolean;
+  checked?: boolean;
 };
 
 export type ExtractedFieldsPanelProps = {
@@ -106,7 +107,7 @@ export function ExtractedFieldsPanel({
                   <div className={styles.splitSectionHeader}>
                     <span className={styles.splitSectionTitle}>{section}</span>
                     {isChecks && hasAnyCheckMismatch ? (
-                      <span className={styles.splitFailureState}>Failure state</span>
+                      <span className={styles.splitFailureState}>Needs review</span>
                     ) : null}
                   </div>
 
@@ -140,8 +141,8 @@ export function ExtractedFieldsPanel({
                             <span className={styles.splitFieldLabel}>{field.label}</span>
                             {field.hasMismatch ? (
                               <span className={styles.badgeMismatch}>mismatch</span>
-                            ) : isFalseCheck ? (
-                              <span className={styles.badgeNeutral}>not detected</span>
+                            ) : isFalseCheck || !field.checked || /^(?:unclear|not detected|unknown)$/i.test(field.value) ? (
+                              <span className={styles.badgeNeutral}>{isFalseCheck ? "not detected" : "extracted · not verified"}</span>
                             ) : (
                               <span
                                 className={styles.badgeCrossChecked}

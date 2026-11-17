@@ -68,6 +68,8 @@ const PURCHASE_DOCUMENT_UDFS = {
   sha256: { name: "KalikaSourceDocumentSha256", index: 30003 },
   id: { name: "KalikaSourceDocumentId", index: 30004 },
   vehicle: { name: "KalikaVehicleNumber", index: 30005 },
+  consolidatedNumber: { name: "BhuleshwarConsolidatedEwayNumber", index: 30006 },
+  consolidatedDate: { name: "BhuleshwarConsolidatedEwayDate", index: 30007 },
 };
 const DEFAULT_TALLY_DATA_ROOT = path.join(process.env.PUBLIC || "C:\\Users\\Public", "TallyPrime", "data");
 const CURRENT_FILE = fileURLToPath(import.meta.url);
@@ -391,7 +393,7 @@ function getAttributeFromAnyElement(block, attributeName) {
 
 function getUdfTagText(block, tagName) {
   const match = block.match(
-    new RegExp(`<(?:UDF:)?${tagName}\\b[^>]*>([\\s\\S]*?)<\\/(?:UDF:)?${tagName}>`, "i")
+    new RegExp(`<(?:UDF:)?${tagName}(?:\\s[^>]*)?>([\\s\\S]*?)<\\/(?:UDF:)?${tagName}>`, "i")
   );
   return match ? cleanXmlText(match[1]) : null;
 }
@@ -1361,6 +1363,8 @@ function buildPurchaseDocumentUdfXml(payload) {
   }
   const values = [
     ...(hasDocument ? documentValues : []),
+    ...(payload?.ewayBill?.record && payload.ewayBill.consolidatedNumber ? [[PURCHASE_DOCUMENT_UDFS.consolidatedNumber,payload.ewayBill.consolidatedNumber]] : []),
+    ...(payload?.ewayBill?.record && payload.ewayBill.consolidatedDate ? [[PURCHASE_DOCUMENT_UDFS.consolidatedDate,payload.ewayBill.consolidatedDate]] : []),
     ...(String(payload?.vehicleNumber || "").trim()
       ? [[PURCHASE_DOCUMENT_UDFS.vehicle, payload.vehicleNumber]]
       : []),
@@ -1421,7 +1425,7 @@ function buildPurchaseEwayBillXml(ewayBill) {
   if (!/^\d{12}$/.test(number) || !date) return "";
   const value = (input) => escapeXml(String(input ?? "").trim());
   const consignee = ewayBill.consignee || {};
-  const toAddress = consignee.address || "";
+  const toAddress = consignee.address?.length ? consignee.address : ewayBill.toAddress || "";
   const toPlace = consignee.place || ewayBill.toPlace || "";
   const toPincode = consignee.pincode || ewayBill.toPincode || "";
   const toState = consignee.state || ewayBill.toState || "";
@@ -1432,7 +1436,7 @@ function buildPurchaseEwayBillXml(ewayBill) {
     "<OVRDNEWAYBILLAPPLICABILITY>No</OVRDNEWAYBILLAPPLICABILITY>",
     "<EWAYBILLDETAILS.LIST>",
     ewayBill.fromAddress ? `<CONSIGNORADDRESS.LIST TYPE="String"><CONSIGNORADDRESS>${value(ewayBill.fromAddress)}</CONSIGNORADDRESS></CONSIGNORADDRESS.LIST>` : "",
-    toAddress ? `<CONSIGNEEADDRESS.LIST TYPE="String"><CONSIGNEEADDRESS>${value(toAddress)}</CONSIGNEEADDRESS></CONSIGNEEADDRESS.LIST>` : "",
+    toAddress?.length ? `<CONSIGNEEADDRESS.LIST TYPE="String">${(Array.isArray(toAddress)?toAddress:[toAddress]).map(line=>`<CONSIGNEEADDRESS>${value(line)}</CONSIGNEEADDRESS>`).join("")}</CONSIGNEEADDRESS.LIST>` : "",
     `<BILLDATE>${date}</BILLDATE>`,
     "<DOCUMENTTYPE>Tax Invoice</DOCUMENTTYPE>",
     toPincode ? `<CONSIGNEEPINCODE>${value(toPincode)}</CONSIGNEEPINCODE>` : "",
@@ -1466,8 +1470,9 @@ function buildPurchaseEwayBillXml(ewayBill) {
 // The company's own mailing address from Tally, for the e-way bill consignee.
 const companyAddressCache = new Map();
 async function readCompanyAddress(tallyUrl, companyName) {
-  const key = String(companyName || "").trim().toLowerCase();
-  if (companyAddressCache.has(key)) return companyAddressCache.get(key);
+  const key = `${tallyUrl}|${String(companyName || "").trim().toLowerCase()}`;
+  const cached = companyAddressCache.get(key);
+  if (cached?.expiresAt > Date.now()) return cached.value;
   const xml = await exportTallyCollection(tallyUrl, {
     collectionName: "Kalika Company Address",
     tallyType: "Company",
@@ -1476,12 +1481,12 @@ async function readCompanyAddress(tallyUrl, companyName) {
     timeoutMs: 8_000,
   });
   const block = extractBlocks(xml, "COMPANY").find((candidate) =>
-    String(getTagText(candidate, "NAME") || getAttribute(candidate, "NAME") || "").trim().toLowerCase() === key
+    String(getTagText(candidate, "NAME") || getAttribute(candidate, "NAME") || "").trim().toLowerCase() === String(companyName || "").trim().toLowerCase()
   );
   // Exact <ADDRESS> lines only (not the enclosing <ADDRESS.LIST>).
   const address = block
     ? [...block.matchAll(/<ADDRESS(?:\s[^>]*)?>([\s\S]*?)<\/ADDRESS>/gi)]
-        .map((match) => cleanXmlText(match[1]).trim()).filter(Boolean).join(", ")
+        .map((match) => cleanXmlText(match[1]).trim()).filter(Boolean)
     : "";
   const result = block ? {
     address,
@@ -1490,7 +1495,7 @@ async function readCompanyAddress(tallyUrl, companyName) {
     country: getTagText(block, "COUNTRYNAME") || "",
     gstin: getTagText(block, "GSTREGISTRATIONNUMBER") || "",
   } : null;
-  companyAddressCache.set(key, result);
+  if (result) companyAddressCache.set(key, {value:result,expiresAt:Date.now()+60_000});
   return result;
 }
 
@@ -1518,7 +1523,7 @@ async function readPartyMailing(tallyUrl, companyName, ledgerName) {
     state: getTagText(block, "LEDSTATENAME") || "",
     country: getTagText(block, "COUNTRYNAME") || "",
     address: [...block.matchAll(/<ADDRESS(?:\s[^>]*)?>([\s\S]*?)<\/ADDRESS>/gi)]
-      .map((match) => cleanXmlText(match[1]).trim()).filter(Boolean).slice(0, 4),
+      .map((match) => cleanXmlText(match[1]).trim()).filter(Boolean),
   };
 }
 
@@ -2336,6 +2341,21 @@ function purchaseVoucherReadbackComparison(voucher, payload, options = {}) {
     differences.push("Vehicle number was not preserved on the Tally voucher.");
   }
 
+  const compareFields = (label,expected,actual,keys)=>{
+    if(!expected)return;
+    for(const key of keys){
+      if(expected[key]==null || String(expected[key]).trim()==="")continue;
+      const date=/date$/i.test(key);
+      const normal=value=>date?normalizeTallyDate(value):String(value??"").replace(/\s+/g," ").trim().toLowerCase();
+      if(normal(expected[key])!==normal(actual?.[key]))differences.push(`${label} ${key} was not preserved on the Tally voucher.`);
+    }
+  };
+  if(payload?.ewayBill?.record)compareFields("E-way bill",payload.ewayBill,voucher?.ewayBill,["number","date","fromAddress","toAddress","fromPlace","toPlace","fromPincode","toPincode","fromState","toState","consignorName","consigneeName","consignorGstin","consigneeGstin","transporterName","transporterId","documentNumber","documentDate","vehicleNumber","transportMode","vehicleType","distanceKm","consolidatedNumber","consolidatedDate"]);
+  compareFields("Receipt details",payload?.partyDetails,voucher?.partyDetails,["receiptNote","receiptNoteDate","receiptDocNo","carrierName","destination","lrNumber","lrDate","otherReferences","dispatchedThrough","motorVehicleNo","paymentTerms","termsOfDelivery"]);
+  compareFields("Party details",payload?.partyHeader,voucher?.partyHeader,["partyMailingName","partyGstin","partyState","partyCountry","placeOfSupply","companyName","companyGstin","companyState","companyCountry"]);
+  for(const key of ["partyAddress","companyAddress"]){
+    if(payload?.partyHeader?.[key]?.length && JSON.stringify(payload.partyHeader[key].map(v=>String(v).trim()))!==JSON.stringify(voucher?.partyHeader?.[key]||[]))differences.push(`Party details ${key} was not preserved on the Tally voucher.`);
+  }
   return differences;
 }
 
@@ -2398,7 +2418,7 @@ async function verifyPurchaseVoucherInTally(config, payload = {}, options = {}) 
       collectionName: detailed ? "Autodealer Purchase Voucher Verification" : "Autodealer Purchase Voucher Identity",
       tallyType: "Voucher",
       fetchFields: detailed
-        ? "Date,EffectiveDate,ReferenceDate,VoucherTypeName,VoucherNumber,Reference,PartyLedgerName,MasterID,AlterID,GUID,Narration,KalikaSourceDocumentPath,KalikaSourceDocumentName,KalikaSourceDocumentSha256,KalikaSourceDocumentId,KalikaVehicleNumber,UDFForLinkDocumentFile,AllLedgerEntries.*,AllLedgerEntries.BillAllocations.Name,AllLedgerEntries.BillAllocations.BillType,AllLedgerEntries.BillAllocations.BillDate,AllLedgerEntries.BillAllocations.Amount,AllInventoryEntries.*"
+        ? "Date,EffectiveDate,ReferenceDate,VoucherTypeName,VoucherNumber,Reference,PartyLedgerName,MasterID,AlterID,GUID,Narration,KalikaSourceDocumentPath,KalikaSourceDocumentName,KalikaSourceDocumentSha256,KalikaSourceDocumentId,KalikaVehicleNumber,BhuleshwarConsolidatedEwayNumber,BhuleshwarConsolidatedEwayDate,UDFForLinkDocumentFile,AllLedgerEntries.*,AllLedgerEntries.BillAllocations.Name,AllLedgerEntries.BillAllocations.BillType,AllLedgerEntries.BillAllocations.BillDate,AllLedgerEntries.BillAllocations.Amount,AllInventoryEntries.*,EWayBillDetails.*,InvoiceDelNotes.*,BasicShipDocumentNo,BasicShippedBy,BasicFinalDestination,BillOfLadingNo,BillOfLadingDate,BasicShipVesselNo,BasicDueDateOfPymt,BasicOrderRef,BasicOrderTerms,TransporterName,PartyMailingName,PartyGSTIN,StateName,CountryOfResidence,PlaceOfSupply,Address.*,CmpGSTIN,CmpGSTState,BasicBuyerName,BasicBuyerAddress.*,ConsigneeGSTIN,ConsigneeStateName"
         : "Date,VoucherTypeName,VoucherNumber,Reference,PartyLedgerName,MasterID,GUID",
       companyName,
       dateFrom,
@@ -2783,8 +2803,14 @@ async function postPurchaseVoucher(tallyUrl, payload, companyName, options = {})
   // be read, the e-way bill's Ship To place/PIN are used instead.
   let postingPayload = numberedPayload;
   const companyAddress = await readCompanyAddress(tallyUrl, companyName).catch(() => null);
+  if (!companyAddress || (payload?.buyerGstin && !companyAddress.gstin)) {
+    throw new Error("Could not verify the selected Tally company GST registration. Refresh the company details before posting.");
+  }
+  if (payload?.buyerGstin && companyAddress?.gstin && normalizeLooseName(payload.buyerGstin) !== normalizeLooseName(companyAddress.gstin)) {
+    throw new Error("The reviewed buyer GSTIN does not match the selected Tally company. Select the correct company before posting.");
+  }
   if (payload?.ewayBill && companyAddress) {
-    postingPayload = { ...numberedPayload, ewayBill: { ...payload.ewayBill, consignee: { ...companyAddress, name: companyName } } };
+    postingPayload = { ...numberedPayload, ewayBill: { ...payload.ewayBill, consignee: { address: payload.ewayBill.toAddress ? [payload.ewayBill.toAddress] : companyAddress.address, name: payload.ewayBill.consigneeName || companyName, place: payload.ewayBill.toPlace || companyAddress.place, pincode: payload.ewayBill.toPincode || companyAddress.pincode, state: payload.ewayBill.toState || companyAddress.state } } };
   }
   // Supplier mailing name/GSTIN/state and the company's own details go in the voucher
   // header; the e-way bill and Party Details screens read them from there.
@@ -2794,15 +2820,15 @@ async function postPurchaseVoucher(tallyUrl, payload, companyName, options = {})
     partyHeader: {
       partyMailingName: partyMailing?.mailingName || payload?.supplierLedgerName,
       partyGstin: partyMailing?.gstin || payload?.supplierGstin,
-      partyState: partyMailing?.state,
+      partyState: partyMailing?.state || payload?.ewayBill?.fromState,
       partyCountry: partyMailing?.country || "India",
-      partyAddress: partyMailing?.address,
-      placeOfSupply: companyAddress?.state,
+      partyAddress: partyMailing?.address?.length ? partyMailing.address : payload?.ewayBill?.fromAddress ? [payload.ewayBill.fromAddress] : [],
+      placeOfSupply: companyAddress?.state || payload?.ewayBill?.toState,
       companyName,
-      companyGstin: companyAddress?.gstin,
-      companyState: companyAddress?.state,
+      companyGstin: companyAddress?.gstin || payload?.buyerGstin,
+      companyState: companyAddress?.state || payload?.ewayBill?.toState,
       companyCountry: companyAddress?.country || "India",
-      companyAddress: companyAddress?.address ? [companyAddress.address] : [],
+      companyAddress: companyAddress?.address?.length ? companyAddress.address : payload?.ewayBill?.toAddress ? [payload.ewayBill.toAddress] : [],
     },
   };
   let xml = buildPurchaseVoucherXml(postingPayload, companyName);
@@ -4101,6 +4127,11 @@ function toVoucher(block) {
     referenceDate: getTagText(block, "REFERENCEDATE"),
     narration: getTagText(block, "NARRATION"),
     partyLedgerName: getTagText(block, "PARTYLEDGERNAME"),
+    ewayBill: (()=>{const e=extractBlocks(block,"EWAYBILLDETAILS.LIST")[0] || "";const t=extractBlocks(e,"TRANSPORTDETAILS.LIST")[0] || "";return {
+      consolidatedNumber:getUdfTagText(block,"BHULESHWARCONSOLIDATEDEWAYNUMBER"),consolidatedDate:getUdfTagText(block,"BHULESHWARCONSOLIDATEDEWAYDATE"),fromAddress:[...e.matchAll(/<CONSIGNORADDRESS(?:\s[^>]*)?>([\s\S]*?)<\/CONSIGNORADDRESS>/gi)].map(m=>cleanXmlText(m[1])).join(", "),toAddress:[...e.matchAll(/<CONSIGNEEADDRESS(?:\s[^>]*)?>([\s\S]*?)<\/CONSIGNEEADDRESS>/gi)].map(m=>cleanXmlText(m[1])).join(", "),fromPincode:getTagText(e,"CONSIGNORPINCODE"),toPincode:getTagText(e,"CONSIGNEEPINCODE"),transportMode:getTagText(t,"TRANSPORTMODE"),vehicleType:getTagText(t,"VEHICLETYPE"),distanceKm:getTagText(t,"DISTANCE"),number:getTagText(e,"BILLNUMBER"),date:getTagText(e,"BILLDATE"),fromPlace:getTagText(e,"CONSIGNORPLACE"),toPlace:getTagText(e,"CONSIGNEEPLACE"),fromState:getTagText(e,"CONSIGNORSTATENAME"),toState:getTagText(e,"CONSIGNEESTATENAME"),consignorName:getTagText(e,"CONSIGNORNAME"),consigneeName:getTagText(e,"CONSIGNEENAME"),consignorGstin:getTagText(e,"CONSIGNORGSTIN"),consigneeGstin:getTagText(e,"CONSIGNEEGSTIN"),transporterName:getTagText(t,"TRANSPORTERNAME"),transporterId:getTagText(t,"TRANSPORTERID"),documentNumber:getTagText(t,"DOCUMENTNUMBER"),documentDate:getTagText(t,"DOCUMENTDATE"),vehicleNumber:getTagText(t,"VEHICLENUMBER")};})(),
+    partyDetails: {termsOfDelivery:getTagText(block,"BASICORDERTERMS"),receiptNoteDate:getTagText(block,"BASICSHIPPINGDATE"),dispatchedThrough:getTagText(block,"BASICSHIPPEDBY"),motorVehicleNo:getTagText(block,"BASICSHIPVESSELNO"),paymentTerms:getTagText(block,"BASICDUEDATEOFPYMT"),receiptNote:getTagText(block,"BASICSHIPDELIVERYNOTE"),receiptDocNo:getTagText(block,"BASICSHIPDOCUMENTNO"),carrierName:getTagText(block,"TRANSPORTERNAME"),destination:getTagText(block,"BASICFINALDESTINATION"),lrNumber:getTagText(block,"BILLOFLADINGNO"),lrDate:getTagText(block,"BILLOFLADINGDATE"),otherReferences:getTagText(block,"BASICORDERREF")},
+    partyHeader: {partyMailingName:getTagText(block,"PARTYMAILINGNAME"),partyCountry:getTagText(block,"COUNTRYOFRESIDENCE"),placeOfSupply:getTagText(block,"PLACEOFSUPPLY"),companyName:getTagText(block,"BASICBUYERNAME"),companyCountry:getTagText(block,"CONSIGNEECOUNTRYNAME"),partyGstin:getTagText(block,"PARTYGSTIN"),partyState:getTagText(block,"STATENAME"),companyGstin:getTagText(block,"CMPGSTIN"),companyState:getTagText(block,"CMPGSTSTATE"),partyAddress:extractBlocks(block,"ADDRESS.LIST").flatMap(b=>[...b.matchAll(/<ADDRESS(?:\s[^>]*)?>([\s\S]*?)<\/ADDRESS>/gi)].map(m=>cleanXmlText(m[1]))),companyAddress:[...block.matchAll(/<BASICBUYERADDRESS(?:\s[^>]*)?>([\s\S]*?)<\/BASICBUYERADDRESS>/gi)].map(m=>cleanXmlText(m[1]))},
+
     ledgerNames,
     ledgerEntries,
     bankReferences,
@@ -9919,9 +9950,11 @@ export {
   openBillBlockRequiresVoucherFallback,
   pairBridge,
   parseTallyImportResult,
+  parseVoucherCollection,
   purchasePayloadMasterNames,
   purchaseVoucherFinancialYearRange,
   purchaseVoucherReadbackComparison,
+  readCompanyAddress,
   parseMasterCollection,
   parseNativeLedgerRegistrationXml,
   exportNativeLedgerGstRegistrations,

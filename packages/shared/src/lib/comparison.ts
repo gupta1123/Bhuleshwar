@@ -1,4 +1,4 @@
-import type { CaseDoc, ComparisonOptions, DocType, FieldKey } from "@/types/pipeline";
+import type { CaseDoc, ComparisonOptions, DocType, FieldKey } from "../types/pipeline";
 
 export const DEFAULT_COMPARISON_OPTIONS: ComparisonOptions = {
   considerFormatting: false,
@@ -21,10 +21,9 @@ const PURCHASE_ORDER_DOC_TYPES = new Set<DocType>(["Purchase Order", "Amended Pu
 const VEHICLE_REGISTRATION_DOC_TYPES = new Set<DocType>(["Vehicle Registration Certificate"]);
 
 const COMPARISON_FIELD_ALIASES: Partial<Record<FieldKey, FieldKey>> = {
+  totalTaxableAmount: "subtotal",
   referencePoNumber: "poNumber",
   referenceInvoiceNumber: "invoiceNumber",
-  paidAmount: "totalAmount",
-  statementAmount: "totalAmount",
   registrationNumber: "vehicleNumber",
   routeFrom: "dispatchFrom",
   routeTo: "shipTo",
@@ -114,7 +113,49 @@ const FORMAT_INSENSITIVE_IDENTIFIER_FIELDS = new Set<FieldKey>([
   "fastagReference",
   "transactionReference",
 ]);
+const AMOUNT_FIELDS = new Set<FieldKey>([
+  "subtotal",
+  "taxAmount",
+  "totalAmount",
+  "paidAmount",
+  "statementAmount",
+  "freightAmount",
+  "advanceAmount",
+  "toPayAmount",
+  "openingBalance",
+  "creditAmount",
+  "debitAmount",
+  "closingBalance",
+]);
+const WEIGHT_FIELDS = new Set<FieldKey>(["grossWeight", "tareWeight", "netWeight"]);
 const COUNT_UNIT_VALUES = new Set(["nos", "no", "number", "numbers", "pcs", "piece", "pieces", "pc"]);
+
+function parseNumericValue(value: string) {
+  const compact = value.replace(/[₹$€£,\s]/g, "");
+  if (!/^-?\d+(\.\d+)?$/.test(compact)) {
+    return null;
+  }
+
+  const parsed = Number(compact);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeNumericLikeValue(value: string) {
+  const parsed = parseNumericValue(value);
+  return parsed === null ? null : parsed.toString();
+}
+
+function normalizeCurrencyLikeValue(value: string) {
+  if (/[₹$€£]/.test(value)) {
+    return "inr";
+  }
+
+  const compact = value.replace(/[^a-z]/g, "");
+  if (["inr", "rs", "rupee", "rupees", "indianrupee", "indianrupees"].includes(compact)) {
+    return "inr";
+  }
+  return null;
+}
 
 function normalizeGstinValue(value: string) {
   const compact = value.toUpperCase().replace(/[^A-Z0-9]/g, "");
@@ -137,16 +178,6 @@ function normalizeGstinValue(value: string) {
     : null;
 }
 
-function normalizeNumericLikeValue(value: string) {
-  const compact = value.replace(/[₹$€£,\s]/g, "");
-  if (!/^-?\d+(\.\d+)?$/.test(compact)) {
-    return null;
-  }
-
-  const parsed = Number(compact);
-  return Number.isFinite(parsed) ? parsed.toString() : null;
-}
-
 function normalizeUnitValue(value: string) {
   const compact = value.toLowerCase().replace(/[^a-z0-9]/g, "");
   if (COUNT_UNIT_VALUES.has(compact) || ["cyl", "cylinder", "cylinders"].includes(compact)) return "nos";
@@ -167,6 +198,96 @@ function normalizeInvoiceReferenceValue(value: string) {
   return withoutDocumentLabel || compact;
 }
 
+function getInvoiceSeriesParts(value: string | number | null | undefined, options: ComparisonOptions) {
+  const normalized = normalizeComparableValue(value, options, "invoiceNumber");
+  if (!normalized) return null;
+
+  const seriesMatch = normalized.match(/^([a-z]{1,12})(\d{6,})$/);
+  if (seriesMatch) {
+    return {
+      normalized,
+      series: seriesMatch[1],
+      body: seriesMatch[2],
+    };
+  }
+
+  if (/^\d{6,}$/.test(normalized)) {
+    return {
+      normalized,
+      series: null,
+      body: normalized,
+    };
+  }
+
+  return {
+    normalized,
+    series: null,
+    body: normalized,
+  };
+}
+
+function areInvoiceReferencesStructurallyEqual(
+  left: string | number | null | undefined,
+  right: string | number | null | undefined,
+  options: ComparisonOptions
+) {
+  const leftParts = getInvoiceSeriesParts(left, options);
+  const rightParts = getInvoiceSeriesParts(right, options);
+  if (!leftParts || !rightParts) return false;
+
+  if (leftParts.normalized === rightParts.normalized) return true;
+
+  if (leftParts.series && !rightParts.series) {
+    return leftParts.body === rightParts.normalized;
+  }
+
+  if (rightParts.series && !leftParts.series) {
+    return rightParts.body === leftParts.normalized;
+  }
+
+  return false;
+}
+
+function normalizeWeightToKg(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return null;
+
+  const raw = String(value).toLowerCase().trim();
+  if (!raw) return null;
+
+  const numericMatch = raw.replace(/,/g, "").match(/-?\d+(?:\.\d+)?/);
+  if (!numericMatch) return null;
+
+  const parsed = Number(numericMatch[0]);
+  if (!Number.isFinite(parsed)) return null;
+
+  if (/\b(?:m\.?t\.?s?\.?|metric\s*ton(?:ne)?s?|tonnes?|tons?)\b/i.test(raw)) {
+    return parsed * 1000;
+  }
+
+  return parsed;
+}
+
+function isNonComparablePlaceholder(value: string) {
+  const compact = value.toLowerCase().replace(/[^a-z0-9]/g, "");
+  if (!compact) return true;
+
+  return (
+    compact === "na" ||
+    compact === "notapplicable" ||
+    compact === "notavailable" ||
+    compact === "unknown" ||
+    compact === "unclear" ||
+    compact === "none" ||
+    compact === "nil" ||
+    compact === "illegible" ||
+    compact === "unreadable" ||
+    compact.includes("notvisible") ||
+    compact.includes("notclearlyvisible") ||
+    compact.includes("numbernotvisible") ||
+    compact.includes("platenotvisible")
+  );
+}
+
 export function normalizeComparableValue(
   value: string | number | null | undefined,
   options: ComparisonOptions = DEFAULT_COMPARISON_OPTIONS,
@@ -176,6 +297,10 @@ export function normalizeComparableValue(
 
   const raw = String(value).trim();
   if (!raw) return null;
+
+  if (isNonComparablePlaceholder(raw)) return null;
+
+  const lowerCased = raw.toLowerCase();
 
   if (fieldKey && GSTIN_FIELDS.has(fieldKey)) {
     return normalizeGstinValue(raw);
@@ -189,7 +314,6 @@ export function normalizeComparableValue(
     return normalizeInvoiceReferenceValue(raw);
   }
 
-  const lowerCased = raw.toLowerCase();
   const numericNormalized = normalizeNumericLikeValue(lowerCased);
 
   if (numericNormalized !== null) {
@@ -198,6 +322,11 @@ export function normalizeComparableValue(
 
   if (fieldKey && FORMAT_INSENSITIVE_IDENTIFIER_FIELDS.has(fieldKey)) {
     return normalizeIdentifierValue(raw);
+  }
+
+  const currencyNormalized = normalizeCurrencyLikeValue(lowerCased);
+  if (currencyNormalized !== null) {
+    return currencyNormalized;
   }
 
   if (options.considerFormatting) {
@@ -213,6 +342,33 @@ export function areComparableValuesEqual(
   options: ComparisonOptions = DEFAULT_COMPARISON_OPTIONS,
   fieldKey?: FieldKey
 ) {
+  if (fieldKey && (AMOUNT_FIELDS.has(fieldKey) || WEIGHT_FIELDS.has(fieldKey))) {
+    if (WEIGHT_FIELDS.has(fieldKey)) {
+      const leftWeight = normalizeWeightToKg(left);
+      const rightWeight = normalizeWeightToKg(right);
+      if (leftWeight !== null && rightWeight !== null) {
+        return Math.abs(leftWeight - rightWeight) <= Math.max(5, Math.abs(rightWeight) * 0.005);
+      }
+    }
+
+    const leftNumber = parseNumericValue(String(left ?? "").toLowerCase());
+    const rightNumber = parseNumericValue(String(right ?? "").toLowerCase());
+
+    if (leftNumber !== null && rightNumber !== null) {
+      const directTolerance = AMOUNT_FIELDS.has(fieldKey) ? 1 : 0.01;
+      if (Math.abs(leftNumber - rightNumber) <= Math.max(directTolerance, Math.abs(rightNumber) * 0.001)) {
+        return true;
+      }
+
+      if (fieldKey === "taxAmount") {
+        return (
+          Math.abs(leftNumber * 2 - rightNumber) <= Math.max(1, Math.abs(rightNumber) * 0.001) ||
+          Math.abs(leftNumber - rightNumber * 2) <= Math.max(1, Math.abs(leftNumber) * 0.001)
+        );
+      }
+    }
+  }
+
   const normalizedLeft = normalizeComparableValue(left, options, fieldKey);
   const normalizedRight = normalizeComparableValue(right, options, fieldKey);
 
@@ -221,6 +377,13 @@ export function areComparableValuesEqual(
   }
 
   if (normalizedLeft === normalizedRight) return true;
+
+  if (
+    (fieldKey === "invoiceNumber" || fieldKey === "referenceInvoiceNumber") &&
+    areInvoiceReferencesStructurallyEqual(left, right, options)
+  ) {
+    return true;
+  }
 
   const splitIdentifierList = (value: string | number | null | undefined) =>
     String(value ?? "")
@@ -277,6 +440,7 @@ export function getComparisonFieldKey(fieldKey: FieldKey) {
 }
 
 export function isPrimaryComparisonField(fieldKey: string) {
+  if (fieldKey === "validityDate") return true;
   const canonicalField = getComparisonFieldKey(fieldKey as FieldKey);
   return PRIMARY_COMPARISON_FIELD_SET.has(canonicalField);
 }
@@ -311,9 +475,7 @@ export function getComparableFieldValue(doc: ComparableDoc, fieldKey: FieldKey) 
       ) {
         return undefined;
       }
-      return PAYMENT_EVIDENCE_DOC_TYPES.has(doc.type)
-        ? doc.fields.paidAmount ?? doc.fields.statementAmount ?? doc.fields.totalAmount
-        : doc.fields.totalAmount ?? doc.fields.paidAmount ?? doc.fields.statementAmount;
+      return doc.fields.totalAmount;
     }
     case "vehicleNumber":
       return VEHICLE_REGISTRATION_DOC_TYPES.has(doc.type)

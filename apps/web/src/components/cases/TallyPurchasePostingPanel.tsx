@@ -220,7 +220,7 @@ function statusLabel(status: string | undefined, verificationStatus?: unknown) {
   if (status === "created" && verificationStatus === "already_in_tally") return "Already in Tally";
   const labels: Record<string, string> = {
     draft: "Draft",
-    correction_required: "Needs attention",
+    correction_required: "Awaiting review selections",
     ready_for_approval: "Ready to send",
     approved: "Approved",
     queued: "Sending to Tally",
@@ -2512,7 +2512,7 @@ export function TallyPurchasePostingPanel({
                 <div className="text-[8px] font-semibold uppercase tracking-[0.12em] text-slate-400">E-way bill</div>
                 <label
                   className="flex items-center gap-1.5 text-[10px] font-medium text-slate-600"
-                  title={"Recorded as reference; Tally's e-way bill applicability stays No. To is your company address from Tally."}
+                  title={"Recorded as reference; Tally's e-way bill applicability stays No. Reviewed delivery details are used; missing address details can come from the selected company."}
                 >
                   <input
                     checked={review.ewayBill.record}
@@ -2532,6 +2532,8 @@ export function TallyPurchasePostingPanel({
                   ["Vehicle", review.ewayBill.vehicleNumber || review.vehicleNumber || "—", false],
                   ["Distance", review.ewayBill.distanceKm ? `${review.ewayBill.distanceKm} km · ${review.ewayBill.transportMode.replace(/^\d+\s*-\s*/, "")}` : "—", false],
                   ["Consignor", review.ewayBill.consignorName || "—", false],
+                  ["Consolidated EWB", [review.ewayBill.consolidatedNumber,review.ewayBill.consolidatedDate].filter(Boolean).join(" / ") || "—", false],
+                  ["To", [review.ewayBill.toPlace,review.ewayBill.toPincode].filter(Boolean).join(" ") || "—", false],
                   ["Consignee", review.ewayBill.consigneeName || "—", false],
                   ["Transporter", review.ewayBill.transporterName || "—", false],
                   ["Transporter ID", review.ewayBill.transporterId || "—", false],
@@ -2563,6 +2565,9 @@ export function TallyPurchasePostingPanel({
                     ["fromAddress", "From address", "text"],
                     ["consigneeName", "Consignee name", "text"],
                     ["consigneeGstin", "Consignee GSTIN", "text"],
+                    ["toAddress", "To address", "text"],
+                    ["consolidatedNumber", "Consolidated e-way number", "text"],
+                    ["consolidatedDate", "Consolidated e-way date", "date"],
                     ["toPlace", "To place", "text"],
                     ["toPincode", "To PIN", "text"],
                     ["toState", "To state", "text"],

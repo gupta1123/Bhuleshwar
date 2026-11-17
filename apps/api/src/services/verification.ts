@@ -1,3 +1,4 @@
+import { normalisePacketEvidence, shipmentMassChecks, arithmeticChecks, evidenceTimestamp } from '@autodealer/shared/lib/packet-evidence';
 import type { CaseDoc, CommercialLineItem, FieldKey, Mismatch, MismatchValue } from "@/types/pipeline";
 import { getFieldKeysForDocType, shouldConsiderFieldKey } from "@/lib/document-schema";
 import {
@@ -27,6 +28,7 @@ const WEIGHT_FIELDS = new Set<FieldKey>(["grossWeight", "tareWeight", "netWeight
 const PARTY_NAME_FIELDS = new Set<FieldKey>(["vendorName", "buyerName", "transporterName", "ownerName", "driverName", "holderName"]);
 const PURCHASE_ORDER_TOTAL_FIELDS = new Set<FieldKey>(["subtotal", "taxAmount", "totalAmount"]);
 const EWAY_VALIDITY_RELATED_DOC_TYPES = new Set<CaseDoc["type"]>([
+  "Receiving Record",
   "Invoice",
   "Tax Invoice",
   "Delivery Challan",
@@ -134,6 +136,7 @@ export interface VerificationGroup {
 export interface GroupedVerificationResult {
   groups: VerificationGroup[];
   mismatches: Omit<Mismatch, "analysis" | "fixPlan">[];
+  checks: ReturnType<typeof shipmentMassChecks>["checks"];
 }
 
 export interface VerificationRoleSelection {
@@ -144,6 +147,7 @@ export interface VerificationRoleSelection {
 }
 
 function shouldExpectField(doc: CaseDoc, field: FieldKey) {
+  if (doc.type === "Receiving Record" && ["invoiceNumber","poNumber"].includes(field)) return false;
   if (PURCHASE_DOC_TYPES.has(doc.type) && PURCHASE_ORDER_TOTAL_FIELDS.has(field)) {
     return false;
   }
@@ -490,6 +494,18 @@ function getSellerChainRoleSelection(
   if (invoices.length < 2) return null;
 
   const purchaseDocs = docs.filter((doc) => PURCHASE_DOC_TYPES.has(doc.type));
+  // A legal buyer/supplier graph can establish a chain even when the PO is absent.
+  const inferredPrimary = !purchaseDocs.length ? invoices.filter(invoice => {
+    const supplier = getPartyIdentity(invoice, comparisonOptions, "supplierGstin", "vendorName");
+    return invoices.some(other => other.id !== invoice.id && partyIdentitiesMatch(getPartyIdentity(other, comparisonOptions, "buyerGstin", "buyerName"),supplier));
+  }) : [];
+  if (!purchaseDocs.length && inferredPrimary.length) {
+    const supplierIds = inferredPrimary.map(invoice=>getPartyIdentity(invoice,comparisonOptions,"supplierGstin","vendorName"));
+    const upstream = invoices.filter(invoice=>!inferredPrimary.includes(invoice) && partyIdentityMatchesAny(getPartyIdentity(invoice,comparisonOptions,"buyerGstin","buyerName"),supplierIds));
+    const refs = new Set(upstream.map(invoice=>getInvoiceReference(invoice,comparisonOptions)).filter(Boolean));
+    const context = docs.filter(doc=>upstream.includes(doc) || (getInvoiceBranchReference(doc,comparisonOptions) && refs.has(getInvoiceBranchReference(doc,comparisonOptions))));
+    if (inferredPrimary.length === 1 && upstream.length && !upstream.some(invoice=>partyIdentitiesMatch(getPartyIdentity(inferredPrimary[0],comparisonOptions,"buyerGstin","buyerName"),getPartyIdentity(invoice,comparisonOptions,"supplierGstin","vendorName")))) return {strategy:"seller_chain",primaryDocumentIds:inferredPrimary.map(doc=>doc.id),contextDocumentIds:context.map(doc=>doc.id),note:"Legal bill-to chain identified; upstream invoices are supporting evidence."};
+  }
   if (!purchaseDocs.length) return null;
 
   const purchaseBuyers = uniquePartyIdentities(
@@ -955,10 +971,10 @@ function parseDocumentDay(value: string | number | null | undefined) {
 }
 
 function getDocumentDateForValidity(doc: CaseDoc) {
-  const candidates: FieldKey[] = ["documentDate", "ackDate", "transactionDate"];
+  const candidates: FieldKey[] = ["arrivalDate", "documentDate", "ackDate", "transactionDate"];
   for (const field of candidates) {
     const value = doc.fields[field];
-    const stamp = parseDocumentDay(value);
+    const stamp = evidenceTimestamp(value);
     if (stamp !== null) return { field, value, stamp };
   }
   return null;
@@ -971,9 +987,9 @@ function verifyEWayBillValidity(docs: CaseDoc[]): Omit<Mismatch, "analysis" | "f
 
   for (const eWayBill of eWayBills) {
     const validUntilValue = eWayBill.fields.validityDate;
-    const validUntilStamp = parseDocumentDay(validUntilValue);
+    const validUntilStamp = evidenceTimestamp(validUntilValue, true);
     const generatedValue = eWayBill.fields.documentDate;
-    const generatedStamp = parseDocumentDay(generatedValue);
+    const generatedStamp = evidenceTimestamp(generatedValue);
 
     if (validUntilStamp !== null && generatedStamp !== null && validUntilStamp < generatedStamp) {
       mismatches.push({
@@ -1335,6 +1351,7 @@ export function groupDocumentsForVerification(
   docs: CaseDoc[],
   comparisonOptions: ComparisonOptions = DEFAULT_COMPARISON_OPTIONS
 ) {
+  docs = normalisePacketEvidence(docs);
   const parent = docs.map((_, index) => index);
 
   const find = (index: number): number => {
@@ -1403,6 +1420,23 @@ export function groupDocumentsForVerification(
       }
     }
   }
+
+  const compactRef = (value: unknown) => String(value || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+  docs.forEach((doc,index)=>{
+    if (!["Receiving Record","Weighment Slip"].includes(doc.type)) return;
+    const vehicle = compactRef(doc.fields.vehicleNumber);
+    if (!vehicle) return;
+    const reference = compactRef(doc.fields.referenceInvoiceNumber);
+    const candidates = docs.flatMap((candidate,i)=>{
+      if ((!INVOICE_DOC_TYPES.has(candidate.type) && candidate.type!=="E-Way Bill") || !candidate.sourceFileName || candidate.sourceFileName!==doc.sourceFileName) return [];
+      if (!reference && compactRef(candidate.fields.vehicleNumber)!==vehicle) return [];
+      const invoice = compactRef(candidate.fields.invoiceNumber || candidate.fields.referenceInvoiceNumber);
+      if (reference && invoice!==reference && !(reference.length>=4 && invoice.endsWith(reference))) return [];
+      return [i];
+    });
+    const roots = new Set(candidates.map(find));
+    if (roots.size===1 && candidates.length) union(index,candidates[0]);
+  });
 
   const grouped = new Map<number, CaseDoc[]>();
   docs.forEach((doc, index) => {
@@ -1866,10 +1900,12 @@ function buildLineMismatch(
       {
         docId: referenceDoc.id,
         value: referenceLine ? `${lineLabel(referenceLine, index)}: ${referenceDetail}` : `No matching ${referenceDoc.type} line`,
+        lineIndex: referenceLine ? referenceDoc.lineItems?.indexOf(referenceLine) : undefined,
       },
       {
         docId: comparedDoc.id,
         value: `${lineLabel(comparedLine, index)}: ${comparedDetail}`,
+        lineIndex: comparedDoc.lineItems?.indexOf(comparedLine),
       },
     ],
   };
@@ -2478,7 +2514,24 @@ export function verifyCaseDocuments(
     if (mismatch) mismatches.push(mismatch);
   }
 
-  return [...mismatches, ...verifyEWayBillValidity(docs), ...verifyCommercialLineItems(docs)];
+  return [...mismatches, ...verifyEWayBillValidity(docs), ...verifyCommercialLineItems(docs), ...shipmentMassChecks(docs).mismatches, ...arithmeticChecks(docs)];
+}
+
+function verificationCoverage(docs: CaseDoc[], options: ComparisonOptions) {
+  const checks: ReturnType<typeof shipmentMassChecks>["checks"] = [];
+  for (const field of PRIMARY_COMPARISON_FIELDS) {
+    const participants=docs.filter(doc=>shouldExpectField(doc,field) && isComparableFieldValue(field,getComparableFieldValue(doc,field),options));
+    if (!participants.length) continue;
+    const mismatch=participants.length>=2 ? buildMismatch(field,docs,options) : null;
+    checks.push({key:`field:${field}`,label:field,status:participants.length<2?'not_checked':mismatch?'failed':'passed',detail:participants.length<2?'Only one comparable observation is available.':mismatch?'Conflicting packet observations require review.':'Reconciled within this shipment and commercial leg.',documentIds:participants.map(doc=>doc.id)});
+  }
+  for (const eway of docs.filter(doc=>doc.type==='E-Way Bill')) {
+    const validity=evidenceTimestamp(eway.fields.validityDate,true);
+    const arrivals=docs.filter(doc=>['Receiving Record','Weighment Slip','Delivery Note','Delivery Challan'].includes(doc.type)).filter(doc=>evidenceTimestamp(doc.fields.arrivalDate || doc.fields.documentDate)!==null);
+    const failures=verifyEWayBillValidity(docs).filter(m=>m.values.some(v=>v.docId===eway.id));
+    checks.push({key:`expiry:${eway.id}`,label:'E-way validity at arrival',status:failures.length?'failed':validity===null || !arrivals.length?'not_checked':'passed',detail:failures.length?'Shipment evidence is later than expiry or generation is after expiry.':validity===null || !arrivals.length?'Validity or arrival evidence is missing or unclear.':'Arrival evidence is within the printed validity (IST unless an offset is printed).',documentIds:[eway.id,...arrivals.map(doc=>doc.id)]});
+  }
+  return [...checks,...shipmentMassChecks(docs).checks];
 }
 
 export function verifyGroupedCaseDocuments(
@@ -2488,7 +2541,6 @@ export function verifyGroupedCaseDocuments(
   const groups = groupDocumentsForVerification(docs, comparisonOptions);
   const mismatches = groups.flatMap(({ docs: groupDocs, group }) => {
     const comparisonDocs = documentsForRoleSelectedComparison(groupDocs, group.roleSelection ?? null);
-    if (comparisonDocs.length < 2) return [];
     return verifyCaseDocuments(comparisonDocs, comparisonOptions).map((mismatch) => ({
       ...mismatch,
       id: `${group.groupId}-${mismatch.id}`,
@@ -2498,5 +2550,6 @@ export function verifyGroupedCaseDocuments(
   return {
     groups: groups.map(({ group }) => group),
     mismatches,
+    checks: groups.flatMap(({docs:groupDocs,group})=>verificationCoverage(documentsForRoleSelectedComparison(groupDocs,group.roleSelection || null),comparisonOptions).map(check=>({...check,key:`${group.groupId}:${check.key}`}))),
   };
 }

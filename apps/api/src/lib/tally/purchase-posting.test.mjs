@@ -1686,8 +1686,8 @@ test("the case's e-way bill page is read for the voucher and only sent when vali
     { record: true, number: "262264097358", date: "2026-08-12", fromAddress: undefined, fromPlace: "NAGPUR", fromPincode: "440016",
       fromState: "Maharashtra", toPlace: "JALNA", toPincode: "431203", toState: "Maharashtra", transportMode: "1 - Road",
       vehicleNumber: "MH21X7266", distanceKm: "437",
-      consignorName: "", consignorGstin: "", consigneeName: "", consigneeGstin: "", transporterName: "", documentNumber: "",
-      documentDate: "", transporterId: "", vehicleType: "Regular" }
+      consignorName: "Scrap Supplier", consignorGstin: "", consigneeName: "Configured Buyer", consigneeGstin: "", transporterName: "", documentNumber: "",
+      documentDate: "", transporterId: "", vehicleType: "Regular", toAddress: eway.extracted_fields.shipTo, consolidatedNumber: "", consolidatedDate: "" }
   );
   assert.equal(result.tallyPayload.ewayBill.number, "262264097358");
 
@@ -1743,13 +1743,14 @@ test("the e-way page's generated date, transporter ID, vehicle type and LR date 
   assert.equal(result.tallyPayload.ewayBill.number, "261026550731");
 });
 
-test("Party Details are filled from the weighment slip, lorry receipt and purchase order", () => {
+test("Party Details use labelled receipt references and never substitute the weighment ticket", () => {
   const invoice = invoiceDocument();
   const doc = (id, type, extracted_fields) => ({ id, document_type: type, source_file_name: "invoice.pdf", source_hint: "invoice.pdf", title: type, extracted_fields, markdown: "" });
   const result = preparePurchasePosting({
     documents: [
       invoice,
       doc("w1", "Weighment Slip", { weighmentNumber: "WS-90114", vehicleNumber: "MH31DK4821" }),
+      doc("r1", "Receiving Record", { receiptNumber: "RN-90114", receiptDocNumber: "RD-90114" }),
       doc("l1", "Lorry Receipt", { transporterName: "Kedar Transport Co", routeTo: "Pune", lorryReceiptNumber: "LR/4417", documentDate: "2026-10-25" }),
       doc("p1", "Purchase Order", { poNumber: "BPO/26-27/0221", paymentTerms: "30 days from invoice", freightTerms: "Freight paid by buyer" }),
     ],
@@ -1759,7 +1760,8 @@ test("Party Details are filled from the weighment slip, lorry receipt and purcha
     duplicateExists: false, accountingSettings: { purchaseGoodsTdsEnabled: true, transporterTdsEnabled: true, gstTdsEnabled: false },
   });
   const party = result.tallyPayload.partyDetails;
-  assert.equal(party.receiptDocNo, "WS-90114");
+  assert.equal(party.receiptDocNo, "RD-90114");
+  assert.equal(party.receiptNote, "RN-90114");
   assert.equal(party.dispatchedThrough, "Kedar Transport Co");
   assert.equal(party.destination, "Pune");
   assert.equal(party.lrNumber, "LR/4417");

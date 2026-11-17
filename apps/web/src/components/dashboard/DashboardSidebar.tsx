@@ -92,8 +92,8 @@ export function DashboardSidebar({ user, defaultCollapsed = false }: DashboardSi
   const userRowRef = useRef<HTMLDivElement>(null);
 
   const displayUser: UserInfo = user ?? (snapshot ? {name:snapshot.member.display_name,email:snapshot.member.email} : {
-    name: "Admin",
-    email: "admin@bhuleshwar.local",
+    name: "Loading account",
+    email: "",
   });
 
   const initials = displayUser.name

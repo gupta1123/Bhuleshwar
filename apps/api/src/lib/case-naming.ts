@@ -98,7 +98,7 @@ function getInternalNameHints() {
   const configured =
     process.env.CASE_NAMING_INTERNAL_HINTS ||
     process.env.INTERNAL_COMPANY_NAMES ||
-    "kalika,kalika steel,kalika steels,kalika steel alloys,kalika steel alloys pvt ltd,kalika steel alloys private limited";
+    "bhuleshwar,bhuleshwar steel,kalika,kalika steel,kalika steels,kalika steel alloys,kalika steel alloys pvt ltd,kalika steel alloys private limited";
   return configured
     .split(",")
     .map((value) => normalizeValue(value))

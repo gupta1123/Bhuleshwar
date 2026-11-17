@@ -53,6 +53,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import {
   getComparableFieldValue,
+  getComparisonFieldKey,
   getComparisonModeLabel,
   isPrimaryComparisonField,
   readComparisonOptions,
@@ -418,7 +419,7 @@ const LINE_ITEM_COLUMNS: Array<{
   { key: "sgstRate", label: "SGST %", className: "min-w-20 text-right" },
   { key: "igstRate", label: "IGST %", className: "min-w-20 text-right" },
   { key: "taxAmount", label: "Tax", className: "min-w-24 text-right" },
-  { key: "lineTotal", label: "Total", className: "min-w-28 text-right" },
+  { key: "lineTotal", label: "Row amount (before tax)", className: "min-w-28 text-right" },
 ];
 
 const DRAFT_STAGE_SEQUENCE: PipelineStageProgress["stage"][] = [
@@ -1616,7 +1617,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
     [detail?.case.processingMeta]
   );
   const activeTermsChecklistRows = useMemo(() => {
-    if (!activeDocument || !PURCHASE_ORDER_DOCUMENT_TYPES.has(activeDocument.documentType)) {
+    if (!activeDocument) {
       return [];
     }
 
@@ -2090,7 +2091,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
                   {canRetry ? "Analysis failed" : "Case created"}
                 </div>
                 <h2 className="text-4xl font-medium tracking-tight text-[#1a1a1a] sm:text-5xl">
-                  {canRetry ? "Analysis failed" : "Ready to analyze"}
+                  {canRetry ? "Analysis failed" : isAnalyzing ? "Analysis in progress" : "Ready to analyze"}
                 </h2>
                 <p className="mx-auto text-base font-medium leading-relaxed text-[#5a5046]">
                   {canRetry
@@ -2270,9 +2271,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
       const index = getDocumentIndexDetails(document);
       const identifiers = [document.id, document.clientDocumentId, document.sourceHint, document.title]
         .filter((value): value is string => Boolean(value));
-      const extractedFieldCount = Object.values(document.extractedFields || {}).filter(
-        (val) => val !== null && val !== undefined && String(val).trim() !== ""
-      ).length;
+      const extractedFieldCount = getOrderedDocumentEntries(document.documentType,document.extractedFields || {}).length;
       const comparisonValue = documentFieldComparison
         ? getComparableFieldValue(
             { type: document.documentType as DocType, fields: document.extractedFields },
@@ -2287,7 +2286,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
       const participatesInComparisonMismatch = documentFieldComparison
         ? visibleMismatches.some(
             (mismatch) =>
-              mismatch.fieldName === documentFieldComparison.key &&
+              getComparisonFieldKey(mismatch.fieldName as FieldKey) === getComparisonFieldKey(documentFieldComparison.key as FieldKey) &&
               mismatch.values.some((entry) => Boolean(entry.docId && identifiers.includes(entry.docId)))
           )
         : false;
@@ -2393,12 +2392,18 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
       ([key, value]) => {
         const currentValue = typeof value === "string" ? value : displayValue(value);
         const fieldLabel = getDocumentFieldLabel(activeDocument?.documentType, key);
-        const hasMismatch = visibleMismatches.some((m) => m.fieldName === key);
+        const activeIds = [activeDocument?.id, activeDocument?.clientDocumentId];
+        const hasMismatch = visibleMismatches.some(m =>
+          (getComparisonFieldKey(m.fieldName as FieldKey) === getComparisonFieldKey(key as FieldKey) || (key === "hsnSac" && m.fieldName === "lineItems.hsnSacMismatch")) &&
+          m.values.some(entry=>entry.docId && activeIds.includes(entry.docId)));
+        const checks = Array.isArray(detail.case.processingMeta?.verificationChecks) ? detail.case.processingMeta.verificationChecks as Array<{key:string;status:string;documentIds:string[]}> : [];
+        const checked = checks.some(check=>check.key.endsWith(`:field:${getComparisonFieldKey(key as FieldKey)}`) && check.status==='passed' && check.documentIds.some(id=>activeIds.includes(id)));
         return {
           key,
           label: fieldLabel,
           value: currentValue || "Not detected",
           hasMismatch,
+          checked,
         };
       }
     );
@@ -2444,7 +2449,9 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
                         const cellValue = column.key === "lineNumber"
                           ? getLineItemValue(item, column.key) || String(itemIndex + 1)
                           : getLineItemValue(item, column.key);
-                        return <td key={column.key}>{cellValue ? String(cellValue) : "—"}</td>;
+                        const lineMismatchField: Partial<Record<keyof CommercialLineItem,string>>={hsnSac:"lineItems.hsnSacMismatch",quantity:"lineItems.quantityMismatch",rate:"lineItems.rateMismatch",unit:"lineItems.unitMismatch",taxableAmount:"lineItems.amountMismatch",lineTotal:"lineItems.amountMismatch"};
+                        const issue=visibleMismatches.find(m=>m.fieldName===lineMismatchField[column.key] && m.values.some(entry=>entry.docId && [activeDocument?.id,activeDocument?.clientDocumentId].includes(entry.docId) && (typeof (entry as {lineIndex?:number}).lineIndex === "number" ? (entry as {lineIndex?:number}).lineIndex === itemIndex : String(entry.value).startsWith(`${item.lineNumber || item.itemCode || item.description || item.rawText || `line ${itemIndex+1}`}:`))));
+                        return <td key={column.key} className={issue?"bg-amber-50 text-amber-900":undefined} title={issue?.analysis || undefined}>{cellValue ? String(cellValue) : "—"}{issue?<TriangleAlert className="ml-1 inline h-3 w-3" aria-label="Needs review"/>:null}</td>;
                       })}
                     </tr>
                   );
@@ -2479,13 +2486,20 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
             </article>
           ))}
           {activeTermsChecklistRows.length === 0 && unmatchedTermsIssues.length === 0 ? (
-            <div className={styles.redesignDataEmpty}>No purchase-order terms were extracted for this document.</div>
+            <div className={styles.redesignDataEmpty}>No packet-verifiable terms were extracted for this document.</div>
           ) : null}
         </div>
       </div>
     );
 
-    const dataNode = (
+    const coverage = Array.isArray(detail.case.processingMeta?.verificationChecks) ? detail.case.processingMeta.verificationChecks as Array<{key:string;label:string;status:string;detail:string;documentIds:string[]}> : [];
+    const activeChecks=coverage.filter(check=>check.documentIds.some(id=>[activeDocument?.id,activeDocument?.clientDocumentId].includes(id)));
+    const coverageNode = <details className="border-b border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+      <summary className="cursor-pointer font-semibold">Checks and evidence · {activeChecks.filter(c=>c.status==='passed').length} passed · {activeChecks.filter(c=>c.status==='failed').length} need review · {activeChecks.filter(c=>c.status==='not_checked').length} not checked</summary>
+      {activeChecks.length ? activeChecks.map(check=><p key={check.key} className="mt-1"><strong>{check.key.includes(':field:') ? getDocumentFieldLabel(activeDocument?.documentType,check.label) : check.label}: {check.status.replaceAll("_"," ")}</strong> — {check.detail}</p>) : <p className="mt-1">Coverage is unavailable for this document. Re-analyse an unapproved case to record checks. Zero mismatches alone does not mean every check passed.</p>}
+      {Array.isArray(detail.case.processingMeta?.missingDocumentGroups) && detail.case.processingMeta.missingDocumentGroups.length ? <p className="mt-1 text-amber-800">Missing evidence: {detail.case.processingMeta.missingDocumentGroups.join(", ")}</p>:null}
+    </details>;
+    const dataNode = (<div className="flex h-full min-h-0 flex-col">{coverageNode}<div className="min-h-0 flex-1">
       <ExtractedFieldsPanel
         fields={extractedFieldItems}
         lineItemCount={activeDocumentLineItems.length}
@@ -2507,7 +2521,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
         )}
         lineItemsContent={lineItemsContent}
         termsContent={termsContent}
-      />
+      /></div></div>
     );
 
     const complianceContent = (
@@ -2520,14 +2534,14 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
             <p>{row.value}</p>
             {row.evidence ? <small>{row.evidence}</small> : null}
           </article>
-        )) : <div className={styles.redesignDataEmpty}>Select a purchase order to review its compliance clauses.</div>}
+        )) : <div className={styles.redesignDataEmpty}>No packet-verifiable terms were found for this document.</div>}
       </div>
     );
 
     const activityContent = (
       <div className={styles.redesignActivityList}>
         <article><i /><time>{uploadedLabel}</time><p><strong>Case created</strong> with {detail.files.length} uploaded file{detail.files.length === 1 ? "" : "s"}.</p></article>
-        <article><i /><time>{createdDate}</time><p><strong>Packet analyzed</strong> into {displayDocuments.length} classified document{displayDocuments.length === 1 ? "" : "s"}.</p></article>
+        {Array.isArray(detail.case.processingMeta?.analysisHistory) ? (detail.case.processingMeta.analysisHistory as Array<{jobId:string;at:string;mode:string;documentCount:number;mismatchCount:number}>).map(run=><article key={run.jobId}><i /><time>{new Date(run.at).toLocaleString("en-IN")}</time><p><strong>Packet analyzed</strong> · {run.mode} · {run.documentCount} documents · {run.mismatchCount} findings.</p></article>) : <article><i /><time>Saved result</time><p><strong>Packet analyzed</strong> into {displayDocuments.length} classified documents. This older run has no recorded analysis timestamp.</p></article>}
         <article><i /><time>Current</time><p><strong>Status: {getCaseStatusLabel(detail.case.status)}</strong>{visibleMismatches.length ? ` · ${visibleMismatches.length} mismatch${visibleMismatches.length === 1 ? "" : "es"} on record.` : " · no mismatches found."}</p></article>
       </div>
     );
@@ -2548,8 +2562,16 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
           status={detail.case.status}
           showActions={Boolean(showActions)}
           decisionUpdating={decisionStatus === "updating"}
-          decisionError={decisionStatus === "error" ? decisionError : null}
+          decisionError={decisionStatus === "error" ? decisionError : analysisError}
           onDecision={(decision) => void handleCaseDecision(decision)}
+          canReanalyse={detail.case.status === "completed" && analysisStatus !== "processing"}
+          onReanalyse={async()=>{
+            try {
+              setAnalysisError(null); setAnalysisStatus("processing");
+              await enqueueCaseAnalysis(caseId,{analysisMode:"smart_split",comparisonOptions});
+              window.location.reload();
+            } catch(error) {setAnalysisStatus("error");setAnalysisError(error instanceof Error?error.message:"Could not restart analysis.");}
+          }}
           documents={redesignedDocuments}
           comparisonFieldLabel={documentFieldComparison?.label}
           activeDocumentId={activeDocumentId}
@@ -3345,7 +3367,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
                   })}
 
                   {activeTermsChecklistRows.length === 0 && unmatchedTermsIssues.length === 0 ? (
-                    <div className={styles.emptyState}>No purchase-order terms were extracted for this document.</div>
+                    <div className={styles.emptyState}>No packet-verifiable terms were extracted for this document.</div>
                   ) : null}
                 </>
               ) : null}

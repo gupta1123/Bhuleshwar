@@ -10,6 +10,8 @@ KalikaSourceDocumentName   : String : 30002
 KalikaSourceDocumentSha256 : String : 30003
 KalikaSourceDocumentId     : String : 30004
 KalikaVehicleNumber        : String : 30005
+BhuleshwarConsolidatedEwayNumber : String : 30006
+BhuleshwarConsolidatedEwayDate : String : 30007
 
 [#Form : VCH Display]
 Add : Button : KalikaOpenPurchasePdf

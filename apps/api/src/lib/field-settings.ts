@@ -59,6 +59,7 @@ export const DOC_TYPE_INFO: Record<DocType, { label: string; icon: string }> = {
   "Delivery Note": { label: "Delivery Note", icon: "Package" },
   "Delivery Challan": { label: "Delivery Challan", icon: "Truck" },
   "E-Way Bill": { label: "E-Way Bill", icon: "Route" },
+  "Receiving Record": { label: "Receiving Record", icon: "Truck" },
   "Weighment Slip": { label: "Weighment Slip", icon: "Scale" },
   "Lorry Receipt": { label: "Lorry Receipt", icon: "Truck" },
   "Vehicle Registration Certificate": { label: "RC", icon: "Car" },

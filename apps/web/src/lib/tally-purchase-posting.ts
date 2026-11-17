@@ -33,6 +33,9 @@ export type TallyPostingEwayBill = {
   number: string;
   date: string;
   fromAddress: string;
+  toAddress?: string;
+  consolidatedNumber?: string;
+  consolidatedDate?: string;
   fromPlace: string;
   fromPincode: string;
   fromState: string;

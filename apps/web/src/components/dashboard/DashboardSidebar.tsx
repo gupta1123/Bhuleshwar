@@ -14,7 +14,7 @@ import {
   Settings,
   ChevronLeft,
   PlugZap,
-  // Scale (GST Reconciliation icon) – re-add the import when restoring the entry
+  Scale,
 } from "lucide-react";
 
 import styles from "./DashboardSidebar.module.css";
@@ -53,8 +53,7 @@ const SIDEBAR_SECTIONS: SidebarSection[] = [
       { href: "/cases", label: "Case Register", icon: FolderOpen },
     ],
   },
-  // GST Reconciliation is hidden from the sidebar for client demos. Restore:
-  // { id: "gst", title: "GST", items: [{ href: "/gst", label: "GST Reconciliation", icon: Scale }] },
+  { id: "gst", title: "GST", items: [{ href: "/gst", label: "GST Reconciliation", icon: Scale }] },
   {
     id: "system",
     title: "System",

@@ -12,6 +12,7 @@ import {
 import { OverviewView, ReviewView, scopeRun } from "./GstViews";
 import { ConnectView, SettingsView, SuppliersView } from "./GstAdminViews";
 import { Alert, btn, btnPrimary, Drawer, Empty, Panel, th, td } from "./gst-ui";
+import { useTallyIndicator } from "@/components/tally/TallyStatusProvider";
 
 const TABS = ["Overview", "Review", "Suppliers", "Connect", "Settings"] as const;
 type Tab = (typeof TABS)[number];
@@ -30,6 +31,9 @@ const SOURCES = ["books", "gstr2b", "gstr2a", "gstr3b"] as const;
 const SOURCE_LABEL = { books: "Tally books", gstr2b: "GSTR-2B", gstr2a: "GSTR-2A", gstr3b: "GSTR-3B" } as const;
 
 export default function GstReconciliationPage() {
+  const { status: tallyStatus } = useTallyIndicator();
+  // Saved results are read from the server, so only the Tally actions need the connector.
+  const tallyOffline = !isGstDemo() && tallyStatus !== "connected" && tallyStatus !== "checking";
   const [scope, setScope] = useState<GstScopeInput | null>(null);
   const [tab, setTab] = useState<Tab>("Overview");
   const [bucket, setBucket] = useState("needs");
@@ -131,6 +135,11 @@ export default function GstReconciliationPage() {
   // the normal Run is the only path that can spend GST calls, and it shows the count first.
   async function sync(refreshBooks: boolean) {
     if (!scope || !chosen.length) return;
+    const needsTally = refreshBooks || chosen.some((p) => !byPeriod.get(p)?.books);
+    if (tallyOffline && needsTally) {
+      setError("Tally is not connected. Reconnect the Bhuleshwar Local Agent to read purchases from Tally. Saved results stay available.");
+      return;
+    }
     setError("");
     const total = chosen.length * (refreshBooks ? 1 : 4) + 1;
     let done = 0;
@@ -258,16 +267,22 @@ export default function GstReconciliationPage() {
           />
 
           {!scope ? (
-            <Empty icon={<Plug className="h-7 w-7" />} title="Waiting for Tally" text="Keep the Bhuleshwar Local Agent and Tally open with your company loaded. This page connects on its own." />
+            <Empty icon={<Plug className="h-7 w-7" />} title="No Tally company found" text="No Tally company has been connected to this account yet. Set up the Tally Connector (Bhuleshwar Local Agent) with your company loaded, then return here. This page picks it up on its own." action={<a href="/tally-prime?view=connection" className={btn}>Open Tally Connector</a>} />
           ) : !loaded ? (
             <div className="flex items-center gap-2.5 rounded-xl border border-[#ded8d0] bg-white px-4 py-6 text-[13px] text-[#3d3530]" aria-live="polite">
               <Loader2 className="h-4 w-4 animate-spin" />Loading your saved reconciliation…
             </div>
           ) : (
             <>
+              {tallyOffline && (
+                <Alert tone="warn">
+                  Tally is not connected, so you are viewing saved results{run ? ` (matched ${ago(run.run.createdAt)})` : ""}. Reading new data from Tally is paused.{" "}
+                  <a href="/tally-prime?view=connection" className="font-medium underline">Open Tally Connector</a>
+                </Alert>
+              )}
               {!run && !["Connect", "Settings"].includes(tab) && (
               <Panel title="Months to reconcile"
-                action={anySaved ? <button onClick={() => sync(true)} disabled={!!busy || !chosen.length} className={btn} title="Reads the selected months from Tally again and re-matches them with the saved GST data. No GST calls. Tally is busy while it runs."><RefreshCw className="h-3 w-3" />{rereadLabel}</button> : undefined}>
+                action={anySaved ? <button onClick={() => sync(true)} disabled={!!busy || !chosen.length || tallyOffline} className={btn} title="Reads the selected months from Tally again and re-matches them with the saved GST data. No GST calls. Tally is busy while it runs."><RefreshCw className="h-3 w-3" />{rereadLabel}</button> : undefined}>
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <SelectDropdown size="sm" value={String(setupYear)} onChange={(v) => setSetupYear(Number(v))} options={setupYears.map((y) => ({ value: String(y), label: String(y) }))} className="w-24" />
                   {gstStatus && (gstOk
@@ -426,7 +441,7 @@ export default function GstReconciliationPage() {
 
                   {anySaved && (
                     <p className="mt-5 border-t border-[#ece6dc] pt-4 text-[12.5px] text-[#6b6157]">
-                      Changed something in Tally? <button onClick={() => sync(true)} disabled={!!busy || !chosen.length} className="inline-flex items-center gap-1 font-medium text-[#1a1a1a] underline decoration-dotted underline-offset-2 disabled:opacity-50"><RefreshCw className="h-3 w-3" />{rereadLabel}</button>. It re-matches with the GST data already saved and makes no GST calls. Tally is busy while it runs.
+                      Changed something in Tally? <button onClick={() => sync(true)} disabled={!!busy || !chosen.length || tallyOffline} title={tallyOffline ? "Tally is not connected" : undefined} className="inline-flex items-center gap-1 font-medium text-[#1a1a1a] underline decoration-dotted underline-offset-2 disabled:opacity-50"><RefreshCw className="h-3 w-3" />{rereadLabel}</button>. It re-matches with the GST data already saved and makes no GST calls. Tally is busy while it runs.
                     </p>
                   )}
                 </Drawer>

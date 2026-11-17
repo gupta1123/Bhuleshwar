@@ -36,9 +36,11 @@ export async function resolveGstScope(): Promise<GstScopeInput | null> {
     const response = await apiFetch("/api/tally/connections", { cache: "no-store" });
     if (!response.ok) return null;
     const payload = await response.json() as { connections?: ConnectionSummary[] };
-    const live = (payload.connections ?? []).filter((c) => c.id && c.lastCompanyName && c.bridgeConnected && c.companyLoaded);
+    const known = (payload.connections ?? []).filter((c) => c.id && c.lastCompanyName);
+    const live = known.filter((c) => c.bridgeConnected && c.companyLoaded);
     const preferred = readPreferredTallyConnectionId();
-    const pick = live.find((c) => c.id === preferred) ?? live[0];
+    // No live connector: still open the saved reconciliation for the last company this account used.
+    const pick = live.find((c) => c.id === preferred) ?? live[0] ?? known.find((c) => c.id === preferred) ?? known[0];
     if (!pick?.id || !pick.lastCompanyName) return null;
     return { connectionId: pick.id, companyName: pick.lastCompanyName };
   } catch {

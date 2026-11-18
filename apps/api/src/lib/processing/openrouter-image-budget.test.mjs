@@ -68,8 +68,19 @@ test('JSON requests enforce an object and permanent provider errors stop immedia
     assert.equal(JSON.parse(options.body).response_format.type, 'json_object');
     return Response.json({ error: { message: 'Unsupported request' } }, { status: 400 });
   };
-  await assert.rejects(callOpenRouter([], { jsonMode: true, maxRetries: 2 }), /Unsupported request/);
+  await assert.rejects(callOpenRouter([], { model: "google/gemini-2.5-flash", jsonMode: true, maxRetries: 2 }), /Unsupported request/);
   assert.equal(calls, 1);
   globalThis.fetch = async () => Response.json({ choices: [{ message: { content: '[]' } }] });
   await assert.rejects(callOpenRouter([], { jsonMode: true, maxRetries: 0 }), /JSON object/);
+});
+
+test('Flash Image uses prompt JSON and validates the returned object', async (t) => {
+  const previous = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previous; });
+  globalThis.fetch = async (_url, options) => {
+    assert.equal(JSON.parse(options.body).response_format, undefined);
+    return Response.json({ choices: [{ message: { content: '```json\n{"value":123}\n```' } }] });
+  };
+  const response = await callOpenRouter([], { model: 'google/gemini-2.5-flash-image', jsonMode: true, maxRetries: 0 });
+  assert.deepEqual(JSON.parse(response), { value: 123 });
 });

@@ -86,9 +86,10 @@ function getApprovalPill(status: string) {
         className: "bg-[#ebf5ee] text-[#1b4332] border-[#c3dfcb]",
         dotColor: "bg-[#2d6a4f]",
       };
+    case "failed":
     case "rejected":
       return {
-        label: "Rejected",
+        label: status.toLowerCase() === "failed" ? "Analysis failed" : "Rejected",
         className: "bg-[#fbf0ef] text-[#8c1d18] border-[#f2c7c4]",
         dotColor: "bg-[#b91c1c]",
       };

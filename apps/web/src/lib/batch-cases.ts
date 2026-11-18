@@ -39,7 +39,11 @@ function looksLikeDateOrYear(token: string) {
 export function fileNameNumbers(name: string): string[] {
   const base = stem(name);
   if (GENERATED_NAME.test(base)) return [];
-  const runs = base.match(/\d+/g) ?? [];
+  // A fiscal year preceding the invoice serial (SGI-2627-0914) is shared across suppliers.
+  const serials = base.replace(/\b(\d{2})(\d{2})(?=[-_]\d{3,})/g, (token, start, end) =>
+    Number(end) === (Number(start) + 1) % 100 ? "" : token
+  );
+  const runs = serials.match(/\d+/g) ?? [];
   return [...new Set(runs.map((run) => run.replace(/^0+(?=\d{3})/, "")))].filter(
     (run) => run.length >= 3 && run.length <= 12 && !looksLikeDateOrYear(run)
   );

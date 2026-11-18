@@ -206,6 +206,8 @@ export async function callOpenRouter(
   const callStartedAt = Date.now();
   const maxTokens = normalizeMaxTokens(options?.maxTokens ?? OPENROUTER_MAX_OUTPUT_TOKENS);
   const model = testOverrides?.model || options?.model || OPENROUTER_MODEL;
+  // Flash Image accepts a JSON instruction but rejects response_format with HTTP 400.
+  const sendJsonFormat = options?.jsonMode && model !== "google/gemini-2.5-flash-image";
   const timeoutMs = Number.isFinite(options?.timeoutMs) && Number(options?.timeoutMs) > 0
     ? Number(options?.timeoutMs)
     : OPENROUTER_TIMEOUT_MS;
@@ -234,7 +236,7 @@ export async function callOpenRouter(
           messages,
           temperature: 0,
           ...(options?.reasoning ? { reasoning: options.reasoning } : {}),
-          ...(options?.jsonMode ? { response_format: { type: "json_object" } } : {}),
+          ...(sendJsonFormat ? { response_format: { type: "json_object" } } : {}),
           ...(maxTokens ? { max_tokens: maxTokens } : {}),
         }),
       });
@@ -267,10 +269,13 @@ export async function callOpenRouter(
       }
 
       const message = payload?.choices?.[0]?.message?.content;
-      const content = Array.isArray(message)
+      let content = Array.isArray(message)
         ? message.map((part: OpenRouterContentPart) => part?.text || "").join("\n")
         : String(message || "");
       if (options?.jsonMode) {
+        if (!sendJsonFormat) {
+          content = content.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i, "$1");
+        }
         const parsed = JSON.parse(content);
         if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
           throw new Error("Model response must be a JSON object.");

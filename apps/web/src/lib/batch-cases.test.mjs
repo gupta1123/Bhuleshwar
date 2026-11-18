@@ -39,3 +39,8 @@ test('a number shared by too many files does not group them', () => {
   const files = uploads(Array.from({ length: 8 }, (_, i) => `Ledger 5500 part ${i}.pdf`));
   assert.equal(planBatchCases(files, { undone: [], moves: {} }).length, 8);
 });
+
+test('different invoice serials in one financial year stay separate', () => {
+  assert.deepEqual(fileNameNumbers('02_Sai_SGI-2627-0914.pdf'), ['914']);
+  assert.deepEqual(fileNameNumbers('04_Utkal_USP-2627-1186.pdf'), ['1186']);
+});

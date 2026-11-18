@@ -2059,6 +2059,8 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
   ) {
     const isAnalyzing = detail.case.status === "processing" || analysisStatus === "processing";
     const canRetry = detail.case.status === "failed";
+    const storedError = detail.case.processingMeta?.lastProcessingError;
+    const failureMessage = draftFileError || analysisError || (canRetry && typeof storedError === "string" ? storedError : null);
     const stageLabel = getFriendlyAnalysisStage(analysisStage, analysisStatus);
     const readyCount = detail.files.length;
 
@@ -2099,7 +2101,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
                 </h2>
                 <p className="mx-auto text-base font-medium leading-relaxed text-[#5a5046]">
                   {canRetry
-                    ? "The previous analysis run failed. Review the error below, then retry this case analysis."
+                    ? "The previous analysis run failed. You can retry this case analysis."
                     : `This case has ${readyCount} document${readyCount === 1 ? "" : "s"} ready. Add any missing documents, then analyze to extract fields and check mismatches.`}
                 </p>
 
@@ -2130,9 +2132,9 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
                   </div>
                 )}
 
-                {((analysisStatus === "error" && analysisError) || draftFileError) && (
+                {failureMessage && (
                   <div className="mx-auto mt-4 max-w-2xl rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-medium text-red-700 shadow-sm">
-                    {draftFileError || analysisError}
+                    {failureMessage}
                   </div>
                 )}
               </div>

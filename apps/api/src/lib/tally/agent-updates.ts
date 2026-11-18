@@ -1,4 +1,4 @@
-const DEFAULT_LATEST_AGENT_VERSION = "1.2.49";
+const DEFAULT_LATEST_AGENT_VERSION = "1.2.50";
 const DEFAULT_MINIMUM_AGENT_VERSION = "1.2.49";
 const DEFAULT_RELEASE_REPOSITORY = "https://github.com/gupta1123/Bhuleshwar";
 

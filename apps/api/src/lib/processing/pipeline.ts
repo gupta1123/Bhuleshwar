@@ -115,7 +115,7 @@ const CONSIGNEE_CONTEXT_PATTERN = /\b(?:consignee|ship\s*to|ship-to|recipient)\b
 const DIRECT_BUYER_CONTEXT_PATTERN = /\b(?:buyer|bill\s*to|bill-to|customer|purchaser)\b/i;
 const STORE_EVIDENCE_DOC_TYPES = new Set<DocType>(["Invoice", "Tax Invoice", "Delivery Challan", "Delivery Note"]);
 const STAMP_SIGNATURE_EXTRACTION_INSTRUCTION =
-  "For stamp/signature presence fields, return only Yes, No, or Unclear. Use Yes only when the mark is visibly present, No only when the relevant area is visible and clearly absent, otherwise Unclear. For invoice/delivery receiving evidence, a buyer or receiver stamp block such as Kalika, SMS Division, Store, Gate, or Security with Date and Name & Sign lines means hasStoreStamp=Yes; if handwritten marks or signatures appear on those Name & Sign lines, hasStoreSignature=Yes. Do not confuse the supplier Authorized Signatory with store signature. ";
+  "For stamp/signature presence fields, return only Yes, No, or Unclear. Use Yes only when the mark is visibly present, No only when the relevant area is visible and clearly absent, otherwise Unclear. For invoice/delivery receiving evidence, a buyer or receiver stamp block identifying the receiving company, receiving division, store, gate, or security desk with Date and Name & Sign lines means hasStoreStamp=Yes; if handwritten marks or signatures appear on those Name & Sign lines, hasStoreSignature=Yes. Do not confuse the supplier Authorized Signatory with store signature. ";
 const CLASSIFICATION_EVIDENCE_INSTRUCTION =
   "Gate/Trishul records with Transaction ID, Vehicle Entry Date and gross/tare/net weights are Receiving Record, never Invoice. Classify from the visible document layout, labels, and purpose. Use the filename only as a fallback when document evidence is missing or inconclusive. If the visible document type conflicts with the filename, trust the visible document. Never invent a document type from the filename alone. ";
 const EXTRACTION_EVIDENCE_INSTRUCTION =
@@ -1560,7 +1560,7 @@ export async function reviewAndCorrectExtractedDocuments(
             "Do not automatically move an invalid e-way value into referenceInvoiceNumber unless the visible page explicitly labels it as Doc No, Document No, Invoice No, Tax Invoice No, or Delivery Challan No for that same document. " +
             "If a page is a PASS OUT DOCUMENT, delivery summary, logistics summary, or contains multiple delivery refs such as EM5032/EM5033, avoid creating a strong invoice reference unless the label and line amounts clearly support that exact invoice. " +
             "Preserve legal Bill To buyer separately from physical ship-to/consignee; retain each explicitly labelled legal buyer. " +
-            "For GST, preserve visible tax percentages separately from tax amounts. Same Maharashtra/Kalika state code 27 means CGST+SGST split unless the document explicitly shows IGST. " +
+            "For GST, preserve visible tax percentages separately from tax amounts. Record the printed tax component labels, rates and amounts independently. Never change a printed value to match an expected tax treatment. " +
             "Return JSON shape: {\"corrections\":[{\"docId\":\"...\",\"documentType\":\"Invoice\",\"fields\":{\"fieldKey\":\"value or null\"},\"unsetFields\":[\"fieldKey\"],\"quarantineFields\":[{\"field\":\"fieldKey\",\"reason\":\"...\"}],\"lineItems\":[...],\"reason\":\"concise evidence\"}],\"notes\":[\"...\"]}. " +
             "Use null in fields or quarantineFields to remove unsupported values. Use empty corrections when extraction is already strong.",
         },
@@ -5213,7 +5213,7 @@ async function extractDataFromImagePages(params: {
             lineItemInstruction +
             STAMP_SIGNATURE_EXTRACTION_INSTRUCTION +
             "For FASTag Toll Proof documents, extract statement reference, customer ID/name, statement period/date, vehicle number, tag account number, trip count, opening/credit/debit/closing balances, recharge/payment amount, toll plaza, and a compact toll transaction summary using the canonical FASTag keys. " +
-            "For seller-issued documents, vendorName is the issuing supplier/seller/consignor and buyerName is the receiving buyer, excluding non-Kalika consignee/ship-to/recipient parties. " +
+            "For seller-issued documents, vendorName is the issuing supplier/seller/consignor and buyerName is the receiving buyer, use the explicitly labelled bill-to party for buyerName and preserve a different consignee or ship-to party separately. " +
             "For Purchase Order or Amended Purchase Order documents, vendorName is the supplier/vendor receiving the order and buyerName is the purchaser issuing the order.",
         },
         {
@@ -5355,7 +5355,7 @@ async function extractDataFromTextBatch(params: {
           documentSpecificInstruction +
           lineItemInstruction +
           STAMP_SIGNATURE_EXTRACTION_INSTRUCTION +
-          "Use only information present in the visible text. For seller-issued documents, vendorName is the issuing supplier and buyerName is the receiving buyer, excluding non-Kalika consignee/ship-to/recipient parties. " +
+          "Use only information present in the visible text. For seller-issued documents, vendorName is the issuing supplier and buyerName is the receiving buyer, use the explicitly labelled bill-to party for buyerName and preserve a different consignee or ship-to party separately. " +
           "For Purchase Order or Amended Purchase Order documents, vendorName is the supplier/vendor receiving the order and buyerName is the purchaser issuing the order.",
       },
       {

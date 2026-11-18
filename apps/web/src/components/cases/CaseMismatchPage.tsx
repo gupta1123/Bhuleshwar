@@ -494,7 +494,7 @@ function getReviewerHint(mismatch: MismatchRecord, evidence?: MismatchEvidence[]
       .split("")
       .filter((char, index) => char !== uniqueValues[1][index]).length;
     if (diffCount > 0 && diffCount <= 2) {
-      return `${diffCount}-character difference. Likely OCR or formatting—verify the source.`;
+      return `${diffCount}-character difference. Verify the source before deciding whether this is an extraction error or a document conflict.`;
     }
   }
 
@@ -833,7 +833,7 @@ export function CaseMismatchPage({ caseId }: { caseId: string }) {
         (mismatch) =>
           mismatch.fieldName === TERMS_COMPLIANCE_FIELD ||
           isLineItemMismatchField(mismatch.fieldName) ||
-          (shouldConsiderFieldKey(mismatch.fieldName) && isPrimaryComparisonField(mismatch.fieldName))
+          Boolean(mismatch.fieldName)
       ) ?? [],
     [detail]
   );

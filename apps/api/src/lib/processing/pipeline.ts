@@ -1,4 +1,4 @@
-import { normalisePacketEvidence, hasRelevantPacketTerms } from '@autodealer/shared/lib/packet-evidence';
+import { normalisePacketEvidence, hasRelevantPacketTerms, groundPrintedEvidence, massInKg, visibleEvidence } from '@autodealer/shared/lib/packet-evidence';
 import { execFile } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
@@ -3520,7 +3520,8 @@ function normalizeWeightForDisplay(value: string | number | null | undefined) {
   if (parsed === null) return null;
 
   const raw = String(value ?? "").toLowerCase();
-  const kg = /\b(?:m\.?t\.?s?\.?|metric\s*ton(?:ne)?s?|tonnes?|tons?)\b/i.test(raw) ? parsed * 1000 : parsed;
+  const kg = massInKg(value);
+  if (kg === null) return null;
   return {
     raw: String(value ?? ""),
     kg,
@@ -4018,7 +4019,7 @@ export function enrichProcessedDocuments(documents: CaseDoc[]) {
   const withParties = enrichEWayBillParties(withInvoiceEWay);
   const withVehicles = enrichCorroboratedVehicleNumbers(enrichWeighmentVehicleNumbers(withParties));
   const withConsigneeGuard = applyConsigneeBuyerGuardToDocuments(withVehicles);
-  return applyIdentifierQualityGuards(normalizeIdentifierDisplayFields(enrichCommercialAmounts(withConsigneeGuard)));
+  return applyIdentifierQualityGuards(normalizeIdentifierDisplayFields(enrichCommercialAmounts(withConsigneeGuard))).map(groundPrintedEvidence);
 }
 
 function buildProcessedVerificationResult(
@@ -5160,6 +5161,13 @@ async function extractPdfDocumentGroups(params: {
     }
 
     document = applyVisibleDocTypeRefinement(document, groupTextPages);
+    // Image retries may improve fields, but must not replace an embedded PDF
+    // transcription with a model's different reading of the same glyphs.
+    if (hasGroupText) {
+      const imageTranscription = visibleEvidence(document);
+      document.md = buildMarkdown(document, groupTextPages);
+      if (imageTranscription.trim() && imageTranscription.trim() !== groupTextPages.join('\n\n').trim()) document.md += `\n\n## Image transcription\n${imageTranscription}`;
+    }
     document.id = `${params.fileName}:pages-${group.pageStart}-${group.pageEnd}:${group.documentType}:${group.documentNumber || index}`;
     document.sourceHint = sourceHint;
     document.sourceFileName = params.fileName;
@@ -5934,10 +5942,10 @@ export async function finalizeExtractedDocuments(params: {
   onProgress?: (details: { progress: number; stage: string }) => Promise<void> | void;
 }) {
   const { comparisonOptions, analysisMode, fieldConfiguration } = params;
-  const canonicalDocuments = collapseDuplicateInvoiceCopies(params.documents);
-  const enrichedDocuments = enrichProcessedDocuments(canonicalDocuments);
+  const enrichedDocuments = enrichProcessedDocuments(params.documents);
+  const canonicalDocuments = collapseDuplicateInvoiceCopies(enrichedDocuments);
   const verificationResult = buildProcessedVerificationResult(
-    verifyGroupedCaseDocuments(enrichedDocuments, comparisonOptions)
+    verifyGroupedCaseDocuments(canonicalDocuments, comparisonOptions)
   );
   await params.onProgress?.({
     progress: 80,
@@ -5945,7 +5953,7 @@ export async function finalizeExtractedDocuments(params: {
   });
 
   await params.onProgress?.({ progress: 92, stage: "Finalizing case summary" });
-  const summary = summarizeCase(enrichedDocuments, verificationResult.mismatches, fieldConfiguration);
+  const summary = summarizeCase(canonicalDocuments, verificationResult.mismatches, fieldConfiguration);
 
   return {
     documents: enrichedDocuments,

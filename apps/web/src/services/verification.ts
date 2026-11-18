@@ -1,4 +1,4 @@
-import { normalisePacketEvidence, shipmentMassChecks, arithmeticChecks, evidenceTimestamp } from '@autodealer/shared/lib/packet-evidence';
+import { normalisePacketEvidence, shipmentMassChecks, arithmeticChecks, evidenceTimestamp, massInKg } from '@autodealer/shared/lib/packet-evidence';
 import type { CaseDoc, CommercialLineItem, FieldKey, Mismatch, MismatchValue } from "@/types/pipeline";
 import { getFieldKeysForDocType, shouldConsiderFieldKey } from "@/lib/document-schema";
 import {
@@ -287,6 +287,7 @@ function isComparableFieldValue(
   value: string | number | null | undefined,
   comparisonOptions: ComparisonOptions
 ) {
+  if (WEIGHT_FIELDS.has(field) && massInKg(value) === null) return false;
   return Boolean(normalizeComparableValue(value, comparisonOptions, field));
 }
 
@@ -569,7 +570,15 @@ function documentsForRoleSelectedComparison(
   if (!roleSelection?.contextDocumentIds.length) return docs;
   const contextIds = new Set(roleSelection.contextDocumentIds);
   const comparableDocs = docs.filter((doc) => !contextIds.has(doc.id));
-  return comparableDocs.length >= 2 ? comparableDocs : docs;
+  if (comparableDocs.length < 2) return docs;
+  const upstream = docs.filter(doc=>contextIds.has(doc.id) && INVOICE_DOC_TYPES.has(doc.type));
+  return comparableDocs.map(doc=>{
+    if (!['Lorry Receipt','Weighment Slip'].includes(doc.type)) return doc;
+    const identity = getPartyIdentity(doc, DEFAULT_COMPARISON_OPTIONS, 'supplierGstin', 'vendorName');
+    if (!upstream.some(invoice=>partyIdentitiesMatch(identity,getPartyIdentity(invoice,DEFAULT_COMPARISON_OPTIONS,'supplierGstin','vendorName')))) return doc;
+    const fields = {...doc.fields}; delete fields.vendorName; delete fields.supplierGstin;
+    return {...doc,fields};
+  });
 }
 
 function getSellerChainSourceDocumentIds(

@@ -1,4 +1,16 @@
 export type FieldKey =
+  | "shipToName"
+  | "shipToGstin"
+  | "freightGstRate"
+  | "tds194qAmount"
+  | "tds194qRate"
+  | "transportTdsAmount"
+  | "transportTdsRate"
+  | "cgstTdsAmount"
+  | "sgstTdsAmount"
+  | "igstTdsAmount"
+  | "gstTdsRate"
+  | "tdsRate"
   | "arrivalDate"
   | "departureDate"
   | "driverPhone"
@@ -152,6 +164,7 @@ export interface CaseDoc {
   pages: number;
   fields: Partial<Record<FieldKey, string>>;
   lineItems?: CommercialLineItem[];
+  qualityIssues?: Array<{field: FieldKey; originalValue: string; action: 'quarantined' | 'moved' | 'corrected'; targetField?: FieldKey; reason: string}>;
   md: string;
   sourceFileName?: string;
   sourceHint?: string;

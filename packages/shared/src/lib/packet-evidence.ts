@@ -29,8 +29,13 @@ export function restoreReceivingEvidence(doc: CaseDoc): CaseDoc {
   put('referenceInvoiceNumber', labelled(text, 'Invoice\\s*No(?:\\.)?'));
   put('transactionReference', labelled(text, 'Transaction\\s*ID'));
   put('vendorName', labelled(text, 'Company\\s*Name|Supplier\\s*Name'));
-  const receiver = text.match(/^\s*([^\n]*Bhuleshwar[^\n]*(?:\n[^\n]*Trishul[^\n]*)?)/im)?.[1];
+  const receiver = text.match(/(Bhuleshwar[\s\S]{0,100}?\(Trishul\))/i)?.[1] || text.match(/^\s*([^\n]*Bhuleshwar[^\n]{0,100})/im)?.[1];
   if (receiver) put('buyerName', receiver.replace(/\s+/g, ' ').trim());
+  const company = labelled(text, 'Company\\s*Name|Supplier\\s*Name') || text.match(/Company\s*Name\s*:\s*(.+?)\s+Invoice\s*No/i)?.[1];
+  if (receiver && company && /bhuleshwar/i.test(fields.vendorName || '') && !/bhuleshwar/i.test(company)) {
+    fields.vendorName = company;
+    fields.buyerName = receiver.replace(/\s+/g, ' ').trim();
+  }
   put('vehicleNumber', labelled(text, 'Registration\\s*Number|Vehicle\\s*(?:No|Number)'));
   put('arrivalDate', labelled(text, 'Vehicle\\s*Entry\\s*Date|Gate\\s*Entry(?:\\s*Date)?'));
   put('departureDate', labelled(text, 'Vehicle\\s*Out\\s*Image|Vehicle\\s*Exit\\s*Date'));
@@ -70,7 +75,59 @@ export function deduplicatePhysicalDocuments(documents: CaseDoc[]) {
 }
 
 export function normalisePacketEvidence(documents: CaseDoc[]) {
-  return deduplicatePhysicalDocuments(documents.map(restoreReceivingEvidence));
+  return deduplicatePhysicalDocuments(documents.map(restoreReceivingEvidence).map(groundPrintedEvidence));
+}
+
+/** Restore explicit source labels, never a majority vote or a recomputed GST value. */
+export function groundPrintedEvidence(doc: CaseDoc): CaseDoc {
+  const text = visibleEvidence(doc);
+  const fields = {...doc.fields};
+  const amount = '(\\d[\\d,]*(?:\\.\\d{1,2})?)';
+  if (['Invoice','Tax Invoice','E-Way Bill'].includes(doc.type)) {
+    const taxes = new Map<string,number>();
+    for (const component of ['CGST','SGST','IGST']) {
+      const pattern = new RegExp(`\\b${component}\\s*(?:(?:Amt|Amount)[ \\t]*:[ \\t]*(?:\\r?\\n[ \\t]*)?|@\\s*\\d+(?:\\.\\d+)?\\s*%\\s*)${amount}`, 'ig');
+      const values = [...text.matchAll(pattern)].map(match=>Number(match[1].replace(/,/g,'')));
+      const distinct = [...new Set(values)];
+      if (distinct.length === 1) taxes.set(component,distinct[0]);
+    }
+    const splitTax = /\bCGST\b/i.test(text) && /\bSGST\b/i.test(text);
+    if (taxes.size && (!splitTax || (taxes.has('CGST') && taxes.has('SGST'))) && !/\bcess\b/i.test(text)) fields.taxAmount = String(Math.round([...taxes.values()].reduce((n,v)=>n+v,0)*100)/100);
+    const taxable = text.match(new RegExp(`Tot\\.?\\s*Tax(?:able|'ble)\\s*Amt[ \\t]*:[ \\t]*${amount}`, 'i'));
+    if (taxable) fields.subtotal = fields.totalTaxableAmount = taxable[1].replace(/,/g,'');
+    if (!fields.subtotal && ['Invoice','Tax Invoice'].includes(doc.type) && doc.lineItems?.length && doc.lineItems.every(line=>line.taxableAmount && /^-?[\d,.]+$/.test(line.taxableAmount))) {
+      fields.subtotal = String(Math.round(doc.lineItems.reduce((n,line)=>n+Number(line.taxableAmount!.replace(/,/g,'')),0)*100)/100);
+    }
+    if (doc.type === 'E-Way Bill') {
+      const other = text.match(new RegExp(`Other\\s*Amt\\s*:?\\s*${amount}`, 'i'));
+      if (other) fields.roundOffAmount = other[1].replace(/,/g,'');
+    }
+    const po = text.match(/\b(PO[\/-][A-Z0-9\/-]+)\s+Dt\.?\s*\d{1,2}[-/]/i)?.[1];
+    if (po && fields.referencePoNumber?.replace(/[^A-Z0-9]/gi,'').toUpperCase().startsWith(po.replace(/[^A-Z0-9]/gi,'').toUpperCase()+'DT')) fields.referencePoNumber = po;
+  }
+  if (['Lorry Receipt','Weighment Slip','Receiving Record'].includes(doc.type)) {
+    const units = new Set<string>();
+    if (/\b(?:M\.?T\.?S?\.?|metric\s*tonnes?|tonnes?|tons?)\b/i.test(text)) units.add('MT');
+    if (/\b(?:kg|kgs|kilograms?)\b/i.test(text)) units.add('kg');
+    const explicitUnit = fields.unit || fields.receivedUnit || (units.size === 1 ? [...units][0] : undefined);
+    for (const key of ['grossWeight','tareWeight','netWeight'] as const) {
+      if (fields[key] && /^\d[\d,.]*$/.test(fields[key]!.trim()) && massInKg('1',explicitUnit) !== null) fields[key] += ` ${explicitUnit}`;
+    }
+  }
+  if (doc.type === 'Lorry Receipt') {
+    const receipt = text.match(/\bLetter\s*No\.?\s*:?\s*([A-Z0-9\/-]+)/i)?.[1];
+    if (receipt && (!fields.lorryReceiptNumber || fields.lorryReceiptNumber === fields.vehicleNumber)) fields.lorryReceiptNumber = receipt;
+    const vehicle = text.match(/\bLORRY\s*NO\.?\s*:?\s*([A-Z]{2}\d{1,2}[A-Z]{1,3}\d{1,4})\b/i)?.[1];
+    if (vehicle) fields.vehicleNumber = vehicle.toUpperCase();
+  }
+  const reason = 'Restored from explicit source labels, printed weight units, or taxable line amounts.';
+  const qualityIssues = [...(doc.qualityIssues || [])];
+  for (const [key,value] of Object.entries(fields)) {
+    const field = key as FieldKey;
+    if (value !== doc.fields[field] && !qualityIssues.some(issue=>issue.field===field && issue.reason===reason && issue.originalValue===String(doc.fields[field] || '<missing>'))) qualityIssues.push({field,action:'corrected',originalValue:String(doc.fields[field] || '<missing>'),reason});
+  }
+  const lineItems = doc.lineItems?.map(line=>/^\s*\d*[.)]?\s*goods\s+details\s*$/i.test(line.itemCode || '') ? {...line,itemCode:undefined} : line);
+  return {...doc,fields,lineItems,qualityIssues};
 }
 
 export function massInKg(value?: string | number | null, unit?: string) {

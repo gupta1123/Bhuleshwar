@@ -469,7 +469,7 @@ function getOrderedDocumentEntries(
     .map(([key]) => key)
     .filter((key) => !relevantKeySet.has(key as (typeof relevantKeys)[number]));
 
-  return getFieldDefinitionsByKeys([...relevantKeys, ...remainingKeys]).flatMap(({ key }) => {
+  return getFieldDefinitionsByKeys([...relevantKeys, ...remainingKeys], documentType).flatMap(({ key }) => {
     const value = extractedFields[key];
     if (
       value === null ||
@@ -744,7 +744,9 @@ function getDisplayDocuments(documents: CaseDetailDocument[]) {
     }
   }
 
-  return displayDocuments;
+  // Commercial comparisons collapse copies independently. Keep every source
+  // document here so duplicate copies and their physical pages remain inspectable.
+  return documents;
 }
 
 function displayValue(value: unknown) {
@@ -1256,6 +1258,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
   }, [caseId]);
   const [loadingPreviewFileId, setLoadingPreviewFileId] = useState<string | null>(null);
   const [previewUrlError, setPreviewUrlError] = useState<string | null>(null);
+  const [previewRetryKey, setPreviewRetryKey] = useState(0);
   const draftFileInputRef = useRef<HTMLInputElement | null>(null);
   const desktopWorkspaceRef = useRef<HTMLDivElement | null>(null);
   const paneResizeStartRef = useRef<{ pointerX: number; paneWidth: number } | null>(null);
@@ -1356,7 +1359,8 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
         setAnalysisStage(nextStatus.job?.stage ?? null);
         setAnalysisError(nextStatus.job?.status === "failed" ? nextStatus.job.error ?? null : null);
 
-        if (nextStatus.caseStatus === "completed" || nextStatus.caseStatus === "accepted" || nextStatus.caseStatus === "rejected") {
+        const jobFinished = !nextStatus.job || nextStatus.job.status === "succeeded";
+        if (jobFinished && (nextStatus.caseStatus === "completed" || nextStatus.caseStatus === "accepted" || nextStatus.caseStatus === "rejected")) {
           const refreshed = await fetchCaseDetail(detail.case.id);
           if (!active) return;
           setDetail(refreshed);
@@ -1428,7 +1432,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
         (mismatch) =>
           mismatch.fieldName === TERMS_COMPLIANCE_FIELD ||
           isLineItemMismatchField(mismatch.fieldName) ||
-          (shouldConsiderFieldKey(mismatch.fieldName) && isPrimaryComparisonField(mismatch.fieldName))
+          Boolean(mismatch.fieldName)
       ) ?? [],
     [detail]
   );
@@ -1844,7 +1848,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
     return () => {
       active = false;
     };
-  }, [activePreviewFile, detail, signedFileUrls]);
+  }, [activePreviewFile, detail, signedFileUrls, previewRetryKey]);
 
   const comparisonOptions = useMemo(
     () =>
@@ -2377,6 +2381,10 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
         {isPreviewUrlLoading ? <Loader2 className={styles.redesignSpinner} /> : <FileSearch />}
         <strong>{isPreviewUrlLoading ? "Loading source preview…" : "Preview unavailable"}</strong>
         <span>{previewUrlError || "The source file could not be opened for this document."}</span>
+        {!isPreviewUrlLoading && activePreviewFile ? <button type="button" onClick={() => {
+          setSignedFileUrls(current=>{const next={...current};delete next[activePreviewFile.id];return next;});
+          setPreviewUrlError(null);setPreviewRetryKey(key=>key+1);
+        }}>Retry source preview</button> : null}
       </div>
     );
 

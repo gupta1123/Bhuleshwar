@@ -695,14 +695,14 @@ export function sanitizeFieldsForDocType<T>(
   ) as Record<string, T>;
 }
 
-export function getFieldDefinitionsByKeys(fieldKeys: readonly string[]): FieldDefinition[] {
+export function getFieldDefinitionsByKeys(fieldKeys: readonly string[], docType?: string): FieldDefinition[] {
   const seen = new Set<FieldKey>();
 
   return fieldKeys.flatMap((fieldKey) => {
     const normalizedKey = fieldKey as FieldKey;
     const fieldDefinition = FIELD_DEFINITION_LOOKUP[normalizedKey];
 
-    if (!fieldDefinition || seen.has(normalizedKey) || !shouldConsiderFieldKey(normalizedKey)) {
+    if (!fieldDefinition || seen.has(normalizedKey) || !shouldConsiderFieldKey(normalizedKey, docType)) {
       return [];
     }
 
@@ -712,5 +712,5 @@ export function getFieldDefinitionsByKeys(fieldKeys: readonly string[]): FieldDe
 }
 
 export function getFieldDefinitionsForDocType(docType: DocType | string): FieldDefinition[] {
-  return getFieldDefinitionsByKeys(getFieldKeysForDocType(docType));
+  return getFieldDefinitionsByKeys(getFieldKeysForDocType(docType), docType);
 }

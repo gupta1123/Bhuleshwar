@@ -58,3 +58,18 @@ test('safe image requests still return provider content', async (t) => {
   };
   assert.equal(await callOpenRouter([{ role: 'user', content: [{ type: 'image_url', image_url: { url: 'data:image/jpeg;base64,YQ==' } }] }]), '{"documents":[]}');
 });
+
+test('JSON requests enforce an object and permanent provider errors stop immediately', async (t) => {
+  const previous = globalThis.fetch;
+  t.after(() => { globalThis.fetch = previous; });
+  let calls = 0;
+  globalThis.fetch = async (_url, options) => {
+    calls++;
+    assert.equal(JSON.parse(options.body).response_format.type, 'json_object');
+    return Response.json({ error: { message: 'Unsupported request' } }, { status: 400 });
+  };
+  await assert.rejects(callOpenRouter([], { jsonMode: true, maxRetries: 2 }), /Unsupported request/);
+  assert.equal(calls, 1);
+  globalThis.fetch = async () => Response.json({ choices: [{ message: { content: '[]' } }] });
+  await assert.rejects(callOpenRouter([], { jsonMode: true, maxRetries: 0 }), /JSON object/);
+});

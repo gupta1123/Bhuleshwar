@@ -157,7 +157,7 @@ async function callPacketOpenRouter(
 
   activePacketAiCalls += 1;
   try {
-    return await callOpenRouterRaw(messages, options);
+    return await callOpenRouterRaw(messages, { ...options, jsonMode: options?.expectJson || options?.jsonMode });
   } finally {
     activePacketAiCalls -= 1;
     waitingPacketAiCalls.shift()?.();
@@ -1183,12 +1183,12 @@ export async function assessCaseTermsComplianceDetailed(documents: CaseDoc[]): P
       }
     );
   } catch (error) {
-    console.warn("Failed to assess terms compliance", error);
-    return { mismatches: [], checklist: [] };
+    throw new Error("Terms assessment could not be completed.", { cause: error });
   }
 
   const parsed = safeJsonParse<{ obligations?: unknown }>(raw, {});
-  const obligations = Array.isArray(parsed.obligations) ? parsed.obligations : [];
+  if (!Array.isArray(parsed?.obligations)) throw new Error("Terms assessment returned an invalid obligations list.");
+  const obligations = parsed.obligations;
   const checklist = obligations
     .map((entry) => buildTermsComplianceChecklistItem(entry as TermsComplianceAssessment, documentsById))
     .filter((entry): entry is TermsComplianceChecklistItem => Boolean(entry))
@@ -1597,6 +1597,7 @@ export async function reviewAndCorrectExtractedDocuments(
   }
 
   const payload = safeJsonParse<ExtractionReviewPayload>(raw, {});
+  if (!Array.isArray(payload?.corrections)) throw new Error("Extraction review returned an invalid corrections list.");
   const applied = applyExtractionReviewCorrections(assessableDocuments, payload);
   const correctedById = new Map(applied.documents.map((doc) => [doc.id, doc]));
   return {

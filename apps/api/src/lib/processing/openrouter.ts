@@ -169,6 +169,8 @@ function logOpenRouterDiagnostic(event: Record<string, unknown>) {
   console.log(JSON.stringify({ scope: "openrouter", ...event }));
 }
 
+class PermanentProviderError extends Error {}
+
 export async function callOpenRouter(
   requestMessages: OpenRouterMessage[],
   options?: {
@@ -255,7 +257,7 @@ export async function callOpenRouter(
         });
 
         if (isImageSizeError(errorText) || !isRetryableStatus(response.status) || isHardQuotaError(errorText) || attempt === maxRetries) {
-          throw new Error(errorText);
+          throw new PermanentProviderError(errorText);
         }
 
         const delayMs = RETRY_BASE_MS * Math.pow(2, attempt);
@@ -268,6 +270,12 @@ export async function callOpenRouter(
       const content = Array.isArray(message)
         ? message.map((part: OpenRouterContentPart) => part?.text || "").join("\n")
         : String(message || "");
+      if (options?.jsonMode) {
+        const parsed = JSON.parse(content);
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+          throw new Error("Model response must be a JSON object.");
+        }
+      }
       logOpenRouterDiagnostic({
         event: "response_success",
         model,
@@ -301,7 +309,7 @@ export async function callOpenRouter(
         durationMs: Date.now() - requestStartedAt,
         error: lastError,
       });
-      if (isImageSizeError(error) || attempt === maxRetries) {
+      if (error instanceof PermanentProviderError || isImageSizeError(error) || attempt === maxRetries) {
         recordTestTrace(testOverrides, messages, {
           model,
           durationMs: Date.now() - callStartedAt,

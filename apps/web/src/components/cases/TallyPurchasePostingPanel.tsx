@@ -36,6 +36,7 @@ import {
 } from "@/components/ui/popover";
 import { fetchCaseFileSignedUrl } from "@/lib/case-persistence";
 import { runCashDiscountLiveRequest } from "@/lib/cash-discount-live";
+import { purchaseMasterReadiness } from "@/lib/purchase-master-state";
 import {
   rankPurchaseLedgerRole as rankLedgerRole,
   isPurchaseWithholdingOption,
@@ -819,14 +820,16 @@ export function TallyPurchasePostingPanel({
     quiet = false,
     connectionId?: string | null,
     replaceReview = false,
-    companyName?: string | null
+    companyName?: string | null,
+    signal?: AbortSignal
   ) => {
     if (!quiet) setState("loading");
     try {
       const next = await fetchTallyPurchasePosting(
         caseId,
         connectionId,
-        companyName
+        companyName,
+        signal
       );
       const hydrated = withLiveMasterOptions(next);
       setPayload(hydrated);
@@ -840,6 +843,7 @@ export function TallyPurchasePostingPanel({
       setState("ready");
       return hydrated;
     } catch (loadError) {
+      if (signal?.aborted) return null;
       setError(loadError instanceof Error ? loadError.message : "Failed to load Tally posting review.");
       setState("error");
       return null;
@@ -855,8 +859,11 @@ export function TallyPurchasePostingPanel({
     automaticLiveRefreshRef.current = caseId;
     setLiveMastersReady(false);
     let cancelled = false;
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(new Error('Tally data did not finish loading within 90 seconds. Use Refresh to retry.')), 90_000);
     void (async () => {
-      const next = await load(false, null, true);
+      const next = await load(false, null, true, null, controller.signal);
+      if (controller.signal.aborted) throw controller.signal.reason;
       if (cancelled) return;
       // A voucher that is already created and verified in Tally needs no
       // catalogue: skip the live masters and supplier lookups entirely. Refresh
@@ -898,13 +905,16 @@ export function TallyPurchasePostingPanel({
       const companyName = next.selectedCompanyName;
       const applyCatalogue = async (liveMasters: unknown, noticeText: string) => {
         const liveCatalogue = prepareLiveTallyCatalogue(liveMasters, next.review);
+        if (!liveCatalogue.masterOptions.ledgers.length) throw new Error('Tally returned no ledgers. Check the selected company and use Refresh to retry.');
         liveMasterResultRef.current = liveCatalogue.compactResult;
         liveMasterOptionsRef.current = liveCatalogue.masterOptions;
         const prepared = await prepareTallyPurchasePostingFromLive(
           caseId,
           connectionId,
           companyName,
-          liveCatalogue.compactResult
+          liveCatalogue.compactResult,
+          false,
+          controller.signal
         );
         if (cancelled) return false;
         const hydrated = withLiveMasterOptions(prepared);
@@ -925,6 +935,7 @@ export function TallyPurchasePostingPanel({
       // preview is non-authoritative; the full live pass below validates it.
       const applyCachedOptions = async (liveMasters: unknown) => {
         const liveCatalogue = prepareLiveTallyCatalogue(liveMasters, next.review);
+        if (!liveCatalogue.masterOptions.ledgers.length) throw new Error('The saved Tally catalogue is empty.');
         liveMasterResultRef.current = liveCatalogue.compactResult;
         liveMasterOptionsRef.current = liveCatalogue.masterOptions;
         setPayload((current) => current ? { ...current, masterOptions: liveCatalogue.masterOptions } : current);
@@ -938,7 +949,8 @@ export function TallyPurchasePostingPanel({
             connectionId,
             companyName,
             liveCatalogue.compactResult,
-            true
+            true,
+            controller.signal
           );
           if (cancelled) return;
           const hydrated = withLiveMasterOptions(prepared);
@@ -956,9 +968,10 @@ export function TallyPurchasePostingPanel({
             setReview(cachedReview);
             setLineMasterMatches(hydrated.lineMasterMatches ?? []);
           }
-        } catch {
-          // An unusable cached preview must never prevent the authoritative
-          // full Tally validation that follows.
+        } catch (prepareError) {
+          // Keep the options visible, but let the caller attempt an
+          // authoritative read instead of presenting a failed check as complete.
+          throw prepareError;
         }
       };
       const servedFromCache = (liveMasters: unknown) => {
@@ -974,6 +987,7 @@ export function TallyPurchasePostingPanel({
           connectionId,
           companyName,
           operation: "ledger_masters",
+          signal: controller.signal,
           payload: { ...cataloguePayload, requireFresh: true },
           onProgress: (message) => { if (!cancelled) setNotice(message); },
         });
@@ -992,10 +1006,12 @@ export function TallyPurchasePostingPanel({
             connectionId,
             companyName,
             operation: "ledger_masters",
+            signal: controller.signal,
             payload: cataloguePayload,
             onProgress: (message) => { if (!cancelled) setNotice(message); },
           });
-        } catch {
+        } catch (readError) {
+          if (controller.signal.aborted) throw readError;
           // A missing or unreadable local catalogue must not require the
           // reviewer to discover the manual Refresh control.
           if (!cancelled) await readFreshCatalogue();
@@ -1009,9 +1025,9 @@ export function TallyPurchasePostingPanel({
         }
         try {
           await applyCachedOptions(cachedMasters);
-        } catch {
-          setError("The saved Tally catalogue could not be opened. Refresh it from Tally.");
-          setNotice(null);
+        } catch (cacheError) {
+          if (controller.signal.aborted) throw cacheError;
+          if (!cancelled) await readFreshCatalogue();
           return;
         }
         if (cancelled) return;
@@ -1027,9 +1043,13 @@ export function TallyPurchasePostingPanel({
       } finally {
         if (!cancelled) setRefreshingMasters(false);
       }
-    })();
+    })().catch(loadError => {
+      if (!cancelled) { setError(loadError instanceof Error ? loadError.message : 'Could not load Tally data.'); setNotice(null); setRefreshingMasters(false); setState('ready'); }
+    }).finally(() => window.clearTimeout(timeout));
     return () => {
       cancelled = true;
+      window.clearTimeout(timeout);
+      controller.abort();
       // This effect can be restarted before its asynchronous catalogue load
       // completes (notably by React Strict Mode and approval-state changes).
       // Release this run's guard so the replacement effect is allowed to load
@@ -1056,6 +1076,7 @@ export function TallyPurchasePostingPanel({
       connectionId: selectedConnectionId,
       companyName: selectedCompanyName,
       operation: "ledger_suggestions",
+      signal: AbortSignal.timeout(30_000),
       payload: {
         moduleName: "purchase",
         id: "supplier",
@@ -1525,13 +1546,14 @@ export function TallyPurchasePostingPanel({
   );
   const supplierLedgerLoading = matchingSupplierLedger || matchingIndexedSupplierLedger;
   const postedInTally = payload?.posting?.status === "created";
-  const masterValidationPending =
-    !postedInTally && (!liveMastersReady || refreshingMasters || supplierLedgerLoading || matchingLineMasters);
+  const {checking: masterValidationPending, unavailable: masterDataUnavailable} = purchaseMasterReadiness({
+    posted: postedInTally, initialLoading: state === 'loading', refreshing: refreshingMasters,
+    supplierMatching: supplierLedgerLoading, lineMatching: matchingLineMasters, ready: liveMastersReady,
+  });
   const correctionBlockers = useMemo(
-    () => masterValidationPending || ["created", "verification_required"].includes(payload?.posting?.status ?? "")
+    () => ["created", "verification_required"].includes(payload?.posting?.status ?? "")
       ? []
-      : (payload?.blockers ?? []).filter((issue) => {
-      if (issue.scope === "case" || issue.scope === "company") return false;
+      : [...(masterDataUnavailable ? [{code:'TALLY_MASTER_DATA_UNAVAILABLE',label:'Tally data is not loaded',message:error || 'Live validation has not completed. Use Refresh to load Tally data.',scope:'company' as const}] : []), ...(payload?.blockers ?? []).filter((issue) => {
       // Server blockers describe the last saved review. Clear date errors as
       // (and a picked live round-off ledger) as soon as the current browser
       // value is valid; Save still performs the
@@ -1546,8 +1568,8 @@ export function TallyPurchasePostingPanel({
       // re-check (under a second later) decides whether it still applies.
       if (issueFieldChanged(issue, payload?.review ?? null, review)) return false;
       return true;
-    }),
-    [masterValidationPending, payload?.blockers, payload?.posting?.status, payload?.review, review, roundOffOptions]
+    })],
+    [masterDataUnavailable, error, payload?.blockers, payload?.posting?.status, payload?.review, review, roundOffOptions]
   );
   const remainingCorrectionBlockers = useMemo(
     () => correctionBlockers.filter((item) =>
@@ -1781,6 +1803,7 @@ export function TallyPurchasePostingPanel({
   async function handleApproveAndQueue() {
     if (
       !effectivelyReadyForApproval ||
+      !liveMastersReady || masterValidationPending ||
       dirty ||
       connectionDirty ||
       postingLocked ||
@@ -1885,6 +1908,7 @@ export function TallyPurchasePostingPanel({
   const handleRefreshMasters = useCallback(async (automatic = false) => {
     const connection = payload?.connection;
     if (!connection?.id || !connection.companyName) return;
+    const signal = AbortSignal.timeout(90_000);
     try {
       setRefreshingMasters(true);
       setError(null);
@@ -1898,6 +1922,7 @@ export function TallyPurchasePostingPanel({
         connectionId: connection.id,
         companyName: connection.companyName,
         operation: "ledger_masters",
+        signal,
         payload: {
           moduleName: "purchase",
           persist: false,
@@ -1921,13 +1946,16 @@ export function TallyPurchasePostingPanel({
         onProgress: (message) => setNotice(message),
       });
       const liveCatalogue = prepareLiveTallyCatalogue(liveMasters, review);
+      if (!liveCatalogue.masterOptions.ledgers.length) throw new Error('Tally returned no ledgers. Check the selected company and use Refresh to retry.');
       liveMasterResultRef.current = liveCatalogue.compactResult;
       liveMasterOptionsRef.current = liveCatalogue.masterOptions;
       const prepared = await prepareTallyPurchasePostingFromLive(
         caseId,
         connection.id,
         connection.companyName,
-        liveCatalogue.compactResult
+        liveCatalogue.compactResult,
+        false,
+        signal
       );
       const hydrated = withLiveMasterOptions(prepared);
       setPayload(hydrated);
@@ -2024,6 +2052,7 @@ export function TallyPurchasePostingPanel({
   const effectivelyReadyForApproval = Boolean(payload?.readyForApproval || allBlockersAllowed);
   const canApprove = Boolean(
     effectivelyReadyForApproval &&
+    liveMastersReady && !masterValidationPending &&
     payload?.posting &&
     !hasUnsavedChanges &&
     !postingLocked &&
@@ -2452,7 +2481,7 @@ export function TallyPurchasePostingPanel({
                 ...(supplierLedgerMatch?.ledgerName ? [supplierLedgerMatch.ledgerName] : []),
                 ...(supplierLedgerMatch?.candidateLedgerNames ?? []),
               ]}
-              syncing={(!liveMastersReady && !postedInTally) || supplierLedgerLoading}
+              syncing={refreshingMasters || supplierLedgerLoading}
               value={review.supplierLedgerName}
             />
             {(() => {
@@ -3160,22 +3189,24 @@ export function TallyPurchasePostingPanel({
               ? "border-rose-200 bg-rose-50 text-rose-700"
               : correctionBlockers.length > 0
                 ? "border-amber-200 bg-amber-50 text-amber-700"
-              : hasUnsavedChanges
+              : masterValidationPending || hasUnsavedChanges || (!effectivelyReadyForApproval && !postedInTally)
                 ? "border-amber-200 bg-amber-50 text-amber-700"
                 : "border-emerald-200 bg-emerald-50 text-emerald-700"
           }`}>
-            {remainingCorrectionBlockers.length > 0 ? (
+            {masterValidationPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : remainingCorrectionBlockers.length > 0 ? (
+              <AlertTriangle className="h-3.5 w-3.5" />
+            ) : !effectivelyReadyForApproval && !postedInTally ? (
               <AlertTriangle className="h-3.5 w-3.5" />
             ) : (
               <CheckCircle2 className="h-3.5 w-3.5" />
             )}
-            {remainingCorrectionBlockers.length > 0
+            {postedInTally ? 'Posted to Tally' : masterValidationPending ? 'Checking Tally data' : remainingCorrectionBlockers.length > 0
               ? `${remainingCorrectionBlockers.length} correction${remainingCorrectionBlockers.length === 1 ? "" : "s"} remaining`
               : correctionBlockers.length > 0
                 ? `${correctionBlockers.length} override${correctionBlockers.length === 1 ? "" : "s"} allowed`
               : hasUnsavedChanges
                 ? "Save to check"
-                : "Accounting checks passed"}
+                : effectivelyReadyForApproval ? "Accounting checks passed" : "Review required"}
           </div>
         </header>
 
@@ -3464,7 +3495,7 @@ export function TallyPurchasePostingPanel({
           ) : null}
           <DialogFooter>
             <Button disabled={queueing} onClick={() => setConfirmOpen(false)} variant="outline">Cancel</Button>
-            <Button className="bg-emerald-700 text-white hover:bg-emerald-800" disabled={queueing || tallyReviewRefreshing || staleMastersBlocking || (acknowledgementWarnings.length > 0 && !warningsAcknowledged)} onClick={() => void handleApproveAndQueue()}>
+            <Button className="bg-emerald-700 text-white hover:bg-emerald-800" disabled={!canApprove || queueing || staleMastersBlocking || (acknowledgementWarnings.length > 0 && !warningsAcknowledged)} onClick={() => void handleApproveAndQueue()}>
               {queueing || tallyReviewRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
               {tallyReviewRefreshing
                 ? "Checking Tally data"

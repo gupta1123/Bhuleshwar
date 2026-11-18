@@ -793,7 +793,8 @@ async function readResponse(response: Response, fallback: string) {
 export async function fetchTallyPurchasePosting(
   caseId: string,
   connectionId?: string | null,
-  companyName?: string | null
+  companyName?: string | null,
+  signal: AbortSignal = AbortSignal.timeout(25_000)
 ) {
   const preferredConnectionId =
     connectionId || readPreferredTallyConnectionId();
@@ -801,7 +802,7 @@ export async function fetchTallyPurchasePosting(
   if (preferredConnectionId) params.set("connectionId", preferredConnectionId);
   if (companyName) params.set("companyName", companyName);
   const query = params.size > 0 ? `?${params.toString()}` : "";
-  const response = await apiFetch(`/api/cases/${caseId}/tally-posting${query}`, { cache: "no-store" });
+  const response = await apiFetch(`/api/cases/${caseId}/tally-posting${query}`, { cache: "no-store", signal });
   return readResponse(response, "Failed to load Tally posting review.");
 }
 
@@ -910,10 +911,12 @@ export async function prepareTallyPurchasePostingFromLive(
   connectionId: string,
   companyName: string,
   liveMasters: unknown,
-  allowStalePreview = false
+  allowStalePreview = false,
+  signal: AbortSignal = AbortSignal.timeout(30_000)
 ) {
   const response = await apiFetch(`/api/cases/${caseId}/tally-posting`, {
     method: "POST",
+    signal,
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       action: "prepare_live_context",
@@ -939,6 +942,7 @@ export async function matchTallyPurchaseSupplierLedger(
 ) {
   const response = await apiFetch(`/api/cases/${caseId}/tally-posting`, {
     method: "POST",
+    signal: AbortSignal.timeout(60_000),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "match_supplier_ledger", ...input }),
   });
@@ -966,6 +970,7 @@ export async function matchTallyPurchaseLineMasters(
 ) {
   const response = await apiFetch(`/api/cases/${caseId}/tally-posting`, {
     method: "POST",
+    signal: AbortSignal.timeout(60_000),
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ action: "match_purchase_masters", ...input }),
   });

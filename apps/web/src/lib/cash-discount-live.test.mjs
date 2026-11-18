@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import test from "node:test";
 import ts from "typescript";
 
-function harness() {
+function harness(getToken = async () => 'token', authenticate = true) {
   let now = 1000;
   const sockets = [];
   const timers = new Map();
@@ -19,13 +19,13 @@ function harness() {
     message(value) { this.emit("message", { data: JSON.stringify(value) }); }
     send(raw) {
       const message = JSON.parse(raw); this.sent.push(message);
-      if (message.type === "authenticate") queueMicrotask(() => this.message({ type: "authenticated" }));
+      if (message.type === "authenticate" && authenticate) queueMicrotask(() => this.message({ type: "authenticated" }));
     }
     close() { this.closes += 1; this.readyState = 3; this.emit("close"); }
   }
   const exports = {};
   const imports = {
-    "@/lib/api-client": { getApiAccessToken: async () => "token" },
+    "@/lib/api-client": { getApiAccessToken: getToken },
     "@/lib/access-cache": { accessCacheEpoch: () => 0, registerAccessCache() {} },
   };
   const source = fs.readFileSync(new URL("./cash-discount-live.ts", import.meta.url), "utf8");
@@ -40,6 +40,22 @@ function harness() {
   return { request: exports.runCashDiscountLiveRequest, sockets, timers, advance: (ms) => { now += ms; } };
 }
 const tick = () => new Promise((resolve) => setImmediate(resolve));
+
+test('a catalogue deadline can cancel a stalled authentication bootstrap',async()=>{
+ const h=harness(()=>new Promise(()=>{}));const controller=new AbortController();
+ const pending=h.request({connectionId:'pc-A',companyName:'A',operation:'ledger_masters',signal:controller.signal});
+ const rejected=assert.rejects(pending,/deadline/);
+ await tick();controller.abort(new Error('catalogue deadline'));await rejected;
+ assert.equal(h.sockets.length,0);
+});
+
+test('a catalogue deadline also stops waiting for gateway authentication',async()=>{
+ const h=harness(async()=>'token',false);const controller=new AbortController();
+ const pending=h.request({connectionId:'pc-A',companyName:'A',operation:'ledger_masters',signal:controller.signal});
+ const rejected=assert.rejects(pending,/deadline/);
+ await tick();controller.abort(new Error('gateway deadline'));await rejected;
+ assert.ok(!h.sockets[0].sent.some(message=>message.type==='request'));
+});
 
 test("a second request does not replace a two-minute-old socket with pending work", async () => {
   const h = harness();

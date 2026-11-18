@@ -336,11 +336,21 @@ export async function runCashDiscountLiveRequest<T>(request: LiveRequest): Promi
   throw lastError;
 }
 
+function whileActive<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const abort = () => { signal.removeEventListener('abort', abort); reject(signal.reason); };
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(value => { signal.removeEventListener('abort', abort); resolve(value); }, error => { signal.removeEventListener('abort', abort); reject(error); });
+    if (signal.aborted) abort();
+  });
+}
+
 async function runLiveRequestOnce<T>(request: LiveRequest, stallMs?: number): Promise<T> {
   const epoch=accessCacheEpoch();
   request.signal?.throwIfAborted();
-  const session = await getLiveSession(request);
-  await session.ready;
+  const session = await whileActive(getLiveSession(request), request.signal);
+  await whileActive(session.ready, request.signal);
   if(epoch!==accessCacheEpoch())throw new DOMException('Access changed before the live request started.','AbortError');
   request.signal?.throwIfAborted();
   return new Promise<T>((resolve, reject) => {

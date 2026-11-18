@@ -838,3 +838,11 @@ export async function fetchCaseFileSignedUrl(
 
 export const fetchCaseDetailPreferCache = fetchCaseDetail;
 export const fetchCaseFileSignedUrlPreferCache = fetchCaseFileSignedUrl;
+
+export type CaseProgress = Pick<SavedAnalysisJob, "status" | "progress" | "stage" | "error"> & { queuePosition?: number | null };
+
+export async function fetchCaseAnalysisProgress(ids: string[]): Promise<Record<string, CaseProgress>> {
+  const response = await performApiFetch(`/api/cases/analysis-progress?ids=${ids.join(",")}`, { cache: "no-store" });
+  if (!response.ok) throw new Error("Could not load case progress.");
+  return (await response.json()).progress;
+}

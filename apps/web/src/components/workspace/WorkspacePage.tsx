@@ -1,5 +1,6 @@
 "use client";
 
+import { BatchCases } from "./BatchCases";
 import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -503,6 +504,8 @@ export function WorkspacePage() {
   const [duplicateUploadConflicts, setDuplicateUploadConflicts] = useState<DuplicateUploadConflict[]>([]);
   const [duplicateCaseNotice, setDuplicateCaseNotice] = useState<DuplicateCaseReference | null>(null);
   const [caseDraftCreated, setCaseDraftCreated] = useState(false);
+  const [uploadMode, setUploadMode] = useState<"one" | "separate">("one");
+  const [batchStarted, setBatchStarted] = useState(false);
   const [recentCreatedCaseId,setRecentCreatedCaseId]=useState<string|null>(null);
   useEffect(()=>{try{const saved=JSON.parse(window.localStorage.getItem("bhuleshwar:last-created-case") || "null");if(saved?.id)setRecentCreatedCaseId(saved.id);}catch{}},[]);
   const [draftCaseStatus, setDraftCaseStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
@@ -1042,6 +1045,8 @@ export function WorkspacePage() {
   );
 
   const resetWorkspace = () => {
+    setBatchStarted(false);
+    setUploadMode("one");
     setCaseDraftCreated(false);
     setDuplicateUploadConflicts([]);
     setDuplicateCaseNotice(null);
@@ -1460,10 +1465,10 @@ export function WorkspacePage() {
           />
 
           {/* Centered Upload Card */}
-          {teamAccess.enforcementRequired&&<label className="mx-auto flex w-full max-w-2xl flex-col gap-2 text-sm font-medium">Company for this case<select value={selectedAccessCompany} onChange={e=>setAccessCompanyId(e.target.value)} className="rounded-lg border border-[#ded8d0] bg-white p-3"><option value="">Select a company</option>{availableCompanies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
+          {teamAccess.enforcementRequired&&<label className="mx-auto flex w-full max-w-2xl flex-col gap-2 text-sm font-medium">Company for this case<select disabled={batchStarted} value={selectedAccessCompany} onChange={e=>setAccessCompanyId(e.target.value)} className="rounded-lg border border-[#ded8d0] bg-white p-3"><option value="">Select a company</option>{availableCompanies.map(c=><option key={c.id} value={c.id}>{c.name}</option>)}</select></label>}
           <div className="flex flex-1 items-center justify-center pb-12">
             <div className="w-full max-w-2xl">
-          <div
+          {!batchStarted && (<div
             className={`w-full rounded-2xl border-2 border-dashed px-6 py-8 text-center transition-all sm:px-10 sm:py-10 ${
               isUploadDragActive
                 ? "border-[#2b1a10] bg-[#fbfaf8] shadow-md ring-4 ring-[#ede6d9]"
@@ -1557,6 +1562,7 @@ export function WorkspacePage() {
             </div>
           </div>
 
+          )}
           {/* Draft Error & Queue Overlays */}
           {draftCaseStatus === "error" && draftCaseError && (
             <div className="mt-6 rounded-2xl border border-red-200 bg-red-50 px-5 py-4 text-sm font-bold text-red-700 shadow-sm text-center">
@@ -1572,6 +1578,45 @@ export function WorkspacePage() {
               animate={{ opacity: 1, y: 0 }}
               className="mt-6 flex flex-col items-center w-full"
             >
+              {queuedUploads.length > 1 && !persistence.savedCase && !batchStarted && (
+                <div className="mb-3 flex w-full flex-col gap-2 rounded-2xl border border-[#ded8d0] bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                  <span className="text-xs font-medium text-[#3d3530]">
+                    {queuedUploads.length} files added. Are they one case or separate cases?
+                  </span>
+                  <div className="inline-flex rounded-lg border border-[#ded8d0] bg-[#fbfaf8] p-0.5" role="radiogroup" aria-label="How to make cases">
+                    {([
+                      ["one", "One case"],
+                      ["separate", "Separate cases"],
+                    ] as const).map(([mode, label]) => (
+                      <button
+                        key={mode}
+                        type="button"
+                        role="radio"
+                        aria-checked={uploadMode === mode}
+                        onClick={() => setUploadMode(mode)}
+                        className={`rounded-md px-3 py-1.5 text-xs font-semibold transition-colors ${
+                          uploadMode === mode ? "bg-[#2b1a10] text-white shadow-2xs" : "text-[#5b4b3d] hover:text-[#111827]"
+                        }`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+              {uploadMode === "separate" && queuedUploads.length > 1 && !persistence.savedCase ? (
+                <div className="w-full rounded-2xl border border-[#ded8d0] bg-white p-4 sm:p-5 shadow-xs">
+                  <BatchCases
+                    uploads={queuedUploads}
+                    accessCompanyId={selectedAccessCompany}
+                    disabled={teamAccess.enforcementRequired && !selectedAccessCompany}
+                    onRemoveUpload={removeUpload}
+                    onStarted={() => setBatchStarted(true)}
+                    onReset={resetWorkspace}
+                  />
+                </div>
+              ) : (
+              <>
               <div className="w-full rounded-2xl border border-[#ded8d0] bg-white p-4 sm:p-5 shadow-xs">
                 {queuedUploadRail}
               </div>
@@ -1596,6 +1641,7 @@ export function WorkspacePage() {
                   )}
                 </Button>
               </div>
+              </>)}
             </motion.div>
           )}
 

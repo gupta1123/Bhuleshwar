@@ -30,6 +30,8 @@ import {
 } from "@/components/ui/table";
 import {
   fetchCasePage,
+  fetchCaseAnalysisProgress,
+  type CaseProgress,
   recycleCase,
   type SavedCaseRecord,
 } from "@/lib/case-persistence";
@@ -253,15 +255,16 @@ export function CasesPage() {
       setTotalPages(cached.totalPages);
       setStatus("ready");
       setError(null);
-      return;
     }
 
     const controller = new AbortController();
 
-    setCases([]);
-    setTotalCount(0);
-    setTotalPages(1);
-    setStatus("loading");
+    if (!cached) {
+      setCases([]);
+      setTotalCount(0);
+      setTotalPages(1);
+      setStatus("loading");
+    }
     setError(null);
 
     fetchCasePage({
@@ -296,6 +299,35 @@ export function CasesPage() {
 
     return () => controller.abort();
   }, [cacheKey, currentPage, debouncedSearchQuery, pageSize]);
+
+  const [progress, setProgress] = useState<Record<string, CaseProgress>>({});
+  const processingIds = cases.filter(item => item.status === "processing").map(item => item.id).join(",");
+  useEffect(() => {
+    setProgress({});
+    if (!processingIds) return;
+    let stopped = false;
+    let timer: number;
+    const poll = async () => {
+      const ids = processingIds.split(",");
+      try {
+        const live: Record<string, CaseProgress> = {};
+        for (let i = 0; i < ids.length && !stopped; i += 50) {
+          Object.assign(live, await fetchCaseAnalysisProgress(ids.slice(i, i + 50)));
+        }
+        if (stopped) return;
+        setProgress(live);
+        if (Object.values(live).some(job => ["succeeded", "failed", "cancelled"].includes(job.status))) {
+          setListRevision(value => value + 1);
+          return;
+        }
+      } catch {
+        // Retry temporary network failures while the register is open.
+      }
+      if (!stopped) timer = window.setTimeout(poll, 4000);
+    };
+    void poll();
+    return () => { stopped = true; window.clearTimeout(timer); };
+  }, [processingIds, cacheEpoch]);
 
   async function handleConfirmDelete() {
     if (!pendingCase) return;
@@ -521,7 +553,11 @@ export function CasesPage() {
                               className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium shadow-[0_1px_2px_rgba(0,0,0,0.02)] ${pill.className}`}
                             >
                               <span className={`h-1.5 w-1.5 rounded-full ${pill.dotColor}`} />
-                              {pill.label}
+                              {progress[item.id]?.status === "running"
+                                ? `${progress[item.id].stage || "Analysing"} ? ${progress[item.id].progress}%`
+                                : progress[item.id]?.status === "queued"
+                                  ? `Queued${progress[item.id].queuePosition ? ` ? #${progress[item.id].queuePosition}` : ""}`
+                                  : pill.label}
                             </span>
                           </TableCell>
 

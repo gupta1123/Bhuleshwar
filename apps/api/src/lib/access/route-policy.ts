@@ -23,6 +23,7 @@ export function userRoutePolicy(path: string, method: string, action?: string, c
   let m:RegExpMatchArray|null;
   if (path.startsWith('/api/settings/')) return simple('settings.manage');
   if (path === '/api/ai/openrouter') return simple('purchases.prepare');
+  if (path === '/api/cases/analysis-progress' && method === 'GET') return simple('purchases.view');
   if (path === '/api/cases') return simple(read ? 'purchases.view' : 'purchases.prepare');
   if ((m=path.match(/^\/api\/cases\/([^/]+)(?:\/(.*))?$/))) {
     const tail=m[2]||'';

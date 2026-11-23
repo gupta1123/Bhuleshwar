@@ -6,7 +6,7 @@ import { DEMO_SCOPE, demoGstCall, isGstDemo } from "@/lib/gst-demo";
 
 export { isGstDemo };
 
-export type GstScopeInput = { connectionId: string; companyName: string; companyGuid?: string };
+export type GstScopeInput = { companyId?: string; connectionId: string; companyName: string; companyGuid?: string; financialYear?: string };
 
 export function readGstScope(): GstScopeInput | null {
   const connectionId = readPreferredTallyConnectionId();
@@ -28,14 +28,29 @@ type ConnectionSummary = { id?: string; lastCompanyName?: string | null; bridgeC
 
 // The saved company choice can point at a connector that was since replaced.
 // Fall back to the company the live connector has loaded in Tally.
-export async function resolveGstScope(): Promise<GstScopeInput | null> {
+export async function resolveGstScope(onChoices?: (choices: GstScopeInput[]) => void, current?: GstScopeInput): Promise<GstScopeInput | null> {
   if (isGstDemo()) return DEMO_SCOPE;
   const saved = readGstScope();
-  if (saved) return saved;
+
   try {
-    const response = await apiFetch("/api/tally/connections", { cache: "no-store" });
+    const response = await apiFetch("/api/tally/connections?purpose=gst", { cache: "no-store" });
     if (!response.ok) return null;
-    const payload = await response.json() as { connections?: ConnectionSummary[] };
+    const payload = await response.json() as { connections?: ConnectionSummary[]; scopes?: GstScopeInput[] };
+    if (current?.companyId && payload.scopes) {
+      const sameCompany=payload.scopes.filter(s=>s.companyId===current.companyId);
+      const sameYear=sameCompany.find(s=>s.companyGuid===current.companyGuid && s.financialYear===current.financialYear);
+      if (sameYear) return sameYear;
+      if (sameCompany.length===1 && (!current.companyGuid || !sameCompany[0].connectionId)) return sameCompany[0];
+      return {...current,connectionId:''};
+    }
+    if (payload.scopes) {
+      if (payload.scopes.length === 1 && (!saved || (saved.companyGuid
+        ? saved.companyGuid === payload.scopes[0].companyGuid
+        : saved.companyName === payload.scopes[0].companyName))) return payload.scopes[0];
+      onChoices?.(payload.scopes);
+      return null;
+    }
+    if (saved) return saved;
     const known = (payload.connections ?? []).filter((c) => c.id && c.lastCompanyName);
     const live = known.filter((c) => c.bridgeConnected && c.companyLoaded);
     const preferred = readPreferredTallyConnectionId();

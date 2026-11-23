@@ -3,6 +3,7 @@ export type ModuleKey = keyof typeof MODULES;
 export const ACTIONS = { view: 'View records and documents', prepare: 'Prepare, correct and analyze', submit: 'Submit for review', approve: 'Approve or return work', post: 'Post approved entries to ERP', export: 'Export and download', recycle: 'Recycle and restore', delete: 'Permanently delete' } as const;
 export const ADMIN_PERMISSIONS = { 'team.manage': 'Manage teammates', 'roles.manage': 'Manage roles', 'settings.manage': 'Manage settings', 'connections.manage': 'Manage ERP connections' } as const;
 export const PERMISSIONS: Readonly<Record<string,string>> = Object.freeze({
+  "purchases.support": "Diagnose the company connector and look up vouchers",
   ...Object.fromEntries(Object.entries(MODULES).flatMap(([m,label])=>Object.entries(ACTIONS).map(([a,action])=>[`${m}.${a}`,`${label}: ${action}`]))), ...ADMIN_PERMISSIONS,
 });
 export const DEFAULT_ROLES = [

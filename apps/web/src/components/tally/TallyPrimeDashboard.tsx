@@ -19,6 +19,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ServerSupportPanel } from "./ServerSupportPanel";
 import { TallyCompanyLinkingPanel } from "@/components/tally/TallyCompanyLinkingPanel";
 import { CaseConfirmDialog } from "@/components/cases/CaseConfirmDialog";
 
@@ -1032,6 +1033,7 @@ export function TallyPrimeDashboard({ initialView = "home" }: TallyPrimeDashboar
               value={companyLoaded ? "Loaded" : "Not detected"}
             />
           </div>
+          <ServerSupportPanel key={selectedConnection.id} connectionId={selectedConnection.id}/>
           {connectorActive ? (
             <>
               <TallyCompanyLinkingPanel connectionId={selectedConnection.id} onLinked={() => loadConnections({ quiet: true })} />

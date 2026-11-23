@@ -10,6 +10,7 @@ type ObservedCompany = {
   companyName: string;
   financialYear: string;
   isActive: boolean;
+  isServer: boolean;
   linkedCompanyId: string | null;
   linkedCompanyName: string | null;
 };
@@ -40,17 +41,18 @@ export function TallyCompanyLinkingPanel({ connectionId, onLinked }: { connectio
   // Inactive observations are retained by the API for history and diagnostics,
   // but they must not interrupt the normal connection flow.
   const unlinked = payload?.activeUnlinked || payload?.observedCompanies?.filter((company) => company.isActive && !company.linkedCompanyId) || [];
-  if (hidden || (payload && unlinked.length === 0)) return null;
-  const link = async (company: ObservedCompany) => {
+  const linked = payload?.observedCompanies?.filter(company => company.isActive && company.linkedCompanyId) ?? [];
+  if (hidden || (payload && !unlinked.length && !linked.length)) return null;
+  const link = async (company: ObservedCompany, action?: "set-server" | "remove-server") => {
     const key = `${company.companyGuid}\u0000${company.financialYear}`;
-    const chosen = selection[key];
+    const chosen = action ? company.linkedCompanyId : selection[key];
     if (!chosen) return;
     setBusyKey(key); setMessage(null);
     try {
       const response = await apiFetch(`/api/tally/connections/${connectionId}/company-links`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          companyId: chosen === "__create__" ? undefined : chosen,
+          action, companyId: chosen === "__create__" ? undefined : chosen,
           createCompany: chosen === "__create__",
           companyGuid: company.companyGuid,
           financialYear: company.financialYear,
@@ -58,7 +60,8 @@ export function TallyCompanyLinkingPanel({ connectionId, onLinked }: { connectio
       });
       const result = await response.json().catch(() => ({})) as { error?: string };
       if (!response.ok) throw new Error(result.error || "Could not link this company.");
-      setMessage(`${company.companyName} is linked. Future reconnects on this connector will restore it automatically.`);
+      if (action) setMessage("Server connector setting saved.");
+      else setMessage(`${company.companyName} is linked. Future reconnects on this connector will restore it automatically.`);
       await load();
       await onLinked();
     } catch (error) {
@@ -70,11 +73,17 @@ export function TallyCompanyLinkingPanel({ connectionId, onLinked }: { connectio
       <div className="flex items-start gap-3">
         <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-white text-amber-700"><ShieldCheck className="h-5 w-5" /></div>
         <div>
-          <h3 className="text-sm font-semibold text-[#24140c]">Link this Tally company once</h3>
+          <h3 className="text-sm font-semibold text-[#24140c]">Company connection</h3>
           <p className="mt-1 text-xs leading-5 text-amber-900/75">Confirm which Bhuleshwar company owns each exact Tally GUID and financial year. The connector installation will remember this mapping across reconnects and updates.</p>
         </div>
       </div>
       <div className="mt-4 space-y-3">
+        {linked.map(company => <div key={company.companyGuid + company.financialYear} className="flex items-center justify-between gap-3">
+          <span>{company.companyName}{company.isServer ? " ? Designated server" : ""}</span>
+          <Button disabled={busyKey !== null} onClick={() => void link(company, company.isServer ? "remove-server" : "set-server")}>
+            {company.isServer ? "Remove server designation" : "Use as company server"}
+          </Button>
+        </div>)}
         {unlinked.map((company) => {
           const key = `${company.companyGuid}\u0000${company.financialYear}`;
           return <div key={key} className="flex flex-col gap-3 rounded-xl border border-amber-200 bg-white p-4 lg:flex-row lg:items-center">

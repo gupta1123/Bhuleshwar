@@ -12,7 +12,7 @@ import {
 import { OverviewView, ReviewView, scopeRun } from "./GstViews";
 import { ConnectView, SettingsView, SuppliersView } from "./GstAdminViews";
 import { Alert, btn, btnPrimary, Drawer, Empty, Panel, th, td } from "./gst-ui";
-import { useTallyIndicator } from "@/components/tally/TallyStatusProvider";
+import { apiFetch } from "@/lib/api-client";
 
 const TABS = ["Overview", "Review", "Suppliers", "Connect", "Settings"] as const;
 type Tab = (typeof TABS)[number];
@@ -31,10 +31,28 @@ const SOURCES = ["books", "gstr2b", "gstr2a", "gstr3b"] as const;
 const SOURCE_LABEL = { books: "Tally books", gstr2b: "GSTR-2B", gstr2a: "GSTR-2A", gstr3b: "GSTR-3B" } as const;
 
 export default function GstReconciliationPage() {
-  const { status: tallyStatus } = useTallyIndicator();
+  const [tallyOffline, setTallyOffline] = useState(false);
   // Saved results are read from the server, so only the Tally actions need the connector.
-  const tallyOffline = !isGstDemo() && tallyStatus !== "connected" && tallyStatus !== "checking";
+
+  const [choices, setChoices] = useState<GstScopeInput[] | null>(null);
   const [scope, setScope] = useState<GstScopeInput | null>(null);
+  useEffect(() => {
+    if (!scope || isGstDemo()) return;
+    if (!scope.connectionId) { setTallyOffline(true); return; }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    async function refresh() {
+      try {
+        const response = await apiFetch(`/api/tally/connections/${scope!.connectionId}/status`, {cache:"no-store"});
+        const {connection} = await response.json();
+        if (!cancelled) setTallyOffline(!response.ok || !connection?.bridgeConnected || !connection.tallyReachable ||
+          !connection.companyLoaded || connection.lastCompanyName !== scope!.companyName);
+      } catch { if (!cancelled) setTallyOffline(true); }
+      if (!cancelled) timer = setTimeout(refresh, 15000);
+    }
+    void refresh();
+    return () => { cancelled = true; clearTimeout(timer); };
+  }, [scope]);
   const [tab, setTab] = useState<Tab>("Overview");
   const [bucket, setBucket] = useState("needs");
   const [setupOpen, setSetupOpen] = useState(false);
@@ -68,9 +86,18 @@ export default function GstReconciliationPage() {
 
   // The connector may still be reconnecting when the page opens, so keep looking until a company shows up.
   useEffect(() => {
+    if (scope?.companyId) {
+      let cancelled=false;
+      const timer=window.setInterval(async()=>{
+        const next=await resolveGstScope(undefined,scope);
+        if(!cancelled && next && next.companyId===scope.companyId &&
+            (next.connectionId!==scope.connectionId || next.companyName!==scope.companyName)) setScope(next);
+      },15000);
+      return ()=>{cancelled=true;window.clearInterval(timer);};
+    }
     if (scope) return;
     let cancelled = false;
-    const find = () => void resolveGstScope().then((next) => { if (!cancelled && next) setScope(next); });
+    const find = () => void resolveGstScope(items => { if (!cancelled) setChoices(items); }).then((next) => { if (!cancelled && next) setScope(next); });
     find();
     const timer = window.setInterval(find, 4000);
     return () => { cancelled = true; window.clearInterval(timer); };
@@ -266,7 +293,14 @@ export default function GstReconciliationPage() {
             ) : undefined}
           />
 
-          {!scope ? (
+          {!scope && choices ? (
+            <div className="rounded-xl bg-white p-4">
+              {choices.length ? <select aria-label="Company and financial year" defaultValue="" onChange={event => setScope(choices[Number(event.target.value)])}>
+                <option value="" disabled>Choose company and financial year</option>
+                {choices.map((item,index) => <option key={index} value={index}>{item.companyName} ? {item.financialYear}</option>)}
+              </select> : "The designated company server is unavailable. Check its pairing and company link."}
+            </div>
+          ) : !scope ? (
             <Empty icon={<Plug className="h-7 w-7" />} title="No Tally company found" text="No Tally company has been connected to this account yet. Set up the Tally Connector (Bhuleshwar Local Agent) with your company loaded, then return here. This page picks it up on its own." action={<a href="/tally-prime?view=connection" className={btn}>Open Tally Connector</a>} />
           ) : !loaded ? (
             <div className="flex items-center gap-2.5 rounded-xl border border-[#ded8d0] bg-white px-4 py-6 text-[13px] text-[#3d3530]" aria-live="polite">

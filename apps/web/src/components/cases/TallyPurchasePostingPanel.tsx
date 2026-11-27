@@ -820,6 +820,19 @@ export function TallyPurchasePostingPanel({
   // The review on screen right now. A save that finishes after newer edits
   // must not replace them; a failed automatic save waits for the next edit.
   const currentReviewRef = useRef<TallyPostingReview | null>(null);
+  const editedFields = useRef(new Set<string>());
+  function applyPreparedReview(incoming: TallyPostingReview | null) {
+    setReview(current => {
+      if (!incoming || !current || incoming.selectedInvoiceDocumentId !== current.selectedInvoiceDocumentId) return incoming;
+      const fields = Object.fromEntries(Object.entries(current).filter(([key]) => editedFields.current.has(key)));
+      return { ...incoming, ...fields, lines: incoming.lines.map(line => {
+        const previous = current.lines.find(row => row.lineId === line.lineId);
+        if (!previous) return line;
+        return { ...line, ...Object.fromEntries(Object.entries(previous).filter(([key]) => editedFields.current.has(line.lineId + "." + key))) };
+      }) };
+    });
+  }
+  useEffect(() => { editedFields.current.clear(); }, [caseId]);
   const autoSaveFailedReviewRef = useRef<TallyPostingReview | null>(null);
   const dirtyRef = useRef(dirty);
   dirtyRef.current = dirty;
@@ -848,7 +861,7 @@ export function TallyPurchasePostingPanel({
       setPayload(hydrated);
       setSelectedConnectionId(hydrated.selectedConnectionId ?? connectionId ?? "");
       setSelectedCompanyName(hydrated.selectedCompanyName ?? companyName ?? "");
-      if (replaceReview || (!dirty && !review)) setReview(hydrated.review);
+      if (replaceReview || (!dirty && !review)) applyPreparedReview(hydrated.review);
       // A failed posting loaded from storage is history, not a failure of the
       // current page operation. Keep it in the footer/status area; only a new
       // live request or posting transition should raise the prominent banner.
@@ -934,7 +947,7 @@ export function TallyPurchasePostingPanel({
         const editingReview = dirtyRef.current ? currentReviewRef.current : null;
         setPayload(editingReview ? { ...hydrated, review: editingReview } : hydrated);
         if (!editingReview) {
-          setReview(hydrated.review);
+          applyPreparedReview(hydrated.review);
           setSupplierLedgerMatch(hydrated.supplierLedgerMatch ?? null);
           setLineMasterMatches(hydrated.lineMasterMatches ?? []);
         }
@@ -978,7 +991,7 @@ export function TallyPurchasePostingPanel({
           const editingReview = dirtyRef.current ? currentReviewRef.current : null;
           setPayload({ ...hydrated, review: editingReview ?? cachedReview, liveMatchingComplete: false });
           if (!editingReview) {
-            setReview(cachedReview);
+            applyPreparedReview(cachedReview);
             setLineMasterMatches(hydrated.lineMasterMatches ?? []);
           }
         } catch (prepareError) {
@@ -1392,7 +1405,7 @@ export function TallyPurchasePostingPanel({
       .then((match) => {
         setSupplierLedgerMatch(match);
         if (match.matchType === "direct_match" && match.ledgerName) {
-          setReview((current) => current ? { ...current, supplierLedgerName: match.ledgerName ?? "" } : current);
+          setReview((current) => current && !editedFields.current.has("supplierLedgerName") && !current.supplierLedgerName && current.supplierGstin.trim() === supplierGstin && current.supplierName.trim() === supplierName ? { ...current, supplierLedgerName: match.ledgerName ?? "" } : current);
           setDirty(true);
         }
       })
@@ -1473,10 +1486,10 @@ export function TallyPurchasePostingPanel({
               ...line,
               stockItemName:
                 line.stockItemName ||
-                (match.stockItem.matchType === "direct_match" ? match.stockItem.masterName ?? "" : ""),
+                (!editedFields.current.has(line.lineId + ".stockItemName") && match.stockItem.matchType === "direct_match" ? match.stockItem.masterName ?? "" : ""),
               purchaseLedgerName:
                 line.purchaseLedgerName ||
-                (match.purchaseLedger.matchType === "direct_match" ? match.purchaseLedger.masterName ?? "" : ""),
+                (!editedFields.current.has(line.lineId + ".purchaseLedgerName") && match.purchaseLedger.matchType === "direct_match" ? match.purchaseLedger.masterName ?? "" : ""),
             };
           }),
         } : current);
@@ -1653,6 +1666,7 @@ export function TallyPurchasePostingPanel({
   }
 
   function updateReview<K extends keyof TallyPostingReview>(key: K, value: TallyPostingReview[K]) {
+    editedFields.current.add(key);
     setReview((current) => current ? { ...current, [key]: value } : current);
     if (key === "supplierName" || key === "supplierGstin") {
       setSupplierLedgerMatch(null);
@@ -1702,18 +1716,16 @@ export function TallyPurchasePostingPanel({
     }
   }
 
-  async function handleAdjustmentToggle(
-    key: "applyTds194q" | "applyTransportTds" | "applyGstTds" | "tcsReceivable"
-  ) {
-    if (!review || locked || saving) return;
-    const nextReview = { ...review, [key]: !review[key] };
-    setReview(nextReview);
+  function handleAdjustmentToggle(key: "applyTds194q" | "applyTransportTds" | "applyGstTds" | "tcsReceivable") {
+    if (!review || locked) return;
+    editedFields.current.add(key);
+    setReview(current => current && { ...current, [key]: !current[key] });
     setDirty(true);
-    setNotice("Recalculating voucher…");
-    await persistReview(nextReview);
+    setNotice(null);
   }
 
   function updateLine(index: number, key: keyof TallyPostingReview["lines"][number], value: string) {
+    if (review?.lines[index]) editedFields.current.add(review.lines[index].lineId + "." + key);
     setReview((current) => {
       if (!current) return current;
       return {
@@ -1730,6 +1742,7 @@ export function TallyPurchasePostingPanel({
   // A godown picked on one line also fills every line that has none: Tally
   // rejects the whole voucher when any item line lacks a godown.
   function updateGodown(index: number, value: string) {
+    review?.lines.forEach((line, i) => { if (i === index || (value && !line.godownName.trim())) editedFields.current.add(line.lineId + ".godownName"); });
     setReview((current) => {
       if (!current) return current;
       return {
@@ -1978,7 +1991,7 @@ export function TallyPurchasePostingPanel({
       );
       const hydrated = withLiveMasterOptions(prepared);
       setPayload(hydrated);
-      if (!dirty) setReview(hydrated.review);
+      if (!dirtyRef.current) applyPreparedReview(hydrated.review);
       setSupplierLedgerMatch(hydrated.supplierLedgerMatch ?? null);
       setLineMasterMatches(hydrated.lineMasterMatches ?? []);
       setLiveMastersReady(true);
@@ -2168,13 +2181,16 @@ export function TallyPurchasePostingPanel({
     const buyer = (review.buyerGstin || payload.connection?.companyGstin || "").match(/^\d{2}/)?.[0];
     return supplier && buyer ? (supplier === buyer ? "cgst_sgst" as const : "igst" as const) : "unknown" as const;
   })();
-  const sourceWithholdingAmount = [
-    payload.source?.invoiceTds194qAmount?.trim() ? Number(payload.calculation?.tds194qAmount || 0) : 0,
-    payload.source?.invoiceTransportTdsAmount?.trim() ? Number(payload.calculation?.transportTdsAmount || 0) : 0,
-    payload.source?.invoiceCgstTdsAmount?.trim() ? Number(payload.calculation?.cgstTdsAmount || 0) : 0,
-    payload.source?.invoiceSgstTdsAmount?.trim() ? Number(payload.calculation?.sgstTdsAmount || 0) : 0,
-    payload.source?.invoiceIgstTdsAmount?.trim() ? Number(payload.calculation?.igstTdsAmount || 0) : 0,
-  ].reduce((total, amount) => total + (Number.isFinite(amount) ? amount : 0), 0);
+  // Eligibility and basis are computed by the API even when GST TDS is off.
+  // Apply the current switch immediately, using the same per-component rounding.
+  const gstDeduction = (mode: typeof localTaxMode, printed?: string | null) => {
+    if (!review.applyGstTds || !payload.accountingSettings.gstTdsEnabled || mode !== localTaxMode) return "0";
+    if (payload.calculation?.scrapGstTdsEligible) {
+      const basisPaise = Math.round(Number(payload.calculation.gstTdsBasisAmount) * 100);
+      return (Math.round(basisPaise / (mode === "igst" ? 50 : 100)) / 100).toFixed(2);
+    }
+    return String(Math.abs(Number((printed || "0").replace(/,/g, ""))) || 0);
+  };
   const liveCoreCalculation = calculatePurchaseVoucher({
     taxMode: localTaxMode,
     defaultGstRate: review.gstRate,
@@ -2183,7 +2199,13 @@ export function TallyPurchasePostingPanel({
     freightGstRate: review.freightGstRate,
     invoiceGstAmount: payload.source?.invoiceTaxAmount ?? "",
     invoiceTotal: review.invoiceTotal,
-    invoiceWithholdingAmount: String(sourceWithholdingAmount),
+    printedDeductions: {
+      tds194q: Boolean(payload.source?.invoiceTds194qAmount?.trim()),
+      transport: Boolean(payload.source?.invoiceTransportTdsAmount?.trim()),
+      cgst: Boolean(payload.source?.invoiceCgstTdsAmount?.trim()),
+      sgst: Boolean(payload.source?.invoiceSgstTdsAmount?.trim()),
+      igst: Boolean(payload.source?.invoiceIgstTdsAmount?.trim()),
+    },
     sourceRoundOffAmount: payload.source?.invoiceRoundOffAmount ?? "",
     confirmedRoundOffAmount: review.roundOffAmount,
     tcsAmount: review.tcsReceivable ? review.tcsAmount : "0",
@@ -2191,12 +2213,12 @@ export function TallyPurchasePostingPanel({
     tds194qBasisAmount: review.tds194qBasisAmount,
     tds194qRate: review.tds194qRate,
     tds194qRounding: review.tds194qRounding,
-    transportTdsEnabled: review.applyTransportTds,
+    transportTdsEnabled: payload.accountingSettings.transporterTdsEnabled && review.applyTransportTds,
     sourceTransportTdsAmount: payload.source?.invoiceTransportTdsAmount ?? "",
     transportTdsRate: review.transportTdsRate,
-    cgstTdsAmount: review.applyGstTds ? payload.calculation?.cgstTdsAmount ?? "0" : "0",
-    sgstTdsAmount: review.applyGstTds ? payload.calculation?.sgstTdsAmount ?? "0" : "0",
-    igstTdsAmount: review.applyGstTds ? payload.calculation?.igstTdsAmount ?? "0" : "0",
+    cgstTdsAmount: gstDeduction("cgst_sgst", payload.source?.invoiceCgstTdsAmount),
+    sgstTdsAmount: gstDeduction("cgst_sgst", payload.source?.invoiceSgstTdsAmount),
+    igstTdsAmount: gstDeduction("igst", payload.source?.invoiceIgstTdsAmount),
   });
   const calculation = payload.calculation ? {
     ...payload.calculation,
@@ -2362,8 +2384,8 @@ export function TallyPurchasePostingPanel({
                 <button
                   aria-checked={review.applyTds194q}
                   className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyTds194q ? "bg-emerald-700" : "bg-slate-300"}`}
-                  disabled={locked || saving}
-                  onClick={() => void handleAdjustmentToggle("applyTds194q")}
+                  disabled={locked}
+                  onClick={() => handleAdjustmentToggle("applyTds194q")}
                   role="switch"
                   type="button"
                 >
@@ -2375,8 +2397,8 @@ export function TallyPurchasePostingPanel({
                 <button
                   aria-checked={review.applyTransportTds}
                   className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyTransportTds ? "bg-emerald-700" : "bg-slate-300"}`}
-                  disabled={locked || saving}
-                  onClick={() => void handleAdjustmentToggle("applyTransportTds")}
+                  disabled={locked}
+                  onClick={() => handleAdjustmentToggle("applyTransportTds")}
                   role="switch"
                   type="button"
                 >
@@ -2388,8 +2410,8 @@ export function TallyPurchasePostingPanel({
                 <button
                   aria-checked={review.applyGstTds}
                   className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyGstTds ? "bg-emerald-700" : "bg-slate-300"}`}
-                  disabled={locked || saving}
-                  onClick={() => void handleAdjustmentToggle("applyGstTds")}
+                  disabled={locked}
+                  onClick={() => handleAdjustmentToggle("applyGstTds")}
                   role="switch"
                   type="button"
                 >
@@ -2405,8 +2427,8 @@ export function TallyPurchasePostingPanel({
                 <button
                   aria-checked={review.tcsReceivable}
                   className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.tcsReceivable ? "bg-emerald-700" : "bg-slate-300"}`}
-                  disabled={locked || saving}
-                  onClick={() => void handleAdjustmentToggle("tcsReceivable")}
+                  disabled={locked}
+                  onClick={() => handleAdjustmentToggle("tcsReceivable")}
                   role="switch"
                   type="button"
                 >
@@ -2967,6 +2989,33 @@ export function TallyPurchasePostingPanel({
             </div>
           ) : (
             <div>
+              {review.applyGstTds && !cgstTdsActive && !sgstTdsActive && !igstTdsActive && (
+                <p className="py-2 text-xs text-slate-600" role="status">
+                  {payload.accountingSettings.gstTdsEnabled
+                    ? "GST TDS is on. No deduction applies to the current invoice details."
+                    : "GST TDS is disabled in the company settings."}
+                </p>
+              )}
+              <section aria-label="GST by item" className="border-b border-slate-200 py-3 text-xs">
+                <h4 className="font-semibold text-slate-800">GST by item</h4>
+                <ul className="divide-y divide-slate-100">
+                  {liveCoreCalculation.itemTaxes.map((tax, index) => {
+                    const line = review.lines[index];
+                    return (
+                      <li key={tax.lineId} className="py-2">
+                        <div className="font-medium text-slate-900">{line.stockItemName || line.description || `Item ${index + 1}`}</div>
+                        <div className="text-slate-600">
+                          {money(tax.taxable)} taxable · {tax.rate}% GST
+                          {localTaxMode === "unknown" ? " · Tax type pending" : ` = ${money(tax.gst)} ${localTaxMode === "igst" ? "IGST" : "GST"}`}
+                        </div>
+                        {localTaxMode === "cgst_sgst" && (
+                          <div className="text-slate-600">CGST {money(tax.cgst)} + SGST {money(tax.sgst)}</div>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              </section>
               <div className="flex items-center justify-between gap-3 py-2.5 text-[11px]">
                 <span className="font-semibold text-slate-700">Ledger reconciliation</span>
                 <span className="ml-auto text-slate-500">
@@ -3329,6 +3378,8 @@ export function TallyPurchasePostingPanel({
                       <div className="pr-5">
                         <strong>{line.stockItemName || line.description || "Item not mapped"}</strong>
                         <div className="text-[9px] text-[#657186]">{line.description || `HSN ${line.hsn || "missing"}`}</div>
+                        {line.godownName && <div className="text-[9px] text-[#657186]">Godown: {line.godownName}</div>}
+                        {previewPurchaseLedgers.length > 1 && <div className="text-[9px] text-[#657186]">{line.purchaseLedgerName}</div>}
                       </div>
                       <strong className="text-right tabular-nums">{tallyQuantity(line.quantity)}</strong>
                       <strong className="text-right tabular-nums">{tallyAmount(line.rate)}</strong>

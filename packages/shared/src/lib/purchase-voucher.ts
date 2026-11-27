@@ -18,6 +18,7 @@ export type PurchaseCalculationInput = {
   invoiceTotal: string;
   /** Deductions visibly included in the source invoice's printed payable. */
   invoiceWithholdingAmount?: string;
+  printedDeductions?: Record<"tds194q" | "transport" | "cgst" | "sgst" | "igst", boolean>;
   sourceRoundOffAmount: string;
   confirmedRoundOffAmount: string;
   tcsAmount: string;
@@ -87,20 +88,28 @@ export function calculatePurchaseVoucher(input: PurchaseCalculationInput) {
   let basic = 0;
   let gstTaxable = 0;
 
-  for (const line of input.lines) {
+  const itemTaxes = input.lines.map(line => {
     const basis = purchaseMoneyPaise(line.taxableAmount) ?? 0;
     const rate = purchaseRateBasisPoints(line.taxRate) ?? defaultRate;
     basic += basis;
     if (rate > 0) gstTaxable += basis;
     const totalTax = input.taxMode === "unknown" ? 0 : taxAmount(basis, rate);
+    const cgst = input.taxMode === "cgst_sgst" ? Math.round(totalTax / 2) : 0;
     if (input.taxMode === "cgst_sgst") {
-      const cgst = Math.round(totalTax / 2);
       addBucket(bucketMap, "cgst", rate / 2, basis, cgst);
       addBucket(bucketMap, "sgst", rate / 2, basis, totalTax - cgst);
     } else if (input.taxMode === "igst") {
       addBucket(bucketMap, "igst", rate, basis, totalTax);
     }
-  }
+    return {
+      lineId: line.lineId,
+      taxable: purchaseFormatPaise(basis),
+      rate: purchaseFormatPaise(rate).replace(/\.00$/, ""),
+      gst: purchaseFormatPaise(totalTax),
+      cgst: purchaseFormatPaise(cgst),
+      sgst: purchaseFormatPaise(input.taxMode === "cgst_sgst" ? totalTax - cgst : 0),
+    };
+  });
 
   const freight = Math.max(0, purchaseMoneyPaise(input.freightAmount) ?? 0);
   const freightRate = purchaseRateBasisPoints(input.freightGstRate) ?? 0;
@@ -160,7 +169,11 @@ export function calculatePurchaseVoucher(input: PurchaseCalculationInput) {
   const payable = unroundedPayable + roundOff;
   const invoiceGst = purchaseMoneyPaise(input.invoiceGstAmount) ?? 0;
   const invoiceTotal = purchaseMoneyPaise(input.invoiceTotal) ?? 0;
-  const invoiceWithholding = Math.abs(purchaseMoneyPaise(input.invoiceWithholdingAmount) ?? 0);
+  const printed = input.printedDeductions;
+  const invoiceWithholding = printed
+    ? (printed.tds194q ? tds194q : 0) + (printed.transport ? transportTds : 0) +
+      (printed.cgst ? cgstTds : 0) + (printed.sgst ? sgstTds : 0) + (printed.igst ? igstTds : 0)
+    : Math.abs(purchaseMoneyPaise(input.invoiceWithholdingAmount) ?? 0);
 
   return {
     calculationVersion: PURCHASE_CALCULATION_VERSION,
@@ -168,6 +181,7 @@ export function calculatePurchaseVoucher(input: PurchaseCalculationInput) {
     freightAmount: purchaseFormatPaise(freight),
     gstTaxableAmount: purchaseFormatPaise(gstTaxable),
     taxBuckets: buckets,
+    itemTaxes,
     cgstAmount: purchaseFormatPaise(cgst),
     sgstAmount: purchaseFormatPaise(sgst),
     igstAmount: purchaseFormatPaise(igst),

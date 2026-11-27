@@ -49,6 +49,9 @@ test("groups mixed item and freight GST by kind and rate", () => {
     invoiceTotal: "2067.00",
   }));
   assert.equal(result.gstAmount, "217.00");
+  assert.deepEqual(result.itemTaxes.map(row => [row.lineId, row.rate, row.gst]), [
+    ["a", "18", "180.00"], ["b", "5", "25.00"], ["c", "0", "0.00"],
+  ]);
   assert.equal(result.calculatedInvoiceTotal, "2067.00");
   assert.deepEqual(result.taxBuckets.map((bucket) => [bucket.kind, bucket.rate, bucket.amount]), [
     ["igst", "18", "180.00"],
@@ -65,6 +68,8 @@ test("splits an odd paise of intrastate GST without losing it", () => {
     invoiceTotal: "0.04",
   }));
   assert.equal(result.cgstAmount, "0.01");
+  assert.equal(result.itemTaxes[0].cgst, "0.01");
+  assert.equal(result.itemTaxes[0].sgst, "0.00");
   assert.equal(result.sgstAmount, "0.00");
   assert.equal(result.gstAmount, "0.01");
 });
@@ -153,4 +158,14 @@ test("a printed transport TDS amount is used as printed", () => {
   }));
   assert.equal(result.transportTdsAmount, "367.00");
   assert.equal(result.transportTdsDifference, "-0.92");
+});
+
+test("preview reconciles a printed deduction immediately when toggled", () => {
+  const draft = input({ invoiceTotal: "1179", printedDeductions: { tds194q: true } });
+  const off = calculator.calculatePurchaseVoucher(draft);
+  const on = calculator.calculatePurchaseVoucher({ ...draft, tds194qEnabled: true });
+  assert.equal(off.calculatedPayable, "1180.00");
+  assert.equal(on.calculatedPayable, "1179.00");
+  assert.equal(off.totalDifference, "1.00");
+  assert.equal(on.totalDifference, "0.00");
 });

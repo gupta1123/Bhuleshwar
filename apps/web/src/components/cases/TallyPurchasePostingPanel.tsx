@@ -443,6 +443,7 @@ function MasterCombobox({
   value,
   options,
   onChange,
+  onPick,
   disabled = false,
   placeholder = "Select from Tally",
   issues,
@@ -462,6 +463,7 @@ function MasterCombobox({
   value: string;
   options: TallyMasterOption[];
   onChange: (value: string) => void;
+  onPick: (label: string, value: string) => void;
   disabled?: boolean;
   placeholder?: string;
   issues?: TallyPostingIssue[];
@@ -600,6 +602,7 @@ function MasterCombobox({
                   className="shrink-0 text-[10px] font-semibold text-slate-500 hover:text-rose-700"
                   onClick={() => {
                     onChange("");
+                    onPick(label, "");
                     setOpen(false);
                   }}
                   type="button"
@@ -625,6 +628,7 @@ function MasterCombobox({
                     key={`${option.type}:${option.id}`}
                     onClick={() => {
                       onChange(option.name);
+                      onPick(label, option.name);
                       setOpen(false);
                     }}
                     type="button"
@@ -781,6 +785,12 @@ export function TallyPurchasePostingPanel({
   const [state, setState] = useState<PanelState>("loading");
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pickToast, setPickToast] = useState<{ choice: string; phase: "pending" | "saved" | "failed" } | null>(null);
+  useEffect(() => {
+    if (!pickToast || pickToast.phase === "pending") return;
+    const timer = window.setTimeout(() => setPickToast(null), 4500);
+    return () => window.clearTimeout(timer);
+  }, [pickToast]);
   const [dirty, setDirty] = useState(false);
   const [connectionDirty, setConnectionDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -1676,12 +1686,16 @@ export function TallyPurchasePostingPanel({
       if (currentReviewRef.current !== nextReview) return;
       setReview(hydrated.review);
       setDirty(false);
+      setPickToast(current => current && { ...current, phase: "saved" });
       setNotice(hydrated.readyForApproval
         ? "All changes saved. This voucher is ready to send to Tally."
         : "All changes saved. Complete the highlighted items before approval.");
       if (approval.required) await approval.refresh();
     } catch (saveError) {
       autoSaveFailedReviewRef.current = nextReview;
+      if (currentReviewRef.current === nextReview) {
+        setPickToast(current => current && { ...current, phase: "failed" });
+      }
       setError(saveError instanceof Error ? `${saveError.message} Your changes are kept; use Retry.` : "Could not save your changes. Use Retry.");
     } finally {
       setSaving(false);
@@ -2068,6 +2082,9 @@ export function TallyPurchasePostingPanel({
     selectedMatchesActive
   );
   const masterContext = {
+    onPick: (label: string, value: string) => setPickToast({
+      choice: value ? `${label}: ${value}` : `${label} cleared`, phase: "pending",
+    }),
     companyName: connection?.companyName ?? selectedCompanyName,
     syncedAt: connection?.masterSyncedAt,
     syncing: deterministicMastersLoading,
@@ -2401,6 +2418,12 @@ export function TallyPurchasePostingPanel({
 
   return (
     <div className={`tally-purchase-workflow mx-auto max-w-6xl space-y-3 p-3 sm:p-4 ${quickView ? "" : "pb-32 sm:pb-32"}`} id="tally-header">
+      <div role="status" aria-live="polite" aria-atomic="true" className="pointer-events-none fixed inset-x-3 top-[max(0.75rem,env(safe-area-inset-top))] z-[100] flex justify-center">
+        {pickToast && <div className="max-w-md rounded-lg bg-slate-900 px-4 py-2 text-sm text-white shadow-lg">
+          <strong>{pickToast.phase === "saved" ? "Saved" : pickToast.phase === "failed" ? "Save failed. Use Retry." : "Saving…"}</strong>
+          <span className="ml-2">{pickToast.choice}</span>
+        </div>}
+      </div>
       {payload.eligibility.invoiceCandidates.length > 1 ? (
         <section className="rounded-xl border border-slate-200 bg-white p-3">
           <div className="mb-2 text-xs font-semibold text-slate-900">Invoice selected for this Purchase voucher</div>

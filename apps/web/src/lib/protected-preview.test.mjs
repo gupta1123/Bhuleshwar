@@ -3,10 +3,10 @@ import {readFile} from 'node:fs/promises';import ts from 'typescript';
 const source=await readFile(new URL('./protected-preview.ts',import.meta.url),'utf8');
 const code=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText;
 const expected='/api/cases/case/files?fileId=file&content=1';
-function fixture(){
+function fixture(contentType="application/pdf", payload){
  let epoch=0,clear,resolve;const calls=[],revoked=[],exports={};
  const body=new Promise(r=>{resolve=r;});
- const imports={'./api-client':{apiFetch:async path=>{calls.push(path);return {ok:true,blob:()=>body};}},
+ const imports={'./api-client':{apiFetch:async path=>{calls.push(path);return {ok:true,headers:{get:()=>contentType},json:async()=>payload,blob:()=>body};}},
  './access-cache':{accessCacheEpoch:()=>epoch,registerAccessCache:(_name,fn)=>{clear=fn;}}};
  vm.runInNewContext(code,{exports,require:name=>imports[name],URLSearchParams,DOMException,
   URL:{createObjectURL:()=> 'blob:fixture',revokeObjectURL:url=>revoked.push(url)},window:{addEventListener(){}}});
@@ -24,4 +24,14 @@ test('protected object URLs are revoked on release and access invalidation',asyn
  const f=fixture();f.resolve({size:4});const url=await f.api.loadProtectedCasePreview('case','file',expected);
  f.api.releaseProtectedPreview(url);f.api.releaseProtectedPreview(url);assert.equal(f.revoked.length,1);
  await f.api.loadProtectedCasePreview('case','file',expected);f.change();assert.equal(f.revoked.length,2);
+});
+
+test('case preview takes one request for protected bytes or legacy signed metadata',async()=>{
+ for (const type of ['application/pdf','application/json']){
+   const f=fixture(type,{fileId:'file',signedUrl:'https://storage.test/file'});
+   f.resolve({size:4});
+   assert.equal(await f.api.loadProtectedCasePreview('case','file',expected),
+     type==='application/pdf'?'blob:fixture':'https://storage.test/file');
+   assert.deepEqual(f.calls,[expected]);
+ }
 });

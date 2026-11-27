@@ -11,6 +11,8 @@ export function usePurchaseApproval(caseId:string){
  const {snapshot,enforcementRequired}=useAccess();
  const enabled=enforcementRequired;
  const [workflow,setWorkflow]=useState<Workflow|null>(null),[loading,setLoading]=useState(false),[error,setError]=useState<string|null>(null);
+ const contextKey = JSON.stringify([caseId,snapshot?.organizationId,snapshot?.member.user_id,snapshot?.revision]);
+ const [settledKey,setSettledKey] = useState<string|null>(null);
  const generation=useRef(0);
  const refresh=useCallback(async()=>{
   if(!enabled)return;
@@ -18,8 +20,8 @@ export function usePurchaseApproval(caseId:string){
   setLoading(true);
   try{const response=await apiFetch(`/api/cases/${caseId}/approval`,{cache:'no-store',signal:AbortSignal.timeout(10000)});const data=await response.json();if(version!==generation.current)return;if(!response.ok)throw Error(data.error||'Could not read purchase approval.');setWorkflow(data.workflow);setError(null);}
   catch(e){if(version===generation.current)setError(e instanceof Error?e.message:'Approval unavailable.');throw e;}
-  finally{if(version===generation.current)setLoading(false);}
- },[caseId,enabled]);
+  finally{if(version===generation.current){setSettledKey(contextKey);setLoading(false);}}
+ },[caseId,enabled,contextKey]);
  useEffect(()=>{setWorkflow(null);if(!enabled)return;const read=()=>{void refresh().catch(()=>{});};read();window.addEventListener('focus',read);return()=>{generation.current++;window.removeEventListener('focus',read);};},[refresh,enabled,snapshot?.revision]);
  const transition=useCallback(async(action:'submit'|'approve'|'return',reason?:string)=>{
   let revision=workflow?.revision??0;
@@ -30,7 +32,7 @@ export function usePurchaseApproval(caseId:string){
   catch(e){setError(e instanceof Error?e.message:'Approval failed.');throw e;}
   finally{setLoading(false);}
  },[caseId,workflow?.revision]);
- return {enabled,snapshot,workflow,loading,error,refresh,transition};
+ return {enabled,snapshot,workflow,loading:loading || (enabled && settledKey !== contextKey),error,refresh,transition};
 }
 export function PurchaseApprovalControls({approval,hasUnsavedChanges,ready}:{approval:ReturnType<typeof usePurchaseApproval>;hasUnsavedChanges:boolean;ready:boolean}){
  const [action,setAction]=useState<'submit'|'approve'|'return'|null>(null),[reason,setReason]=useState('');

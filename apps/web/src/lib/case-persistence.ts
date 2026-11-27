@@ -168,6 +168,9 @@ export type FetchCasesOptions = {
   statusFilter?: "all" | "pending" | "in_review" | "completed" | "failed";
   approvalFilter?: "all" | "approved" | "pending" | "rejected";
   reconciliationFilter?: "all" | "clean" | "issues";
+  createdFrom?: string;
+  createdThrough?: string;
+  expiresWithin?: string;
   tallyFilter?: "all" | "posted" | "not_posted" | "check";
   signal?: AbortSignal;
 };
@@ -609,12 +612,15 @@ export async function fetchCasePage({
   statusFilter,
   approvalFilter,
   reconciliationFilter,
-  tallyFilter,
+  tallyFilter, createdFrom, createdThrough, expiresWithin,
   signal,
 }: FetchCasesOptions): Promise<RecentCasesResponse> {
   const query = new URLSearchParams();
   query.set("limit", String(limit));
   query.set("scope", scope);
+  if (createdFrom) query.set("createdFrom", createdFrom);
+  if (createdThrough) query.set("createdThrough", createdThrough);
+  if (expiresWithin) query.set("expiresWithin", expiresWithin);
   if (cursor) {
     query.set("cursor", cursor);
   } else if (page && page > 0) {
@@ -813,27 +819,8 @@ export async function fetchCaseFileSignedUrl(
   caseId: string,
   fileId: string
 ): Promise<CaseFileSignedUrlResponse> {
-  const searchParams = new URLSearchParams({ fileId });
-  const response = await performApiFetch(`/api/cases/${caseId}/files?${searchParams.toString()}`, {
-    cache: "no-store",
-  });
-  const { payload, rawText } = await readApiResponse<CaseFileSignedUrlResponse & {contentPath?:string}>(response);
-
-  if (response.ok && payload.fileId === fileId && typeof payload.contentPath === 'string') {
-    return {fileId, signedUrl: await loadProtectedCasePreview(caseId,fileId,payload.contentPath)};
-  }
-
-  if (!response.ok || typeof payload.fileId !== "string" || typeof payload.signedUrl !== "string") {
-    throw toApiRequestError(payload, "Failed to load source preview.", {
-      status: response.status,
-      rawText,
-    });
-  }
-
-  return {
-    fileId: payload.fileId,
-    signedUrl: payload.signedUrl,
-  };
+  const path = `/api/cases/${caseId}/files?${new URLSearchParams({fileId, content: '1'})}`;
+  return {fileId, signedUrl: await loadProtectedCasePreview(caseId, fileId, path)};
 }
 
 export const fetchCaseDetailPreferCache = fetchCaseDetail;

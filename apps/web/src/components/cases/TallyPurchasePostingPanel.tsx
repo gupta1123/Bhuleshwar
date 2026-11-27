@@ -36,7 +36,7 @@ import {
 } from "@/components/ui/popover";
 import { fetchCaseFileSignedUrl } from "@/lib/case-persistence";
 import { runCashDiscountLiveRequest } from "@/lib/cash-discount-live";
-import { purchaseMasterReadiness } from "@/lib/purchase-master-state";
+import { purchaseMasterReadiness, mayLoadPurchaseCatalogue } from "@/lib/purchase-master-state";
 import {
   rankPurchaseLedgerRole as rankLedgerRole,
   isPurchaseWithholdingOption,
@@ -869,7 +869,7 @@ export function TallyPurchasePostingPanel({
       // catalogue: skip the live masters and supplier lookups entirely. Refresh
       // still reads Tally on demand.
       if (next?.posting?.status === "created") return;
-      if(approval.enabled&&(!canAccess(approval.snapshot,'purchases.prepare')||approval.workflow?.state!=='draft'))return;
+      if (!mayLoadPurchaseCatalogue(approval.enabled, canAccess(approval.snapshot, 'purchases.prepare'), approval.error, approval.workflow)) return;
       const connection = next?.connection;
       if (
         !next ||
@@ -1058,7 +1058,7 @@ export function TallyPurchasePostingPanel({
         automaticLiveRefreshRef.current = null;
       }
     };
-  }, [caseId,approval.enabled,approval.loading]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [caseId,approval.enabled,approval.loading,approval.error,approval.workflow?.state,approval.snapshot?.revision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!liveMastersReady || !selectedConnectionId || !selectedCompanyName || !review?.supplierName) {

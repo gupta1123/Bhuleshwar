@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { accessCacheEpoch } from "@/lib/access-cache";
 import Link from "next/link";
 import {
   ChevronLeft,
@@ -33,8 +34,8 @@ import {
 
 type LoadState = "loading" | "ready" | "error";
 type PendingAction =
-  | { type: "destroy"; item: SavedCaseRecord }
-  | { type: "restore"; item: SavedCaseRecord }
+  | { type: "destroy"; items: SavedCaseRecord[] }
+  | { type: "restore"; items: SavedCaseRecord[] }
   | null;
 
 // Rows that fit the window: ~52px per row; header, filters, table head and footer take ~300px.
@@ -146,6 +147,9 @@ export function RecycleBinPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalCount, setTotalCount] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  const [selected, setSelected] = useState<string[]>([]);
+  const [expiresWithin, setExpiresWithin] = useState("");
+  const selection = cases.filter(row => selected.includes(row.id));
   const [pendingAction, setPendingAction] = useState<PendingAction>(null);
   const [isMutating, setIsMutating] = useState(false);
   const [reloadKey, setReloadKey] = useState(0);
@@ -163,11 +167,12 @@ export function RecycleBinPage() {
   useEffect(() => {
     const controller = new AbortController();
 
+    setSelected([]);
     setStatus("loading");
     setError(null);
 
     fetchCasePage({
-      scope: "deleted",
+      scope: "deleted", expiresWithin,
       limit: pageSize,
       page: currentPage,
       query: debouncedQuery,
@@ -191,41 +196,39 @@ export function RecycleBinPage() {
     return () => {
       controller.abort();
     };
-  }, [currentPage, debouncedQuery, pageSize, reloadKey]);
+  }, [currentPage, debouncedQuery, pageSize, reloadKey, expiresWithin]);
 
   async function handleConfirmAction() {
-    if (!pendingAction) return;
+    if (!pendingAction || isMutating) return;
+    const epoch = accessCacheEpoch();
+    const remaining = [...pendingAction.items];
 
     try {
       setIsMutating(true);
       setError(null);
       setNotice(null);
 
-      if (pendingAction.type === "restore") {
-        await restoreCase(pendingAction.item.id);
-      } else {
-        await deleteCaseForever(pendingAction.item.id);
+      const update = pendingAction.type === "restore" ? restoreCase : deleteCaseForever;
+      for (const item of pendingAction.items) {
+        if (epoch !== accessCacheEpoch()) { setPendingAction(null); return; }
+        await update(item.id);
+        remaining.shift();
       }
-
-      setCases((current) =>
-        current.filter((item) => item.id !== pendingAction.item.id)
-      );
-      const nextTotalCount = Math.max(0, totalCount - 1);
-      const nextTotalPages = Math.max(1, Math.ceil(nextTotalCount / pageSize));
-      setTotalCount(nextTotalCount);
-      setTotalPages(nextTotalPages);
-      if (currentPage > nextTotalPages) {
-        setCurrentPage(nextTotalPages);
-      }
-      setNotice(pendingAction.type === "restore" ? "Case restored." : "Case permanently deleted.");
+      setNotice(`${pendingAction.items.length} case(s) ${pendingAction.type === "restore" ? "restored" : "permanently deleted"}.`);
       setPendingAction(null);
     } catch (mutationError) {
+      setPendingAction({...pendingAction, items:remaining});
       setError(
         mutationError instanceof Error
           ? mutationError.message
           : "Failed to update recycle bin."
       );
     } finally {
+      const changed = pendingAction.items.length - remaining.length;
+      if (changed) {
+        setCurrentPage(p => Math.min(p, Math.max(1, Math.ceil((totalCount - changed) / pageSize))));
+        setReloadKey(v => v + 1);
+      }
       setIsMutating(false);
     }
   }
@@ -325,11 +328,21 @@ export function RecycleBinPage() {
               </div>
             )}
 
+            <div className="flex items-center gap-4 py-2 text-sm">
+              <label>Auto-deletes <select value={expiresWithin} onChange={e => {setExpiresWithin(e.target.value);setCurrentPage(1);}}>
+                <option value="">Any time</option><option value="1">Within one day</option><option value="7">Within 7 days</option><option value="14">Within 14 days</option>
+              </select></label>
+              {selection.length > 0 && status === "ready" && <>
+                <button onClick={() => setPendingAction({type:"restore",items:selection})}>Restore selected ({selection.length})</button>
+                <button onClick={() => setPendingAction({type:"destroy",items:selection})}>Delete selected ({selection.length})</button>
+              </>}
+            </div>
             {status === "ready" && cases.length > 0 && (
               <div className="w-full">
                 <Table className="w-full">
                   <TableHeader>
                     <TableRow className="border-b border-[#e0d8cc] bg-transparent hover:bg-transparent">
+                      <TableHead><input type="checkbox" aria-label="Select all cases on this page" checked={selection.length === cases.length} onChange={e => setSelected(e.target.checked ? cases.map(row => row.id) : [])}/></TableHead>
                       <TableHead className="h-10 pl-0 pr-3 text-xs font-semibold text-[#3d3530]">
                         Case / Document
                       </TableHead>
@@ -355,6 +368,7 @@ export function RecycleBinPage() {
                           key={item.id}
                           className="group h-[52px] border-b border-[#ece6dc] transition-colors hover:bg-[#ede6d9]/40"
                         >
+                          <TableCell><input type="checkbox" aria-label={`Select ${item.displayName}`} checked={selected.includes(item.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids,item.id] : ids.filter(id => id !== item.id))}/></TableCell>
                           {/* Title / Subtitle */}
                           <TableCell className="pl-0 pr-3 py-2 font-medium text-[#111827]">
                             <Link
@@ -406,7 +420,7 @@ export function RecycleBinPage() {
                               <button
                                 type="button"
                                 className="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-emerald-800 hover:bg-emerald-50 transition-colors"
-                                onClick={() => setPendingAction({ type: "restore", item })}
+                                onClick={() => setPendingAction({ type: "restore", items:[item] })}
                                 title="Restore case"
                               >
                                 <RotateCcw className="h-3 w-3" />
@@ -416,7 +430,7 @@ export function RecycleBinPage() {
                                 type="button"
                                 className="rounded p-1 text-[#8a7f72] transition hover:bg-rose-50 hover:text-rose-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:ring-offset-2"
                                 aria-label="Delete permanently"
-                                onClick={() => setPendingAction({ type: "destroy", item })}
+                                onClick={() => setPendingAction({ type: "destroy", items:[item] })}
                                 title="Delete permanently"
                               >
                                 <Trash2 className="h-3.5 w-3.5" />
@@ -491,14 +505,14 @@ export function RecycleBinPage() {
           }}
           title={
             pendingAction?.type === "restore"
-              ? "Restore this case?"
-              : "Delete this case permanently?"
+              ? "Restore selected cases?"
+              : "Permanently delete selected cases?"
           }
           description={
             pendingAction
               ? pendingAction.type === "restore"
-                ? `"${pendingAction.item.displayName}" will be moved back into the active cases list.`
-                : `"${pendingAction.item.displayName}" and its stored documents will be removed permanently. This cannot be undone.`
+                ? `"${pendingAction.items.length === 1 ? pendingAction.items[0].displayName : pendingAction.items.length + " selected cases"}" will be moved back into the active cases list.`
+                : `"${pendingAction.items.length === 1 ? pendingAction.items[0].displayName : pendingAction.items.length + " selected cases"}" and its stored documents will be removed permanently. This cannot be undone.`
               : ""
           }
           confirmLabel={pendingAction?.type === "restore" ? "Restore case" : "Delete forever"}

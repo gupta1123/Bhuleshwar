@@ -1092,6 +1092,19 @@ async function GETHandler(request: Request) {
     const statusFilter = readCaseStatusFilter(url.searchParams.get("status"));
     const approvalFilter = readCaseApprovalFilter(url.searchParams.get("approval"));
     const reconciliationFilter = readCaseReconciliationFilter(url.searchParams.get("reconciliation"));
+    const from = url.searchParams.get("createdFrom");
+    const through = url.searchParams.get("createdThrough");
+    const days = url.searchParams.get("expiresWithin");
+    const validDay = (day: string) => /^\d{4}-\d{2}-\d{2}$/.test(day) &&
+      Number.isFinite(Date.parse(day)) && new Date(day).toISOString().startsWith(day);
+    if ((from && !validDay(from)) || (through && !validDay(through)) || (from && through && from > through) ||
+        (days && (scope !== "deleted" || !["1","7","14"].includes(days)))) {
+      return jsonWithCors(request, {error: "Invalid case date range."}, {status: 400});
+    }
+    // The company's business day starts at midnight in India.
+    const startDate = from ? new Date(from + "T00:00:00+05:30").toISOString() : null;
+    const endDate = through ? new Date(Date.parse(through + "T00:00:00+05:30") + 86400000).toISOString() : null;
+    const expiryCutoff = days ? new Date(Date.now() - (30 - Number(days)) * 86400000).toISOString() : null;
     const tallyFilter = readCaseTallyFilter(url.searchParams.get("tally"));
     const sortMode = readCaseSortMode(url.searchParams.get("sort"));
     // Tally filter: posted = verified voucher, check = voucher exists but not verified, not_posted = neither.
@@ -1180,6 +1193,9 @@ async function GETHandler(request: Request) {
       if (approvalFilter === "pending") query = query.not("status", "in", "(accepted,rejected)");
       if (reconciliationFilter === "clean") query = query.eq("mismatch_count", 0);
       if (reconciliationFilter === "issues") query = query.gt("mismatch_count", 0);
+      if (startDate) query = query.gte("created_at", startDate);
+      if (endDate) query = query.lt("created_at", endDate);
+      if (expiryCutoff) query = query.lte("deleted_at", expiryCutoff);
       query = applyTallyFilter(query);
 
       if (searchQuery) {
@@ -1246,7 +1262,10 @@ async function GETHandler(request: Request) {
         if (approvalFilter === "pending") fallbackSearchQuery = fallbackSearchQuery.not("status", "in", "(accepted,rejected)");
         if (reconciliationFilter === "clean") fallbackSearchQuery = fallbackSearchQuery.eq("mismatch_count", 0);
         if (reconciliationFilter === "issues") fallbackSearchQuery = fallbackSearchQuery.gt("mismatch_count", 0);
-        fallbackSearchQuery = applyTallyFilter(fallbackSearchQuery);
+        if (startDate) fallbackSearchQuery = fallbackSearchQuery.gte("created_at", startDate);
+      if (endDate) fallbackSearchQuery = fallbackSearchQuery.lt("created_at", endDate);
+      if (expiryCutoff) fallbackSearchQuery = fallbackSearchQuery.lte("deleted_at", expiryCutoff);
+      fallbackSearchQuery = applyTallyFilter(fallbackSearchQuery);
 
         fallbackSearchQuery = fallbackSearchQuery.or(
           [
@@ -1275,7 +1294,7 @@ async function GETHandler(request: Request) {
 
         const queryStartedAt = nowMs();
         if(process.env.TEAM_ACCESS_ENFORCEMENT==='true')throw new AccessError('Scoped listing requires the reviewed database migration.',503);
-        const legacyRows = await fetchLegacyCaseListRows({
+        const unfilteredLegacyRows = await fetchLegacyCaseListRows({
           supabase,
           userId: user.id,
           scope,
@@ -1284,6 +1303,10 @@ async function GETHandler(request: Request) {
           sortMode,
           signal: request.signal,
         });
+        const legacyRows = unfilteredLegacyRows.filter(row =>
+          (!startDate || Date.parse(row.created_at) >= Date.parse(startDate)) &&
+          (!endDate || Date.parse(row.created_at) < Date.parse(endDate)) &&
+          (!expiryCutoff || (row.deleted_at && Date.parse(row.deleted_at) <= Date.parse(expiryCutoff))));
         queryMode = "legacy-all-rows";
         timing.caseQuery = (timing.caseQuery ?? 0) + nowMs() - queryStartedAt;
 

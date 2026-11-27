@@ -1,5 +1,7 @@
 "use client";
 
+import { canAccess } from "@autodealer/shared/lib/access";
+import { CaseVoucherQuickView } from "./CaseVoucherQuickView";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -29,7 +31,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  fetchCasePage,
+  fetchCasePage, updateCaseDecision,
   fetchCaseAnalysisProgress,
   type CaseProgress,
   recycleCase,
@@ -172,9 +174,17 @@ function getViewportPageSize() {
 
 export function CasesPage() {
   const router = useRouter();
-  const {snapshot}=useAccess();
+  const {snapshot,enforcementRequired}=useAccess();
+  const canDecide = !enforcementRequired || canAccess(snapshot, "purchases.approve");
+  const [from,setFrom] = useState("");
+  const [through,setThrough] = useState("");
+  const [selected,setSelected] = useState<string[]>([]);
+  const [preview,setPreview] = useState<string | null>(null);
+  const [decision,setDecision] = useState<{ids:string[]; value:"accepted"|"rejected"} | null>(null);
+  const [deciding,setDeciding] = useState(false);
+  const [decisionError,setDecisionError] = useState("");
   const [cacheEpoch,setCacheEpoch]=useState(accessCacheEpoch);
-  useEffect(()=>{const reset=()=>{setCacheEpoch(accessCacheEpoch());setCases([]);setTotalCount(0);setPendingCase(null);};window.addEventListener('kalika-access-invalidated',reset);return()=>window.removeEventListener('kalika-access-invalidated',reset);},[]);
+  useEffect(()=>{const reset=()=>{setCacheEpoch(accessCacheEpoch());setCases([]);setTotalCount(0);setPendingCase(null);setPreview(null);setSelected([]);setDecision(null);};window.addEventListener('kalika-access-invalidated',reset);return()=>window.removeEventListener('kalika-access-invalidated',reset);},[]);
   const [cases, setCases] = useState<SavedCaseRecord[]>([]);
   const [status, setStatus] = useState<LoadState>("loading");
   const [error, setError] = useState<string | null>(null);
@@ -235,8 +245,8 @@ export function CasesPage() {
   const [isDeleting, setIsDeleting] = useState(false);
 
   const cacheKey = useMemo(
-    () => `${cacheEpoch}:${listRevision}:${snapshot?.member.user_id||'legacy'}:${snapshot?.organizationId||''}:${snapshot?.revision||0}:`+getCaseListCacheKey(debouncedSearchQuery, selectedApproval, `${selectedReconciliation}:tally:${selectedTally}`, currentPage, pageSize),
-    [currentPage, debouncedSearchQuery, selectedApproval, selectedReconciliation, selectedTally, pageSize,cacheEpoch,listRevision,snapshot?.member.user_id,snapshot?.organizationId,snapshot?.revision]
+    () => `${from}:${through}:${cacheEpoch}:${listRevision}:${snapshot?.member.user_id||'legacy'}:${snapshot?.organizationId||''}:${snapshot?.revision||0}:`+getCaseListCacheKey(debouncedSearchQuery, selectedApproval, `${selectedReconciliation}:tally:${selectedTally}`, currentPage, pageSize),
+    [from, through, currentPage, debouncedSearchQuery, selectedApproval, selectedReconciliation, selectedTally, pageSize,cacheEpoch,listRevision,snapshot?.member.user_id,snapshot?.organizationId,snapshot?.revision]
   );
 
   useEffect(() => {
@@ -269,7 +279,7 @@ export function CasesPage() {
     setError(null);
 
     fetchCasePage({
-      scope: "active",
+      scope: "active", createdFrom: from, createdThrough: through,
       limit: pageSize,
       page: currentPage,
       query: debouncedSearchQuery,
@@ -329,6 +339,32 @@ export function CasesPage() {
     void poll();
     return () => { stopped = true; window.clearTimeout(timer); };
   }, [processingIds, cacheEpoch]);
+
+  useEffect(() => { setSelected([]); }, [cacheKey]);
+  function startDecision(ids: string[], value: "accepted" | "rejected") {
+    setDecisionError(""); setDecision({ids,value});
+  }
+  async function applyDecision() {
+    if (!decision || deciding || !canDecide) return;
+    const epoch = accessCacheEpoch();
+    const remaining = [...decision.ids];
+    setDeciding(true);
+    try {
+      for (const id of decision.ids) {
+        if (accessCacheEpoch() !== epoch) return;
+        await updateCaseDecision(id, decision.value);
+        remaining.shift();
+      }
+      setDecision(null);
+    } catch (err) {
+      if (epoch === accessCacheEpoch()) {
+        setDecision({...decision,ids:remaining});
+        setDecisionError(err instanceof Error ? err.message : "Case decision failed.");
+      }
+    } finally {
+      caseListCache.clear(); setListRevision(v => v + 1); setDeciding(false);
+    }
+  }
 
   async function handleConfirmDelete() {
     if (!pendingCase) return;
@@ -441,9 +477,16 @@ export function CasesPage() {
                   options={TALLY_OPTIONS}
                   placeholder="All Tally Status"
                 />
+                <label className="text-xs">Created from <input type="date" value={from} max={through || undefined} onChange={e => { setFrom(e.target.value); setCurrentPage(1); }} /></label>
+                <label className="text-xs">Created through <input type="date" value={through} min={from || undefined} onChange={e => { setThrough(e.target.value); setCurrentPage(1); }} /></label>
               </div>
             )}
           </PageHeader>
+          {canDecide && selected.length > 0 && <div className="flex gap-4 py-2 text-sm">
+            <span>{selected.length} selected</span>
+            <button onClick={() => startDecision(selected,"accepted")}>Accept selected</button>
+            <button onClick={() => startDecision(selected,"rejected")}>Reject selected</button>
+          </div>}
 
           {/* ── Seamless Cardless Table ── */}
           <div className="w-full pt-1">
@@ -495,6 +538,7 @@ export function CasesPage() {
                 <Table className="w-full">
                   <TableHeader>
                     <TableRow className="border-b border-[#e0d8cc] bg-transparent hover:bg-transparent">
+                      {canDecide && <TableHead><input type="checkbox" aria-label="Select all analysed cases on this page" checked={cases.some(row => row.status === "completed") && cases.filter(row => row.status === "completed").every(row => selected.includes(row.id))} onChange={e => setSelected(e.target.checked ? cases.filter(row => row.status === "completed").map(row => row.id) : [])}/></TableHead>}
                       <TableHead className="h-10 pl-0 pr-3 text-xs font-semibold text-[#3d3530]">
                         Customer Name
                       </TableHead>
@@ -529,6 +573,7 @@ export function CasesPage() {
                           key={item.id}
                           className="group h-[52px] border-b border-[#ece6dc] transition-colors hover:bg-[#ede6d9]/40"
                         >
+                          {canDecide && <TableCell>{item.status === "completed" && <input type="checkbox" aria-label={`Select ${getCaseTitle(item)}`} checked={selected.includes(item.id)} onChange={e => setSelected(ids => e.target.checked ? [...ids,item.id] : ids.filter(id => id !== item.id))}/>}</TableCell>}
                           {/* Customer Name */}
                           <TableCell className="pl-0 pr-3 py-2 font-medium text-[#111827]">
                             <Link
@@ -605,6 +650,11 @@ export function CasesPage() {
                           {/* Actions */}
                           <TableCell className="pl-3 pr-0 py-2 text-right whitespace-nowrap">
                             <div className="flex items-center justify-end gap-2">
+                              {item.status === "accepted" && <button className="text-xs font-semibold" onClick={() => setPreview(item.id)}>Quick view</button>}
+                              {canDecide && item.status === "completed" && <>
+                                <button className="text-xs text-emerald-800" onClick={() => startDecision([item.id],"accepted")}>Accept</button>
+                                <button className="text-xs text-rose-800" onClick={() => startDecision([item.id],"rejected")}>Reject</button>
+                              </>}
                               <Link
                                 href={`/cases/${item.id}`}
                                 className="text-xs font-semibold text-[#2b1a10] hover:text-black hover:underline"
@@ -682,6 +732,11 @@ export function CasesPage() {
         </div>
       </div>
 
+      {preview && <CaseVoucherQuickView caseId={preview} key={preview} close={() => setPreview(null)}/>}
+      {decision && <CaseConfirmDialog open onOpenChange={open => {if (!open && !deciding) setDecision(null);}}
+        title={`${decision.value === "accepted" ? "Accept" : "Reject"} ${decision.ids.length === 1 ? (cases.find(c => c.id === decision.ids[0])?.displayName || "this case") : decision.ids.length + " cases"}?`}
+        description="This updates the packet decision. Posting a purchase voucher is a separate action."
+        confirmLabel={decision.value === "accepted" ? "Accept" : "Reject"} loading={deciding} error={decisionError} onConfirm={applyDecision}/>}
       <CaseConfirmDialog
         open={Boolean(pendingCase)}
         onOpenChange={(open) => {

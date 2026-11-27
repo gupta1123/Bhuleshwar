@@ -192,15 +192,22 @@ export function buildPacketFieldConfiguration(params?: {
   const configuredFieldDocTypes = new Set(fieldSettings.map((setting) => setting.doc_type));
   const configuredDocTypes = new Set(docTypeSettings.map((setting) => setting.doc_type));
 
+  // Settings are saved per field. A missing row uses the same enabled
+  // default as the settings screen, even when a sibling has an override.
+  const enabledFields = new Set<string>();
+  for (const docType of configuredFieldDocTypes) {
+    for (const key of DOC_TYPE_EXTRACTION_FIELDS[docType as DocType] ?? []) {
+      enabledFields.add(`${docType}:${key}`);
+    }
+  }
+  for (const setting of fieldSettings) {
+    const key = `${setting.doc_type}:${setting.field_key}`;
+    if (setting.enabled) enabledFields.add(key);
+    else enabledFields.delete(key);
+  }
+
   return {
-    enabledFields:
-      fieldSettings.length > 0
-        ? new Set(
-            fieldSettings
-              .filter((setting) => setting.enabled)
-              .map((setting) => `${setting.doc_type}:${setting.field_key}`)
-          )
-        : null,
+    enabledFields: fieldSettings.length ? enabledFields : null,
     configuredFieldDocTypes,
     enabledDocTypes:
       docTypeSettings.length > 0

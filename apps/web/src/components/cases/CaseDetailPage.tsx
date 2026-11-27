@@ -746,7 +746,37 @@ function getDisplayDocuments(documents: CaseDetailDocument[]) {
 
   // Commercial comparisons collapse copies independently. Keep every source
   // document here so duplicate copies and their physical pages remain inspectable.
-  return documents;
+  return hideAbsorbedBlankPages(documents);
+}
+
+function hasExtractedContent(document: CaseDetailDocument) {
+  const hasFields = Object.values(document.extractedFields || {}).some(
+    (value) => value !== null && value !== undefined && String(value).trim() !== ""
+  );
+  return hasFields || (document.lineItems?.length ?? 0) > 0;
+}
+
+// A blank back side is split out as an empty "Unknown" document, but the page before it
+// already spans it (for example "pages 3-4"). Showing both gives one page two owners.
+function hideAbsorbedBlankPages(documents: CaseDetailDocument[]) {
+  return documents.filter((document) => {
+    if (String(document.documentType || "").toLowerCase() !== "unknown") return true;
+    if (hasExtractedContent(document)) return true;
+
+    const key = getDocumentSourceKey(document);
+    if (!key) return true;
+    const range = getDocumentPageRange(document);
+
+    return !documents.some((other) => {
+      if (other === document || other.documentType === "Unknown" || !range.explicit || getDocumentSourceKey(other) !== key) return false;
+      const otherRange = getDocumentPageRange(other);
+      return (
+        otherRange.end > otherRange.start &&
+        range.start >= otherRange.start &&
+        range.end <= otherRange.end
+      );
+    });
+  });
 }
 
 function displayValue(value: unknown) {
@@ -841,14 +871,40 @@ function isImageSourceFile(mimeType?: string | null, sourceName?: string | null)
   return false;
 }
 
-function getDocumentSourcePage(document?: SavedCaseDetail["documents"][number] | null) {
+const PAGE_RANGE_SUFFIX = /\s*\(pages?\s+(\d+)(?:\s*[-–]\s*(\d+))?\)\s*$/i;
+
+function getDocumentPageRange(document?: SavedCaseDetail["documents"][number] | null) {
+  const pageCount = Math.max(1, document?.pageCount || 1);
+
+  // Prefer the exact suffix so a file that merely has "page 2" in its name is not misread.
+  for (const text of [document?.sourceHint, document?.sourceFileName, document?.title]) {
+    const match = text?.match(PAGE_RANGE_SUFFIX);
+    if (!match) continue;
+    const start = Math.round(Number(match[1]));
+    if (!Number.isFinite(start) || start < 1) continue;
+    const end = Math.round(Number(match[2] ?? match[1]));
+    return { start, end: Number.isFinite(end) && end >= start ? end : start, explicit: true };
+  }
+
   const sourceText = [document?.sourceHint, document?.sourceFileName, document?.title]
     .filter(Boolean)
     .join(" ");
-  const match = sourceText.match(/\bpages?\s+(\d+)/i);
-  if (!match) return 1;
-  const page = Number(match[1]);
-  return Number.isFinite(page) && page > 0 ? Math.round(page) : 1;
+  const loose = sourceText.match(/\bpages?\s+(\d+)/i);
+  const start = loose ? Math.round(Number(loose[1])) : 1;
+  const safeStart = Number.isFinite(start) && start > 0 ? start : 1;
+  return { start: safeStart, end: safeStart + pageCount - 1, explicit: false };
+}
+
+function getDocumentSourcePage(document?: SavedCaseDetail["documents"][number] | null) {
+  return getDocumentPageRange(document).start;
+}
+
+// Documents split from the same uploaded file share this key.
+function getDocumentSourceKey(document: SavedCaseDetail["documents"][number]) {
+  return normalizeText(document.sourceFileName || document.sourceHint || "").replace(
+    PAGE_RANGE_SUFFIX,
+    ""
+  );
 }
 
 function getLineItemPreviewPage(
@@ -1232,6 +1288,8 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
   const [activeTab, setActiveTab] = useState<ActiveTab>("preview");
   const [activeDataView, setActiveDataView] = useState<DataViewMode>("fields");
   const [previewPageIndex, setPreviewPageIndex] = useState(0);
+  const [pdfRotation, setPdfRotation] = useState(0);
+  const [pdfFit, setPdfFit] = useState<"width" | "page">("width");
   const [previewZoom, setPreviewZoom] = useState(DEFAULT_PREVIEW_ZOOM);
   const [previewFocus, setPreviewFocus] = useState<PreviewFocus | null>(null);
   const [previewPdfPage, setPreviewPdfPage] = useState<number | null>(null);
@@ -1803,23 +1861,19 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
     setPreviewZoom(DEFAULT_PREVIEW_ZOOM);
   }, [previewPageIndex]);
 
-  useEffect(() => {
-    if (!detail || !activePreviewFile) {
-      return;
-    }
+  const previewCaseId = detail?.case.id;
+  const previewFileId = activePreviewFile?.id;
+  const hasPreviewResult = Boolean(activePreviewFile?.signedUrl) ||
+    (previewFileId != null && Object.prototype.hasOwnProperty.call(signedFileUrls, previewFileId));
 
-    if (
-      activePreviewFile.signedUrl ||
-      Object.prototype.hasOwnProperty.call(signedFileUrls, activePreviewFile.id)
-    ) {
-      return;
-    }
+  useEffect(() => {
+    if (!previewCaseId || !previewFileId || hasPreviewResult) return;
 
     let active = true;
-    setLoadingPreviewFileId(activePreviewFile.id);
+    setLoadingPreviewFileId(previewFileId);
     setPreviewUrlError(null);
 
-    fetchCaseFileSignedUrlPreferCache(detail.case.id, activePreviewFile.id)
+    fetchCaseFileSignedUrlPreferCache(previewCaseId, previewFileId)
       .then((payload) => {
         if (!active) { releaseProtectedPreview(payload.signedUrl); return; }
         if (payload.signedUrl.startsWith('blob:')) protectedPreviews.current.add(payload.signedUrl);
@@ -1835,20 +1889,20 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
         );
         setSignedFileUrls((current) => ({
           ...current,
-          [activePreviewFile.id]: null,
+          [previewFileId]: null,
         }));
       })
       .finally(() => {
         if (!active) return;
         setLoadingPreviewFileId((current) =>
-          current === activePreviewFile.id ? null : current
+          current === previewFileId ? null : current
         );
       });
 
     return () => {
       active = false;
     };
-  }, [activePreviewFile, detail, signedFileUrls, previewRetryKey]);
+  }, [previewCaseId, previewFileId, hasPreviewResult, previewRetryKey]);
 
   const comparisonOptions = useMemo(
     () =>
@@ -2364,11 +2418,19 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
           </div>
         </div>
       ) : (
-        <div className={styles.redesignPdfPreview}>
+        <div className={styles.redesignPdfPreview} style={{ display: "grid", gridTemplateRows: "auto minmax(0, 1fr)" }}>
+          <div className="flex justify-end gap-3 bg-white px-3 py-1 text-xs">
+            <button onClick={() => setPdfFit(pdfFit === "width" ? "page" : "width")}>{pdfFit === "width" ? "Fit whole page" : "Fit width"}</button>
+            <button onClick={() => setPdfRotation(r => (r + 270) % 360)}>Rotate left</button>
+            <button onClick={() => setPdfRotation(r => (r + 90) % 360)}>Rotate right</button>
+          </div>
           <PdfEvidencePreview
             url={activeFileUrl}
             pageNumber={activePdfPage}
             zoom={previewZoom}
+            rotation={pdfRotation}
+            fitMode={pdfFit}
+            highlightText={documentFieldComparison ? displayValue(activeDocument?.extractedFields?.[documentFieldComparison.key as FieldKey]) : previewFocus?.query}
             searchPageStart={activeDocumentSourcePage}
             searchPageEnd={
               activeDocumentSourcePage + Math.max(1, activeDocument?.pageCount || 1) - 1
@@ -2502,14 +2564,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
       </div>
     );
 
-    const coverage = Array.isArray(detail.case.processingMeta?.verificationChecks) ? detail.case.processingMeta.verificationChecks as Array<{key:string;label:string;status:string;detail:string;documentIds:string[]}> : [];
-    const activeChecks=coverage.filter(check=>check.documentIds.some(id=>[activeDocument?.id,activeDocument?.clientDocumentId].includes(id)));
-    const coverageNode = <details className="border-b border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
-      <summary className="cursor-pointer font-semibold">Checks and evidence · {activeChecks.filter(c=>c.status==='passed').length} passed · {activeChecks.filter(c=>c.status==='failed').length} need review · {activeChecks.filter(c=>c.status==='not_checked').length} not checked</summary>
-      {activeChecks.length ? activeChecks.map(check=><p key={check.key} className="mt-1"><strong>{check.key.includes(':field:') ? getDocumentFieldLabel(activeDocument?.documentType,check.label) : check.label}: {check.status.replaceAll("_"," ")}</strong> — {check.detail}</p>) : <p className="mt-1">Coverage is unavailable for this document. Re-analyse an unapproved case to record checks. Zero mismatches alone does not mean every check passed.</p>}
-      {Array.isArray(detail.case.processingMeta?.missingDocumentGroups) && detail.case.processingMeta.missingDocumentGroups.length ? <p className="mt-1 text-amber-800">Missing evidence: {detail.case.processingMeta.missingDocumentGroups.join(", ")}</p>:null}
-    </details>;
-    const dataNode = (<div className="flex h-full min-h-0 flex-col">{coverageNode}<div className="min-h-0 flex-1">
+    const dataNode = (
       <ExtractedFieldsPanel
         fields={extractedFieldItems}
         lineItemCount={activeDocumentLineItems.length}
@@ -2531,7 +2586,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
         )}
         lineItemsContent={lineItemsContent}
         termsContent={termsContent}
-      /></div></div>
+      />
     );
 
     const complianceContent = (
@@ -2574,7 +2629,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
           decisionUpdating={decisionStatus === "updating"}
           decisionError={decisionStatus === "error" ? decisionError : analysisError}
           onDecision={(decision) => void handleCaseDecision(decision)}
-          canReanalyse={detail.case.status === "completed" && analysisStatus !== "processing"}
+          canReanalyse={detail.case.status === "failed" && analysisStatus !== "processing"}
           onReanalyse={async()=>{
             try {
               setAnalysisError(null); setAnalysisStatus("processing");

@@ -1625,7 +1625,7 @@ async function POSTHandler(request: Request, contextParam: { params: Promise<{ i
       .digest("hex");
     const team = process.env.TEAM_ACCESS_ENFORCEMENT === 'true'
       ? await requireResourceAccess(request, 'case', id, 'purchases.post') : null;
-    if (team && !Number.isSafeInteger(body.workflowRevision)) {
+    if (team && team.access.purchaseApprovalRequired !== false && !Number.isSafeInteger(body.workflowRevision)) {
       return jsonWithCors(request, { error: 'Reload the approved purchase revision before posting.' }, { status: 409 });
     }
     const sourceDocumentFolder = await readPurchaseDocumentFolder(
@@ -1689,7 +1689,7 @@ async function POSTHandler(request: Request, contextParam: { params: Promise<{ i
     const commandResult = team
       ? await context.supabase.rpc('access_enqueue_purchase', {
           p_actor: user.id, p_org: team.access.organizationId, p_case: id,
-          p_workflow_revision: body.workflowRevision, p_source_revision: team.scope.source_revision,
+          p_workflow_revision: body.workflowRevision ?? 0, p_source_revision: team.scope.source_revision,
           p_financial_digest: purchaseFinancialDigest(context.documents.map(({id,document_type,extracted_fields}) => ({id,document_type,extracted_fields})), context.posting.review_patch, { companyId: team.scope.company_id, connectionId: context.connection.id }),
           p_args: queueArgs,
         })

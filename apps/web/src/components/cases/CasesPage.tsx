@@ -732,7 +732,7 @@ export function CasesPage() {
         </div>
       </div>
 
-      {preview && <CaseVoucherQuickView caseId={preview} key={preview} close={() => setPreview(null)}/>}
+      {preview && <CaseVoucherQuickView caseId={preview} key={preview} title={cases.find(row => row.id === preview)?.displayName || "purchase case"} close={() => {setPreview(null);caseListCache.clear();setListRevision(v => v + 1);}}/>}
       {decision && <CaseConfirmDialog open onOpenChange={open => {if (!open && !deciding) setDecision(null);}}
         title={`${decision.value === "accepted" ? "Accept" : "Reject"} ${decision.ids.length === 1 ? (cases.find(c => c.id === decision.ids[0])?.displayName || "this case") : decision.ids.length + " cases"}?`}
         description="This updates the packet decision. Posting a purchase voucher is a separate action."

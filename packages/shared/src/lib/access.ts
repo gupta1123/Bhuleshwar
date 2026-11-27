@@ -14,7 +14,7 @@ export const DEFAULT_ROLES = [
 ] as const;
 export type AccessRole = {id:string; name:string; permissions:string[]; revision:number; template_key:string|null; archived:boolean};
 export type AccessMember = {user_id:string;organization_id:string;role_id:string;display_name:string;email:string;status:'active'|'suspended';is_owner:boolean;all_companies:boolean;company_ids:string[];modules:ModuleKey[];revision:number;must_change_password:boolean};
-export type AccessSnapshot = {organizationId:string;organizationName:string;revision:number;sharingEnabled:boolean;allowSelfApproval:boolean;member:AccessMember;role:AccessRole;companies:Array<{id:string;name:string}>;organizations:Array<{id:string;name:string}>};
+export type AccessSnapshot = {organizationId:string;organizationName:string;revision:number;sharingEnabled:boolean;allowSelfApproval:boolean;purchaseApprovalRequired?:boolean;member:AccessMember;role:AccessRole;companies:Array<{id:string;name:string}>;organizations:Array<{id:string;name:string}>};
 export function validatePermissions(keys:readonly string[]):string[] {
   if(keys.length!==new Set(keys).size) throw new Error('Duplicate permissions.');
   for(const key of keys){

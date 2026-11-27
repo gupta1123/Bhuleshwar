@@ -757,6 +757,7 @@ export type TallyPurchaseValidationState = {
 
 export function TallyPurchasePostingPanel({
   caseId,
+  quickView = false,
   onApprovePacket,
   onHeaderStateChange,
   onRefreshReady,
@@ -764,6 +765,7 @@ export function TallyPurchasePostingPanel({
   allowedBlockerKeys = [],
 }: {
   caseId: string;
+  quickView?: boolean;
   onApprovePacket?: () => Promise<void>;
   onHeaderStateChange?: (state: TallyPurchaseHeaderState) => void;
   onRefreshReady?: (refresh: () => Promise<void>) => void;
@@ -771,6 +773,7 @@ export function TallyPurchasePostingPanel({
   allowedBlockerKeys?: string[];
 }) {
   const [payload, setPayload] = useState<TallyPostingResponse | null>(null);
+  const [showDetails, setShowDetails] = useState(false);
   const approval = usePurchaseApproval(caseId);
   const [review, setReview] = useState<TallyPostingReview | null>(null);
   const [selectedConnectionId, setSelectedConnectionId] = useState("");
@@ -854,7 +857,7 @@ export function TallyPurchasePostingPanel({
   // live Tally read in the background. A reviewer must not need to discover
   // and click Refresh to see changed supplier GSTINs or stock-item HSNs.
   useEffect(() => {
-    if(approval.enabled&&approval.loading)return;
+    if(approval.required && approval.loading)return;
     if (automaticLiveRefreshRef.current === caseId) return;
     automaticLiveRefreshRef.current = caseId;
     setLiveMastersReady(false);
@@ -869,7 +872,7 @@ export function TallyPurchasePostingPanel({
       // catalogue: skip the live masters and supplier lookups entirely. Refresh
       // still reads Tally on demand.
       if (next?.posting?.status === "created") return;
-      if (!mayLoadPurchaseCatalogue(approval.enabled, canAccess(approval.snapshot, 'purchases.prepare'), approval.error, approval.workflow)) return;
+      if (!mayLoadPurchaseCatalogue(approval.enabled, canAccess(approval.snapshot, 'purchases.prepare'), approval.required ? approval.error : null, approval.required ? approval.workflow : null)) return;
       const connection = next?.connection;
       if (
         !next ||
@@ -1058,7 +1061,7 @@ export function TallyPurchasePostingPanel({
         automaticLiveRefreshRef.current = null;
       }
     };
-  }, [caseId,approval.enabled,approval.loading,approval.error,approval.workflow?.state,approval.snapshot?.revision]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [caseId,approval.enabled,approval.required,approval.loading,approval.error,approval.workflow?.state,approval.snapshot?.revision]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!liveMastersReady || !selectedConnectionId || !selectedCompanyName || !review?.supplierName) {
@@ -1278,7 +1281,8 @@ export function TallyPurchasePostingPanel({
   }, [onHeaderStateChange, payload]);
 
   const postingLocked = ["approved", "queued", "creating", "created", "verification_required"].includes(payload?.posting?.status ?? "");
-  const locked = postingLocked || (approval.enabled && (approval.loading || Boolean(approval.error) || !canAccess(approval.snapshot,'purchases.prepare') || Boolean(approval.workflow && approval.workflow.state !== 'draft')));
+  const locked = postingLocked || (approval.enabled && !canAccess(approval.snapshot,'purchases.prepare')) ||
+    (approval.required && (approval.loading || Boolean(approval.error) || Boolean(approval.workflow && approval.workflow.state !== 'draft')));
   const ledgerOptions = useMemo(
     () => dedupeMasterOptions(payload?.masterOptions.ledgers ?? []),
     [payload?.masterOptions.ledgers]
@@ -1675,7 +1679,7 @@ export function TallyPurchasePostingPanel({
       setNotice(hydrated.readyForApproval
         ? "All changes saved. This voucher is ready to send to Tally."
         : "All changes saved. Complete the highlighted items before approval.");
-      if (approval.enabled) await approval.refresh();
+      if (approval.required) await approval.refresh();
     } catch (saveError) {
       autoSaveFailedReviewRef.current = nextReview;
       setError(saveError instanceof Error ? `${saveError.message} Your changes are kept; use Retry.` : "Could not save your changes. Use Retry.");
@@ -1807,7 +1811,8 @@ export function TallyPurchasePostingPanel({
       dirty ||
       connectionDirty ||
       postingLocked ||
-      (approval.enabled && (approval.workflow?.state !== 'approved' || !canAccess(approval.snapshot,'purchases.post'))) ||
+      (approval.required && approval.workflow?.state !== 'approved') ||
+      (approval.enabled && !canAccess(approval.snapshot,'purchases.post')) ||
       refreshingMasters ||
       (acknowledgementWarnings.length > 0 && !warningsAcknowledged)
     ) {
@@ -1838,7 +1843,7 @@ export function TallyPurchasePostingPanel({
         selectedConnectionId,
         selectedCompanyName,
         approvalContext,
-        approval.enabled ? approval.workflow?.revision : undefined
+        approval.required ? approval.workflow?.revision : undefined
       );
       const hydrated = withLiveMasterOptions(next);
       setPayload(hydrated);
@@ -2056,7 +2061,8 @@ export function TallyPurchasePostingPanel({
     payload?.posting &&
     !hasUnsavedChanges &&
     !postingLocked &&
-    (!approval.enabled || (!approval.loading && !approval.error && approval.workflow?.state === 'approved' && canAccess(approval.snapshot,'purchases.post'))) &&
+    (!approval.required || (!approval.loading && !approval.error && approval.workflow?.state === 'approved')) &&
+    (!approval.enabled || canAccess(approval.snapshot,'purchases.post')) &&
     !tallyReviewRefreshing &&
     connectionReadable &&
     selectedMatchesActive
@@ -2334,8 +2340,67 @@ export function TallyPurchasePostingPanel({
     credit?: boolean;
   }>;
 
+  const deductionSwitches = (<>
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
+                <button
+                  aria-checked={review.applyTds194q}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyTds194q ? "bg-emerald-700" : "bg-slate-300"}`}
+                  disabled={locked || saving}
+                  onClick={() => void handleAdjustmentToggle("applyTds194q")}
+                  role="switch"
+                  type="button"
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.applyTds194q ? "left-[18px]" : "left-0.5"}`} />
+                </button>
+                194Q TDS
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
+                <button
+                  aria-checked={review.applyTransportTds}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyTransportTds ? "bg-emerald-700" : "bg-slate-300"}`}
+                  disabled={locked || saving}
+                  onClick={() => void handleAdjustmentToggle("applyTransportTds")}
+                  role="switch"
+                  type="button"
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.applyTransportTds ? "left-[18px]" : "left-0.5"}`} />
+                </button>
+                Transport TDS
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
+                <button
+                  aria-checked={review.applyGstTds}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyGstTds ? "bg-emerald-700" : "bg-slate-300"}`}
+                  disabled={locked || saving}
+                  onClick={() => void handleAdjustmentToggle("applyGstTds")}
+                  role="switch"
+                  type="button"
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.applyGstTds ? "left-[18px]" : "left-0.5"}`} />
+                </button>
+                {calculation?.taxMode === "cgst_sgst"
+                  ? "GST TDS (CGST + SGST)"
+                  : calculation?.taxMode === "igst"
+                    ? "GST TDS (IGST)"
+                    : "GST TDS"}
+              </label>
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
+                <button
+                  aria-checked={review.tcsReceivable}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.tcsReceivable ? "bg-emerald-700" : "bg-slate-300"}`}
+                  disabled={locked || saving}
+                  onClick={() => void handleAdjustmentToggle("tcsReceivable")}
+                  role="switch"
+                  type="button"
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.tcsReceivable ? "left-[18px]" : "left-0.5"}`} />
+                </button>
+                TCS Receivable
+              </label>
+  </>);
+
   return (
-    <div className="tally-purchase-workflow mx-auto max-w-6xl space-y-3 p-3 pb-32 sm:p-4 sm:pb-32" id="tally-header">
+    <div className={`tally-purchase-workflow mx-auto max-w-6xl space-y-3 p-3 sm:p-4 ${quickView ? "" : "pb-32 sm:pb-32"}`} id="tally-header">
       {payload.eligibility.invoiceCandidates.length > 1 ? (
         <section className="rounded-xl border border-slate-200 bg-white p-3">
           <div className="mb-2 text-xs font-semibold text-slate-900">Invoice selected for this Purchase voucher</div>
@@ -2420,6 +2485,10 @@ export function TallyPurchasePostingPanel({
         </section>
       ) : null}
 
+      {quickView && <Button size="sm" variant="outline" aria-expanded={showDetails} onClick={() => setShowDetails(value => !value)}>
+        {showDetails ? "Hide voucher details" : remainingCorrectionBlockers.length ? "Review required corrections" : "Review voucher details"}
+      </Button>}
+      {(!quickView || showDetails) && <>
       <section className="scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" id="tally-invoice">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5 sm:px-5">
           <h3 className="text-sm font-semibold text-slate-950">Source invoice</h3>
@@ -2836,62 +2905,7 @@ export function TallyPurchasePostingPanel({
 
           <div className="border-b border-slate-100">
             <div className="flex flex-wrap items-center gap-x-5 gap-y-2 py-2.5">
-              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
-                <button
-                  aria-checked={review.applyTds194q}
-                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyTds194q ? "bg-emerald-700" : "bg-slate-300"}`}
-                  disabled={locked || saving}
-                  onClick={() => void handleAdjustmentToggle("applyTds194q")}
-                  role="switch"
-                  type="button"
-                >
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.applyTds194q ? "left-[18px]" : "left-0.5"}`} />
-                </button>
-                194Q TDS
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
-                <button
-                  aria-checked={review.applyTransportTds}
-                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyTransportTds ? "bg-emerald-700" : "bg-slate-300"}`}
-                  disabled={locked || saving}
-                  onClick={() => void handleAdjustmentToggle("applyTransportTds")}
-                  role="switch"
-                  type="button"
-                >
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.applyTransportTds ? "left-[18px]" : "left-0.5"}`} />
-                </button>
-                Transport TDS
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
-                <button
-                  aria-checked={review.applyGstTds}
-                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.applyGstTds ? "bg-emerald-700" : "bg-slate-300"}`}
-                  disabled={locked || saving}
-                  onClick={() => void handleAdjustmentToggle("applyGstTds")}
-                  role="switch"
-                  type="button"
-                >
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.applyGstTds ? "left-[18px]" : "left-0.5"}`} />
-                </button>
-                {calculation?.taxMode === "cgst_sgst"
-                  ? "GST TDS (CGST + SGST)"
-                  : calculation?.taxMode === "igst"
-                    ? "GST TDS (IGST)"
-                    : "GST TDS"}
-              </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
-                <button
-                  aria-checked={review.tcsReceivable}
-                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.tcsReceivable ? "bg-emerald-700" : "bg-slate-300"}`}
-                  disabled={locked || saving}
-                  onClick={() => void handleAdjustmentToggle("tcsReceivable")}
-                  role="switch"
-                  type="button"
-                >
-                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.tcsReceivable ? "left-[18px]" : "left-0.5"}`} />
-                </button>
-                TCS Receivable
-              </label>
+              {deductionSwitches}
               {review.applyTds194q ? (
                 <details className="group basis-full border-t border-slate-100 pt-2">
                   <summary className="cursor-pointer list-none text-[10px] font-semibold text-slate-500 hover:text-slate-800">
@@ -3181,6 +3195,24 @@ export function TallyPurchasePostingPanel({
         </div>
       </section>
 
+      </>}
+      {quickView && !showDetails && review.ewayBill?.record && (
+        <div className="flex flex-wrap items-end gap-4 rounded-xl border bg-white px-4 py-3">
+          <div className="flex-1 text-sm">
+            E-way bill <strong>{review.ewayBill.number}</strong>
+            <p className="text-xs text-slate-600">{[review.ewayBill.transportMode, review.ewayBill.vehicleNumber,
+              review.ewayBill.transporterName, review.ewayBill.documentNumber && `LR ${review.ewayBill.documentNumber}`,
+              review.ewayBill.toAddress && `Ship to ${review.ewayBill.toAddress}`].filter(Boolean).join(" / ")}</p>
+          </div>
+          <Field compact type="date" label="E-way bill generation date" disabled={locked}
+            value={review.ewayBill.date} onChange={date => updateReview("ewayBill", { ...review.ewayBill!, date })} />
+        </div>
+      )}
+      {quickView && !showDetails && (
+        <div role="group" aria-label="Voucher tax adjustments" className="flex flex-wrap items-center gap-x-5 gap-y-2 rounded-xl border border-slate-200 bg-white px-4 py-3">
+          {deductionSwitches}
+        </div>
+      )}
       <section className="scroll-mt-24 overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm" id="tally-preview">
         <header className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-4 py-2.5 sm:px-5">
           <h3 className="text-sm font-semibold text-slate-950">Confirm Purchase voucher</h3>
@@ -3367,7 +3399,7 @@ export function TallyPurchasePostingPanel({
         </div>
       ) : null}
 
-      <div className="fixed bottom-0 right-0 z-30 border-t border-slate-200 bg-white/95 px-4 py-2.5 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur lg:left-[340px]">
+      <div className={`${quickView ? "sticky bottom-0" : "fixed bottom-0 right-0 lg:left-[340px]"} z-30 border-t border-slate-200 bg-white/95 px-4 py-2.5 shadow-[0_-8px_24px_rgba(15,23,42,0.08)] backdrop-blur`}>
         <div className="mx-auto flex max-w-6xl flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="flex flex-wrap items-center gap-2 text-xs text-slate-600">
             <Database className="h-4 w-4" />
@@ -3408,7 +3440,7 @@ export function TallyPurchasePostingPanel({
                   Retry save
                 </Button>
               ) : null}
-              {onApprovePacket && !approval.enabled ? (
+              {onApprovePacket && !approval.required && (!approval.enabled || canAccess(approval.snapshot,"purchases.approve")) ? (
                 <Button
                   className="bg-emerald-700 text-white hover:bg-emerald-800"
                   disabled={approvingPacket || locked}
@@ -3437,7 +3469,7 @@ export function TallyPurchasePostingPanel({
                     ? "Checking Tally data"
                     : staleMastersBlocking
                       ? "Refresh Tally data first"
-                      : approval.enabled ? "Post approved purchase" : "Approve and send"}
+                      : approval.required ? "Post approved purchase" : quickView ? "Post to Tally" : "Approve and send"}
                 </Button>
               )}
             </div>

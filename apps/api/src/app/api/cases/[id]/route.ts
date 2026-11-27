@@ -1,3 +1,4 @@
+import { purchaseCaseIdentity, isBhuleshwarName, SUPPLIER_PENDING } from "@autodealer/shared/lib/purchase-case-identity";
 import { withTeamAccess } from '@/lib/access/route-boundary';
 import { jsonWithCors, optionsWithCors } from "@/lib/api/cors";
 import { requireRequestUser } from "@/lib/api/request-auth";
@@ -369,7 +370,10 @@ function mapCaseRow(
 ) {
   const derivedSummary =
     documents.length > 0 ? summarizeCase(documents, [], fieldConfiguration) : null;
-  const receiverName = derivedSummary ? derivedSummary.buyerName : row.buyer_name;
+  const identity = purchaseCaseIdentity(documents);
+  const candidate = derivedSummary?.buyerName ?? row.buyer_name;
+  const receiverName = identity?.supplier ?? (isBhuleshwarName(candidate) ? SUPPLIER_PENDING : candidate);
+  const invoiceNumber = identity ? identity.invoiceNumber : row.invoice_number;
   const category =
     derivedSummary?.category ||
     resolveCaseCategoryLabel({
@@ -382,10 +386,10 @@ function mapCaseRow(
       ),
       status: row.status,
     });
-  const displayName = resolveCaseDisplayName({
-    storedDisplayName: row.display_name,
+  const displayName = identity?.title ?? resolveCaseDisplayName({
+    storedDisplayName: isBhuleshwarName(row.display_name) ? null : row.display_name,
     receiverName,
-    invoiceNumber: row.invoice_number,
+    invoiceNumber,
     poNumber: row.po_number,
     category,
     status: row.status,
@@ -408,7 +412,7 @@ function mapCaseRow(
     receiverName,
     category,
     poNumber: row.po_number,
-    invoiceNumber: row.invoice_number,
+    invoiceNumber,
     status: row.status,
     riskScore,
     uploadCount: row.upload_count,

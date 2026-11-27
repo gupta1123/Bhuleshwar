@@ -1,3 +1,4 @@
+import { purchaseCaseIdentity, isBhuleshwarName, SUPPLIER_PENDING } from "./purchase-case-identity";
 import {
   getEnabledCorePacketGroups,
   isDocTypeEnabled,
@@ -350,6 +351,8 @@ function derivePreferredCounterpartyName(documents: CaseDoc[]) {
 }
 
 export function deriveCaseReceiverName(documents: CaseDoc[]) {
+  const identity = purchaseCaseIdentity(documents);
+  if (identity) return identity.supplier;
   const preferredCounterpartyName = derivePreferredCounterpartyName(documents);
   if (preferredCounterpartyName) {
     return preferredCounterpartyName;
@@ -632,11 +635,13 @@ export function summarizeCase(
   mismatches: Mismatch[],
   fieldConfiguration?: PacketFieldConfiguration
 ): CaseSummary {
-  const buyerName = deriveCaseReceiverName(documents);
+  const identity = purchaseCaseIdentity(documents);
+  const candidate = identity?.supplier ?? deriveCaseReceiverName(documents);
+  const buyerName = isBhuleshwarName(candidate) ? SUPPLIER_PENDING : candidate;
   const poNumber = firstFieldValue(documents, "poNumber") || firstFieldValue(documents, "referencePoNumber");
-  const invoiceNumber =
+  const invoiceNumber = identity ? identity.invoiceNumber :
     firstFieldValue(documents, "invoiceNumber") || firstFieldValue(documents, "referenceInvoiceNumber");
-  const primaryReference = derivePrimaryReference(documents);
+  const primaryReference = identity ? identity.invoiceNumber : derivePrimaryReference(documents);
   const sourceDisplayName = deriveSourceDisplayName(documents);
   const packetCategory = derivePacketCategory(documents, fieldConfiguration);
   const category = resolveCaseCategoryLabel({
@@ -669,7 +674,7 @@ export function summarizeCase(
 
   return {
     slug: `${subjectSlug}-${referenceSlug}`,
-    displayName: resolveStoredCaseDisplayName({
+    displayName: identity?.title ?? resolveStoredCaseDisplayName({
       storedDisplayName: sourceDisplayName,
       receiverName: buyerName,
       invoiceNumber,

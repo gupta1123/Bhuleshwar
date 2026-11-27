@@ -2,7 +2,8 @@
 // AI or upload metadata for directory rows.
 const BASE = 'id,slug,display_name,buyer_name,po_number,invoice_number,status,risk_score,upload_count,document_count,mismatch_count,created_at';
 export const CASE_LIST_META_KEYS = ['caseCategory','packetCategory','documentTypes','termsComplianceMismatchMode','termsComplianceChecklist','recycleBin'] as const;
-export const CASE_LIST_COLUMNS_LEGACY = `${BASE},${CASE_LIST_META_KEYS.map(key => `list_${key}:processing_meta->${key}`).join(',')}`;
+const PARTIES = "naming_parties:packet_documents(type:document_type,buyerName:extracted_fields->>buyerName,buyerGstin:extracted_fields->>buyerGstin,vendorName:extracted_fields->>vendorName,supplierGstin:extracted_fields->>supplierGstin,invoiceNumber:extracted_fields->>invoiceNumber)";
+export const CASE_LIST_COLUMNS_LEGACY = `${BASE},${PARTIES},${CASE_LIST_META_KEYS.map(key => `list_${key}:processing_meta->${key}`).join(',')}`;
 export const CASE_LIST_COLUMNS = `${CASE_LIST_COLUMNS_LEGACY},deleted_at`;
 export function restoreCaseListMetadata<T extends Record<string, unknown>>(row: T): T & {processing_meta: unknown} {
   if (Object.hasOwn(row, 'processing_meta')) return row as T & {processing_meta: unknown};

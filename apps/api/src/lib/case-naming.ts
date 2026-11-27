@@ -1,3 +1,4 @@
+import { purchaseCaseIdentity, isBhuleshwarName, SUPPLIER_PENDING } from "@autodealer/shared/lib/purchase-case-identity";
 import { callOpenRouter } from "@/lib/processing/openrouter";
 import type { CaseSummary } from "@/lib/case-summary";
 import type { CaseDoc, FieldKey } from "@/types/pipeline";
@@ -109,9 +110,11 @@ export async function resolveCaseDisplayNameWithAI(
   documents: CaseDoc[],
   summary: CaseSummary
 ) {
-  const candidates = collectSubjectCandidates(documents);
+  const identity = purchaseCaseIdentity(documents);
+  if (identity) return identity.title;
+  const candidates = collectSubjectCandidates(documents).filter(candidate => !isBhuleshwarName(candidate.name));
   if (candidates.length === 0) {
-    return summary.displayName;
+    return isBhuleshwarName(summary.displayName) ? SUPPLIER_PENDING : summary.displayName;
   }
 
   const internalHints = getInternalNameHints();

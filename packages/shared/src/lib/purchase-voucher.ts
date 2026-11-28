@@ -1,5 +1,16 @@
 export const PURCHASE_CALCULATION_VERSION = 2;
 
+/** Ordinary billet purchases no longer carry general sale-of-goods TCS from April 2025. */
+export function allowsPurchaseTcs(invoiceDate: string, lines: readonly { hsn: string; description: string }[]) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(invoiceDate) || invoiceDate < "2025-04-01") return true;
+  const onlyBillets = lines.length > 0 && lines.every(({ hsn, description }) => {
+    if (/\bscrap\b/i.test(description)) return false;
+    const code = hsn.trim();
+    return code === "72071920" || ((!code || code.startsWith("7207")) && /\bbillets?\b/i.test(description));
+  });
+  return !onlyBillets;
+}
+
 export type PurchaseTaxMode = "cgst_sgst" | "igst" | "unknown";
 
 export type PurchaseCalculationLine = {
@@ -10,6 +21,7 @@ export type PurchaseCalculationLine = {
 
 export type PurchaseCalculationInput = {
   taxMode: PurchaseTaxMode;
+  roundPurchaseAndGst?: boolean;
   defaultGstRate: string;
   lines: PurchaseCalculationLine[];
   freightAmount: string;
@@ -82,46 +94,61 @@ function addBucket(map: Map<string, { kind: PurchaseTaxBucket["kind"]; rate: num
   map.set(key, current);
 }
 
+// Round the total once. Distribute its paise adjustment across the original
+// amounts so every posted allocation still adds up to the displayed total.
+function roundTotalToRupees(amounts: number[], targetPaise?: number) {
+  const total = amounts.reduce((sum, amount) => sum + amount, 0);
+  if (total <= 0) return amounts;
+  const adjustment = (targetPaise ?? Math.round(total / 100) * 100) - total;
+  let cumulative = 0;
+  let allocated = 0;
+  return amounts.map(amount => {
+    cumulative += amount;
+    const target = Math.round(cumulative / total * adjustment);
+    const result = amount + target - allocated;
+    allocated = target;
+    return result;
+  });
+}
+
 export function calculatePurchaseVoucher(input: PurchaseCalculationInput) {
   const bucketMap = new Map<string, { kind: PurchaseTaxBucket["kind"]; rate: number; basis: number; amount: number }>();
   const defaultRate = purchaseRateBasisPoints(input.defaultGstRate) ?? 0;
   let basic = 0;
   let gstTaxable = 0;
 
-  const itemTaxes = input.lines.map(line => {
-    const basis = purchaseMoneyPaise(line.taxableAmount) ?? 0;
-    const rate = purchaseRateBasisPoints(line.taxRate) ?? defaultRate;
-    basic += basis;
+  const freightInput = Math.max(0, purchaseMoneyPaise(input.freightAmount) ?? 0);
+  const rows = [...input.lines, { lineId: "", taxableAmount: purchaseFormatPaise(freightInput), taxRate: input.freightGstRate || "0" }];
+  const bases = rows.map(row => purchaseMoneyPaise(row.taxableAmount) ?? 0);
+  const rates = rows.map(row => purchaseRateBasisPoints(row.taxRate) ?? defaultRate);
+  const taxes = bases.map((basis, i) => input.taxMode === "unknown" ? 0 : taxAmount(basis, rates[i]));
+  const book = (amounts: number[]) => input.roundPurchaseAndGst ? roundTotalToRupees(amounts) : amounts;
+  const bookedBases = book(bases);
+  const central = taxes.map(amount => input.taxMode === "cgst_sgst" ? Math.round(amount / 2) : 0);
+  // Each local GST head receives half of GST before whole-rupee rounding.
+  // Splitting odd paise first can otherwise push only one head over 50 paise.
+  const localHead = Math.round(taxes.reduce((sum, amount) => sum + amount, 0) / 200) * 100;
+  const cgstRows = input.taxMode === "cgst_sgst" && input.roundPurchaseAndGst ? roundTotalToRupees(taxes, localHead) : central;
+  const sgstRows = input.roundPurchaseAndGst ? cgstRows : taxes.map((amount, i) => input.taxMode === "cgst_sgst" ? amount - central[i] : 0);
+  const igstRows = book(taxes.map(amount => input.taxMode === "igst" ? amount : 0));
+  const freight = bookedBases[input.lines.length];
+  const itemTaxes = rows.map((line, i) => {
+    const basis = bookedBases[i], rate = rates[i];
+    if (i < input.lines.length) basic += basis;
     if (rate > 0) gstTaxable += basis;
-    const totalTax = input.taxMode === "unknown" ? 0 : taxAmount(basis, rate);
-    const cgst = input.taxMode === "cgst_sgst" ? Math.round(totalTax / 2) : 0;
     if (input.taxMode === "cgst_sgst") {
-      addBucket(bucketMap, "cgst", rate / 2, basis, cgst);
-      addBucket(bucketMap, "sgst", rate / 2, basis, totalTax - cgst);
+      addBucket(bucketMap, "cgst", rate / 2, basis, cgstRows[i]);
+      addBucket(bucketMap, "sgst", rate / 2, basis, sgstRows[i]);
     } else if (input.taxMode === "igst") {
-      addBucket(bucketMap, "igst", rate, basis, totalTax);
+      addBucket(bucketMap, "igst", rate, basis, igstRows[i]);
     }
     return {
-      lineId: line.lineId,
-      taxable: purchaseFormatPaise(basis),
+      lineId: line.lineId, taxable: purchaseFormatPaise(basis),
       rate: purchaseFormatPaise(rate).replace(/\.00$/, ""),
-      gst: purchaseFormatPaise(totalTax),
-      cgst: purchaseFormatPaise(cgst),
-      sgst: purchaseFormatPaise(input.taxMode === "cgst_sgst" ? totalTax - cgst : 0),
+      gst: purchaseFormatPaise(cgstRows[i] + sgstRows[i] + igstRows[i]),
+      cgst: purchaseFormatPaise(cgstRows[i]), sgst: purchaseFormatPaise(sgstRows[i]),
     };
-  });
-
-  const freight = Math.max(0, purchaseMoneyPaise(input.freightAmount) ?? 0);
-  const freightRate = purchaseRateBasisPoints(input.freightGstRate) ?? 0;
-  if (freightRate > 0) gstTaxable += freight;
-  const freightTax = input.taxMode === "unknown" ? 0 : taxAmount(freight, freightRate);
-  if (freight > 0 && freightRate > 0 && input.taxMode === "cgst_sgst") {
-    const cgst = Math.round(freightTax / 2);
-    addBucket(bucketMap, "cgst", freightRate / 2, freight, cgst);
-    addBucket(bucketMap, "sgst", freightRate / 2, freight, freightTax - cgst);
-  } else if (freight > 0 && freightRate > 0 && input.taxMode === "igst") {
-    addBucket(bucketMap, "igst", freightRate, freight, freightTax);
-  }
+  }).slice(0, input.lines.length);
 
   const buckets: PurchaseTaxBucket[] = Array.from(bucketMap.values()).map((bucket) => ({
     kind: bucket.kind,
@@ -164,8 +191,8 @@ export function calculatePurchaseVoucher(input: PurchaseCalculationInput) {
   // (after TDS) to the nearest rupee, like the client's manual entries.
   const invoiceRoundOff = sourceRoundOff !== null && sourceRoundOff !== 0 ? (confirmedRoundOff ?? sourceRoundOff) : 0;
   const unroundedPayable = basic + freight + gst + tcs - withholdings;
-  const roundOff = Math.round(unroundedPayable / 100) * 100 - unroundedPayable;
-  const gross = basic + freight + gst + tcs + invoiceRoundOff;
+  const roundOff = input.roundPurchaseAndGst ? 0 : Math.round(unroundedPayable / 100) * 100 - unroundedPayable;
+  const gross = basic + freight + gst + tcs + (input.roundPurchaseAndGst ? 0 : invoiceRoundOff);
   const payable = unroundedPayable + roundOff;
   const invoiceGst = purchaseMoneyPaise(input.invoiceGstAmount) ?? 0;
   const invoiceTotal = purchaseMoneyPaise(input.invoiceTotal) ?? 0;
@@ -187,6 +214,7 @@ export function calculatePurchaseVoucher(input: PurchaseCalculationInput) {
     igstAmount: purchaseFormatPaise(igst),
     gstAmount: purchaseFormatPaise(gst),
     invoiceGstAmount: purchaseFormatPaise(invoiceGst),
+    sourceGstDifference: purchaseFormatPaise(taxes.reduce((sum, amount) => sum + amount, 0) - invoiceGst),
     gstDifference: purchaseFormatPaise(gst - invoiceGst),
     tds194qAmount: purchaseFormatPaise(tds194q),
     tds194qBasisAmount: purchaseFormatPaise(tdsBasis),

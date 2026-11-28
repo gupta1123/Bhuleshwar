@@ -90,6 +90,7 @@ export type TallyPostingReview = {
   gstTdsRate: string;
   tdsLedgerName?: string;
   tdsRate?: string;
+  roundPurchaseAndGst?: boolean;
   tcsReceivable: boolean;
   tcsLedgerName: string;
   tcsAmount: string;

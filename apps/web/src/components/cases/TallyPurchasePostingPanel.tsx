@@ -18,7 +18,7 @@ import {
 
 import { Badge } from "@/components/ui/badge";
 import {canAccess} from '@autodealer/shared/lib/access';
-import { calculatePurchaseVoucher } from "@autodealer/shared/lib/purchase-voucher";
+import { allowsPurchaseTcs, calculatePurchaseVoucher } from "@autodealer/shared/lib/purchase-voucher";
 import {PurchaseApprovalControls,usePurchaseApproval} from '@/components/access/PurchaseApprovalControls';
 import { Button } from "@/components/ui/button";
 import {
@@ -2176,6 +2176,8 @@ export function TallyPurchasePostingPanel({
     );
   }
 
+  const tcsAllowed = allowsPurchaseTcs(review.invoiceDate, review.lines);
+  const tcsEnabled = tcsAllowed && review.tcsReceivable;
   const localTaxMode = (() => {
     const supplier = review.supplierGstin.match(/^\d{2}/)?.[0];
     const buyer = (review.buyerGstin || payload.connection?.companyGstin || "").match(/^\d{2}/)?.[0];
@@ -2192,6 +2194,7 @@ export function TallyPurchasePostingPanel({
     return String(Math.abs(Number((printed || "0").replace(/,/g, ""))) || 0);
   };
   const liveCoreCalculation = calculatePurchaseVoucher({
+    roundPurchaseAndGst: review.roundPurchaseAndGst,
     taxMode: localTaxMode,
     defaultGstRate: review.gstRate,
     lines: review.lines.map((line) => ({ lineId: line.lineId, taxableAmount: line.taxableAmount, taxRate: line.taxRate || review.gstRate })),
@@ -2208,7 +2211,7 @@ export function TallyPurchasePostingPanel({
     },
     sourceRoundOffAmount: payload.source?.invoiceRoundOffAmount ?? "",
     confirmedRoundOffAmount: review.roundOffAmount,
-    tcsAmount: review.tcsReceivable ? review.tcsAmount : "0",
+    tcsAmount: tcsEnabled ? review.tcsAmount : "0",
     tds194qEnabled: review.applyTds194q,
     tds194qBasisAmount: review.tds194qBasisAmount,
     tds194qRate: review.tds194qRate,
@@ -2275,7 +2278,7 @@ export function TallyPurchasePostingPanel({
   const showRoundOff = tallyRoundOff !== 0;
   const signedRoundOff = `${tallyRoundOff > 0 ? "+" : "−"} ${money(String(Math.abs(tallyRoundOff)))}`;
   const reviewedTcsValue = Number(String(review.tcsAmount || "0").replace(/,/g, ""));
-  const liveTcsAmount = review.tcsReceivable && Number.isFinite(reviewedTcsValue)
+  const liveTcsAmount = tcsEnabled && Number.isFinite(reviewedTcsValue)
     ? Math.abs(reviewedTcsValue)
     : 0;
   const savedTcsAmount = Number(calculation?.tcsAmount || 0);
@@ -2366,7 +2369,7 @@ export function TallyPurchasePostingPanel({
     calculation?.taxMode === "cgst_sgst"
       ? { ledger: review.sgstLedgerName || "Input SGST", rate: String(Number(calculation.gstRate || 0) / 2), amount: calculation.sgstAmount }
       : null,
-    review.tcsReceivable
+    tcsEnabled
       ? { ledger: review.tcsLedgerName || "TCS Receivable", amount: String(liveTcsAmount) }
       : null,
     Number(calculation?.roundOffAmount || 0)
@@ -2380,6 +2383,19 @@ export function TallyPurchasePostingPanel({
   }>;
 
   const deductionSwitches = (<>
+              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
+                <button
+                  aria-checked={review.roundPurchaseAndGst}
+                  className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.roundPurchaseAndGst ? "bg-emerald-700" : "bg-slate-300"}`}
+                  disabled={locked}
+                  onClick={() => updateReview("roundPurchaseAndGst", !review.roundPurchaseAndGst)}
+                  role="switch"
+                  type="button"
+                >
+                  <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.roundPurchaseAndGst ? "left-[18px]" : "left-0.5"}`} />
+                </button>
+                Round purchase and GST to rupees
+              </label>
               <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
                 <button
                   aria-checked={review.applyTds194q}
@@ -2423,7 +2439,7 @@ export function TallyPurchasePostingPanel({
                     ? "GST TDS (IGST)"
                     : "GST TDS"}
               </label>
-              <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
+              {tcsAllowed && <label className="flex cursor-pointer items-center gap-2 text-xs font-semibold text-slate-800">
                 <button
                   aria-checked={review.tcsReceivable}
                   className={`relative h-5 w-9 shrink-0 rounded-full transition ${review.tcsReceivable ? "bg-emerald-700" : "bg-slate-300"}`}
@@ -2435,7 +2451,7 @@ export function TallyPurchasePostingPanel({
                   <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition ${review.tcsReceivable ? "left-[18px]" : "left-0.5"}`} />
                 </button>
                 TCS Receivable
-              </label>
+              </label>}
   </>);
 
   return (
@@ -3191,7 +3207,7 @@ export function TallyPurchasePostingPanel({
                     </div>
                   ) : null}
 
-                  {review.tcsReceivable ? (
+                  {tcsEnabled ? (
                     <div className="grid grid-cols-[100px_105px_95px_100px_minmax(200px,1fr)_72px] items-center gap-2 border-t border-slate-100 px-3 py-2">
                       <div className="text-xs font-semibold text-slate-900">TCS Receivable</div>
                       <div className="pt-1 text-xs text-slate-400">Adjustment</div>
@@ -3233,8 +3249,10 @@ export function TallyPurchasePostingPanel({
                       <span>{money(calculation?.gstAmount)} GST</span>
                       <span className="text-[#8a7f72]">−</span>
                       <span>{money(calculation?.totalWithholdingAmount)} deductions</span>
-                      <span className="text-[#8a7f72]">+</span>
-                      <span>{money(String(liveTcsAmount))} TCS</span>
+                      {tcsEnabled && <>
+                        <span className="text-[#8a7f72]">+</span>
+                        <span>{money(String(liveTcsAmount))} TCS</span>
+                      </>}
                       {showRoundOff ? (
                         <>
                           <span className="text-[#8a7f72]">{tallyRoundOff > 0 ? "+" : "−"}</span>
@@ -3373,7 +3391,7 @@ export function TallyPurchasePostingPanel({
                   <span className="text-right">Amount</span>
                 </div>
                 <div className="min-h-[255px] py-1">
-                  {review.lines.map((line) => (
+                  {review.lines.map((line, index) => (
                     <div className="grid grid-cols-[minmax(280px,1fr)_120px_115px_60px_145px] items-start px-1 py-1" key={line.lineId}>
                       <div className="pr-5">
                         <strong>{line.stockItemName || line.description || "Item not mapped"}</strong>
@@ -3384,7 +3402,7 @@ export function TallyPurchasePostingPanel({
                       <strong className="text-right tabular-nums">{tallyQuantity(line.quantity)}</strong>
                       <strong className="text-right tabular-nums">{tallyAmount(line.rate)}</strong>
                       <span className="text-center">{line.unit || "—"}</span>
-                      <strong className="text-right tabular-nums">{tallyAmount(line.taxableAmount)}</strong>
+                      <strong className="text-right tabular-nums">{tallyAmount(liveCoreCalculation.itemTaxes[index].taxable)}</strong>
                     </div>
                   ))}
                   {previewLedgerRows.map((row, index) => (

@@ -817,10 +817,11 @@ export async function fetchCaseDetail(caseId: string): Promise<CaseDetailRespons
 
 export async function fetchCaseFileSignedUrl(
   caseId: string,
-  fileId: string
+  fileId: string,
+  signal?: AbortSignal
 ): Promise<CaseFileSignedUrlResponse> {
   const path = `/api/cases/${caseId}/files?${new URLSearchParams({fileId, content: '1'})}`;
-  return {fileId, signedUrl: await loadProtectedCasePreview(caseId, fileId, path)};
+  return {fileId, signedUrl: await loadProtectedCasePreview(caseId, fileId, path, signal)};
 }
 
 export const fetchCaseDetailPreferCache = fetchCaseDetail;

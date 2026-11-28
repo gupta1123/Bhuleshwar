@@ -14,11 +14,11 @@ export function releaseProtectedPreview(url: string | null | undefined) {
   if (url && urls.delete(url)) URL.revokeObjectURL(url);
 }
 
-export async function loadProtectedCasePreview(caseId:string,fileId:string,path:string) {
+export async function loadProtectedCasePreview(caseId:string,fileId:string,path:string,signal?:AbortSignal) {
   const expected = `/api/cases/${caseId}/files?${new URLSearchParams({fileId,content:'1'})}`;
   if(path!==expected)throw new Error('Invalid source preview reference.');
   const epoch=accessCacheEpoch();
-  const response=await apiFetch(path,{cache:'no-store'});
+  const response=await apiFetch(path,{cache:'no-store',signal});
   if(!response.ok)throw new Error(response.status===403||response.status===404?'Source preview is no longer accessible.':'Unable to load source preview.');
   const contentType = response.headers.get('content-type')?.split(';')[0].trim();
   if (contentType === 'application/json') {

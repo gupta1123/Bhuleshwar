@@ -1314,7 +1314,6 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
       protectedPreviews.current.clear();
     };
   }, [caseId]);
-  const [loadingPreviewFileId, setLoadingPreviewFileId] = useState<string | null>(null);
   const [previewUrlError, setPreviewUrlError] = useState<string | null>(null);
   const [previewRetryKey, setPreviewRetryKey] = useState(0);
   const draftFileInputRef = useRef<HTMLInputElement | null>(null);
@@ -1343,7 +1342,6 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
 
   useEffect(() => {
     setSignedFileUrls({});
-    setLoadingPreviewFileId(null);
     setPreviewUrlError(null);
     setDataPaneWidth(DEFAULT_DATA_PANE_WIDTH);
     setDocumentFieldComparison(null);
@@ -1798,8 +1796,6 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
   const activeFileUrl = activePreviewFile
     ? signedFileUrls[activePreviewFile.id] ?? activePreviewFile.signedUrl ?? null
     : null;
-  const isPreviewUrlLoading =
-    Boolean(activePreviewFile) && loadingPreviewFileId === activePreviewFile?.id;
   const previewPageCount = activeDocumentFiles.length || activeDocument?.pageCount || 1;
   const activeSourceLabel = getSourceFileLabel(
     activePreviewFile?.mimeType,
@@ -1866,41 +1862,41 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
   const hasPreviewResult = Boolean(activePreviewFile?.signedUrl) ||
     (previewFileId != null && Object.prototype.hasOwnProperty.call(signedFileUrls, previewFileId));
 
+  const isPreviewUrlLoading = Boolean(previewCaseId && previewFileId && !hasPreviewResult);
+
   useEffect(() => {
     if (!previewCaseId || !previewFileId || hasPreviewResult) return;
 
-    let active = true;
-    setLoadingPreviewFileId(previewFileId);
-    setPreviewUrlError(null);
+    const controller = new AbortController();
+    const fail = (message: string) => {
+      setPreviewUrlError(message);
+      setSignedFileUrls(current => ({ ...current, [previewFileId]: null }));
+    };
+    const timeout = window.setTimeout(() => {
+      controller.abort();
+      fail("The source download timed out. Retry to open the document.");
+    }, 30_000);
 
-    fetchCaseFileSignedUrlPreferCache(previewCaseId, previewFileId)
-      .then((payload) => {
-        if (!active) { releaseProtectedPreview(payload.signedUrl); return; }
-        if (payload.signedUrl.startsWith('blob:')) protectedPreviews.current.add(payload.signedUrl);
-        setSignedFileUrls((current) => ({
-          ...current,
-          [payload.fileId]: payload.signedUrl,
-        }));
+    setPreviewUrlError(null);
+    fetchCaseFileSignedUrlPreferCache(previewCaseId, previewFileId, controller.signal)
+      .then(({ signedUrl }) => {
+        if (controller.signal.aborted) {
+          releaseProtectedPreview(signedUrl);
+          return;
+        }
+        if (signedUrl.startsWith('blob:')) protectedPreviews.current.add(signedUrl);
+        setSignedFileUrls(current => ({ ...current, [previewFileId]: signedUrl }));
       })
-      .catch((loadError) => {
-        if (!active) return;
-        setPreviewUrlError(
-          loadError instanceof Error ? loadError.message : "Failed to load source preview."
-        );
-        setSignedFileUrls((current) => ({
-          ...current,
-          [previewFileId]: null,
-        }));
+      .catch(error => {
+        if (!controller.signal.aborted) {
+          fail(error instanceof Error ? error.message : "Failed to load source preview.");
+        }
       })
-      .finally(() => {
-        if (!active) return;
-        setLoadingPreviewFileId((current) =>
-          current === previewFileId ? null : current
-        );
-      });
+      .finally(() => window.clearTimeout(timeout));
 
     return () => {
-      active = false;
+      window.clearTimeout(timeout);
+      controller.abort();
     };
   }, [previewCaseId, previewFileId, hasPreviewResult, previewRetryKey]);
 
@@ -2444,7 +2440,7 @@ export function CaseDetailPage({ caseId }: { caseId: string }) {
       <div className={styles.redesignPreviewEmpty}>
         {isPreviewUrlLoading ? <Loader2 className={styles.redesignSpinner} /> : <FileSearch />}
         <strong>{isPreviewUrlLoading ? "Loading source preview…" : "Preview unavailable"}</strong>
-        <span>{previewUrlError || "The source file could not be opened for this document."}</span>
+        {!isPreviewUrlLoading && <span>{previewUrlError || "The source file could not be opened for this document."}</span>}
         {!isPreviewUrlLoading && activePreviewFile ? <button type="button" onClick={() => {
           setSignedFileUrls(current=>{const next={...current};delete next[activePreviewFile.id];return next;});
           setPreviewUrlError(null);setPreviewRetryKey(key=>key+1);

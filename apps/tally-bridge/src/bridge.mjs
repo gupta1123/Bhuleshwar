@@ -1468,6 +1468,11 @@ function buildPurchaseEwayBillXml(ewayBill) {
 }
 
 // The company's own mailing address from Tally, for the e-way bill consignee.
+function companyRegistrationNumbers(xml) {
+  const values = ["GSTREGNUMBER", "GSTREGISTRATIONNUMBER", "GSTIN", "PARTYGSTIN"]
+    .flatMap(tag => getTagTexts(xml, tag)).map(value => value.trim().toUpperCase());
+  return [...new Set(values.filter(value => /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][A-Z0-9]Z[A-Z0-9]$/.test(value)))];
+}
 const companyAddressCache = new Map();
 async function readCompanyAddress(tallyUrl, companyName) {
   const key = `${tallyUrl}|${String(companyName || "").trim().toLowerCase()}`;
@@ -1476,8 +1481,8 @@ async function readCompanyAddress(tallyUrl, companyName) {
   const xml = await exportTallyCollection(tallyUrl, {
     collectionName: "Kalika Company Address",
     tallyType: "Company",
-    fetchFields: "Name,Address,PinCode,StateName,CountryName,GSTRegistrationNumber",
-    companyName: null,
+    fetchFields: "Name,Address,PinCode,StateName,CountryName,GSTRegistrationNumber,GSTIN,PartyGSTIN,GSTRegNumber",
+    companyName,
     timeoutMs: 8_000,
   });
   const block = extractBlocks(xml, "COMPANY").find((candidate) =>
@@ -1493,9 +1498,17 @@ async function readCompanyAddress(tallyUrl, companyName) {
     pincode: getTagText(block, "PINCODE") || "",
     state: getTagText(block, "STATENAME") || "",
     country: getTagText(block, "COUNTRYNAME") || "",
-    gstin: getTagText(block, "GSTREGISTRATIONNUMBER") || "",
+    gstin: companyRegistrationNumbers(block).length === 1 ? companyRegistrationNumbers(block)[0] : "",
   } : null;
-  if (result) companyAddressCache.set(key, {value:result,expiresAt:Date.now()+60_000});
+  if (result && !result.gstin) {
+    const registrations = await exportTallyCollection(tallyUrl, {
+      collectionName: "Bhuleshwar Company GST Registrations", tallyType: "Tax Unit",
+      fetchFields: "Name,GSTRegNumber,GSTRegistrationDetails.*", companyName, timeoutMs: 8000,
+    });
+    const numbers = companyRegistrationNumbers(extractBlocks(registrations, "TAXUNIT").join(""));
+    if (numbers.length === 1) result.gstin = numbers[0];
+  }
+  if (result?.gstin) companyAddressCache.set(key, {value:result,expiresAt:Date.now()+60_000});
   return result;
 }
 
@@ -7595,6 +7608,50 @@ async function runCommand(config, command, options = {}) {
     }
   }
 
+  if (command.commandType === "server_support") {
+    let outcome;
+    let install;
+    try {
+      if (!agentRuntime || command.protocolVersion !== 1 || !options.serverSupport) throw new Error("Support unavailable");
+      const { action, value } = command.payload || {};
+      if (action === "voucher" || action === "supplier_history") {
+        const identity = agentRuntime.activeIdentity;
+        if (!identity || identity.companyGuid !== command.identity?.companyGuid || identity.financialYear !== command.identity?.financialYear ||
+            typeof value !== "string" || !value.trim() || value.length > 120) throw new Error("Company or voucher unavailable");
+        // The command already owns the serialized Tally slot.
+        const {TallyAgentGateway} = await import("./agent/tally-gateway.mjs");
+        const gateway = new TallyAgentGateway({tallyUrl:config.tallyUrl});
+        if (action === "supplier_history") {
+          const year = /^(\d{4})-(\d{2}|\d{4})$/.exec(identity.financialYear);
+          const end = Number(year?.[1]) + 1;
+          if (!year || !String(end).endsWith(year[2])) throw new Error("Financial year unavailable");
+          const from = year[1]+"0401", to = end+"0331";
+          const rows = await gateway.workflowVouchers(identity,{workflow:"purchase_history",ledgerNames:[value],
+            dateFrom:from,dateTo:to,limit:25,newestFirst:true});
+          const matches = rows.filter(r=>r.partyLedgerName.toLowerCase()===value.toLowerCase() && r.voucherType==="Purchase" &&
+            /^\d{8}$/.test(r.date) && r.date>=from && r.date<=to).slice(0,25)
+            .map(({date,voucherNumber,amount,isCancelled})=>({date,voucherNumber,amount,isCancelled}));
+          outcome = {success:true,result:{matches}};
+        } else {
+          outcome = {success:true,result:{matches:await gateway.voucherIdentity(identity,{voucherNumber:value})}};
+        }
+      } else {
+        const response = await options.serverSupport(action,value,command.identity);
+        if (action === "diagnose") {
+          const active = agentRuntime.activeIdentity;
+          if (active?.companyGuid === command.identity?.companyGuid && active?.financialYear === command.identity?.financialYear) {
+            const company = await readCompanyAddress(config.tallyUrl, active.companyName).catch(() => null);
+            response.result.companyGstin = company?.gstin || null;
+          }
+        }
+        install = response.install;
+        outcome = {success:true,result:response.result};
+      }
+    } catch { outcome = {success:false,error:"Requested support action unavailable for this installation or company."}; }
+    await sendCommandResult(config,command,outcome);
+    if (outcome.success && install) install();
+    return;
+  }
   if (command.commandType === "sync_masters") {
     try {
       const outcome = await syncMastersFromTally(config, command.payload, command);

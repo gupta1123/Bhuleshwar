@@ -1,9 +1,11 @@
-export const AGENT_VERSION = "1.2.50";
+export const AGENT_VERSION = "1.2.54";
 export const AGENT_PROTOCOL_VERSION = 1;
 export const LOCAL_SCHEMA_VERSION = 3;
 export const TDL_REPORT_VERSION = 1;
 
 export const AGENT_CAPABILITIES = Object.freeze([
+  "server-support-v1",
+  "supplier-purchase-history-v1",
   "purchase-shared-folder-v1",
   "agent-job-envelope-v1",
   "company-guid-routing",

@@ -1,3 +1,5 @@
+import { verifyRelease } from './release-verification.mjs';
+let downloadedRelease;
 import { app, BrowserWindow, dialog, ipcMain, Menu, safeStorage, Tray } from "electron";
 import electronUpdater from "electron-updater";
 import { execFileSync, spawn } from "node:child_process";
@@ -168,8 +170,7 @@ function relaunchWithWindowsCertificateStore() {
         [WINDOWS_CA_READY]: "1",
       },
     });
-    child.unref();
-    return true;
+    return child;
   } catch (error) {
     try {
       fs.appendFileSync(
@@ -323,12 +324,16 @@ function installDownloadedUpdateWhenSafe() {
   if (!runner?.busy) {
     if (updateInstallTimer) clearInterval(updateInstallTimer);
     updateInstallTimer = null;
+    try { verifyStagedInstaller(updateState.availableVersion); }
+    catch (error) { sendUpdateStatus({state:"failed", message:error.message}); return { installing:false }; }
     sendUpdateStatus({ state: "installing", percent: 100, message: "Installing the update. Bhuleshwar Local Agent will reopen automatically…" });
     safeQuitApproved = true;
     // Windows must release the running executable before NSIS can replace it.
     // Use a silent install and force the updated app to relaunch so this feels
     // like one continuous in-app update rather than a second installer flow.
-    setTimeout(() => autoUpdater.quitAndInstall(true, true), 350);
+    // Stop the command scheduler in this idle turn before another write can start.
+    Promise.resolve(runner?.stop("installing update")).then(() => autoUpdater.quitAndInstall(true, true))
+      .catch(() => sendUpdateStatus({state:"failed", message:"Could not stop the connector for installation."}));
     return { installing: true };
   }
   sendUpdateStatus({ state: "waiting", message: "Waiting for the active Tally operation to finish safely." });
@@ -403,6 +408,47 @@ async function renderTallyPrintToPdf({ html, fileName }) {
   }
 }
 
+function verifyStagedInstaller(version) {
+  const installer = autoUpdater.downloadedUpdateHelper?.file;
+  if (!app.isPackaged || !["ready","waiting"].includes(updateState.state) || version !== updateState.availableVersion ||
+      !isNewerVersion(version, app.getVersion()) || !installer || !fs.existsSync(installer)) {
+    throw new Error("Expected update is not staged.");
+  }
+  verifyRelease(installer, downloadedRelease, version);
+}
+
+async function serverSupport(action, value, identity) {
+  if (action === "diagnose") {
+    const status = await runner.getAgentStatus();
+    const dataset = status.datasets?.find(d => d.company_guid === identity.companyGuid && d.financial_year === identity.financialYear);
+    const signals = [];
+    if (fs.existsSync(errPath)) {
+      const fd = fs.openSync(errPath,"r");
+      try {
+        const size = fs.fstatSync(fd).size;
+        const tail = Buffer.alloc(Math.min(size,32768));
+        fs.readSync(fd,tail,0,tail.length,size-tail.length);
+        for (const [label,pattern] of [["Connection refused",/ECONNREFUSED/i],["Read timeout",/timeout|timed out/i],["Pairing rejected",/invalid bridge token/i],["DNS failure",/ENOTFOUND/i]]) {
+          if (pattern.test(tail.toString())) signals.push(label);
+        }
+      } finally { fs.closeSync(fd); }
+    }
+    return {result:{version:app.getVersion(),companyGuid:identity.companyGuid,financialYear:identity.financialYear,
+      lastLedgerSync:dataset?.last_sync_at ?? null,connectorState:lastStatus.state,recentErrorCategories:signals,updateState:updateState.state,
+      stagedVersion:updateState.availableVersion}};
+  }
+  if (action === "check_update") {
+    await checkForUpdatesNow();
+    if (updateState.state === "failed") throw new Error("Update check failed");
+    return {result:{state:updateState.state,availableVersion:updateState.availableVersion,installedVersion:app.getVersion()}};
+  }
+  if (action === "install_update") {
+    verifyStagedInstaller(value);
+    return {result:{stagedVersion:value},install:()=>installDownloadedUpdateWhenSafe()};
+  }
+  throw new Error("Unknown support action");
+}
+
 async function startRunner() {
   // Wait for the previous runner to release its database, vector index and
   // loopback upload port before a new runner opens them again.
@@ -411,6 +457,7 @@ async function startRunner() {
   }
 
   runner = createBridgeRunner({
+    serverSupport,
     safeStorage,
     renderTallyPrintToPdf,
     onProgress(progress) {
@@ -461,10 +508,16 @@ async function startRunner() {
   removeVerifiedLegacyRuntime();
 }
 
+// The server task owns logon startup and restarts a crashed Electron process.
+function setConnectorLoginItem(enabled) {
+  const supervised = process.env.LOCALAPPDATA && fs.existsSync(path.join(process.env.LOCALAPPDATA, CONNECTOR_NAME, "server-startup.enabled"));
+  app.setLoginItemSettings({ openAtLogin: enabled && !supervised, openAsHidden: true, args: [HIDDEN_LAUNCH_ARG] });
+}
+
 async function applyStartWithWindowsSetting() {
   try {
     const settings = await runner?.getAgentSettings?.();
-    app.setLoginItemSettings({ openAtLogin: settings?.startWithWindows !== false, openAsHidden: true, args: [HIDDEN_LAUNCH_ARG] });
+    setConnectorLoginItem(settings?.startWithWindows !== false);
   } catch (error) {
     appendLog(errPath, `Start with Windows setting: ${error instanceof Error ? error.message : error}`);
   }
@@ -795,7 +848,7 @@ function startApplication() {
   ipcMain.handle("agent:get-settings", () => runner?.getAgentSettings?.() ?? {});
   ipcMain.handle("agent:update-settings", async (_event, settings) => {
     const next = await runner?.updateAgentSettings?.(settings && typeof settings === "object" ? settings : {});
-    if (typeof settings?.startWithWindows === "boolean") app.setLoginItemSettings({ openAtLogin: settings.startWithWindows, openAsHidden: true });
+    if (typeof settings?.startWithWindows === "boolean") setConnectorLoginItem(settings.startWithWindows);
     return next || {};
   });
   ipcMain.handle("agent:clear-cache", () => runner?.clearAgentCache?.() ?? { cleared: false });
@@ -849,6 +902,7 @@ function startApplication() {
       app.quit();
       return;
     }
+    if (argv.includes(HIDDEN_LAUNCH_ARG) && !argv.some(isConnectorUrl)) return;
     const protocolArg = argv.find(isConnectorUrl);
     if (protocolArg) {
       handleProtocolUrl(protocolArg);
@@ -893,7 +947,8 @@ function startApplication() {
       // versions allowed an older cached GitHub release to appear as an update
       // after a newer installer had been installed manually.
       autoUpdater.autoDownload = false;
-      autoUpdater.autoInstallOnAppQuit = true;
+      autoUpdater.autoInstallOnAppQuit = false;
+      autoUpdater.disableWebInstaller = true;
       autoUpdater.on("checking-for-update", () => sendUpdateStatus({ state: "checking", message: "Checking for a newer Local Agent…" }));
       autoUpdater.on("update-available", (info) => {
         if (!isNewerVersion(info.version, app.getVersion())) {
@@ -924,6 +979,14 @@ function startApplication() {
           acceptedUpdateVersion = null;
           void autoUpdater.downloadedUpdateHelper?.clear?.().catch((error) => appendLog(errPath, `Stale updater cache: ${error.message}`));
           sendUpdateStatus({ state: "current", availableVersion: null, percent: 0, message: "Local Agent is up to date." });
+          return;
+        }
+        try {
+          verifyRelease(autoUpdater.downloadedUpdateHelper.file, info, info.version);
+          downloadedRelease = info;
+        } catch (error) {
+          downloadedRelease = null;
+          sendUpdateStatus({state:"failed",message:error.message});
           return;
         }
         try {
@@ -981,8 +1044,15 @@ if (process.env.KALIKA_BENCHMARK_PDF) {
       app.quit();
     }
   });
-} else if (relaunchWithWindowsCertificateStore()) {
-  app.exit(0);
 } else {
-  startApplication();
+  const child = relaunchWithWindowsCertificateStore();
+  if (!child) startApplication();
+  else if (process.argv.includes("--server-startup")) {
+    // Keep the scheduled task attached if the Windows certificate fallback forks.
+    child.once("error", () => app.exit(1));
+    child.once("exit", code => app.exit(code ?? 1));
+  } else {
+    child.unref();
+    app.exit(0);
+  }
 }

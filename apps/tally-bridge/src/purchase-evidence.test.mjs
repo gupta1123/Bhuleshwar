@@ -50,7 +50,23 @@ test('company address lookup preserves lines and isolates companies and endpoint
  t.mock.method(globalThis,'fetch',async()=>{reads++;return new Response('<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION><COMPANY NAME="Final Steel"><NAME>Final Steel</NAME><ADDRESS.LIST><ADDRESS>Office Road</ADDRESS><ADDRESS>Pune</ADDRESS></ADDRESS.LIST><GSTREGISTRATIONNUMBER>27CCCCC0000C1Z5</GSTREGISTRATIONNUMBER><STATENAME>Maharashtra</STATENAME></COMPANY><COMPANY NAME="Other Company"><NAME>Other Company</NAME><ADDRESS.LIST><ADDRESS>Mumbai</ADDRESS></ADDRESS.LIST></COMPANY></COLLECTION></DATA></BODY></ENVELOPE>');});
  const a=await readCompanyAddress('http://company-reader-test:9000','Final Steel');assert.deepEqual(a.address,['Office Road','Pune']);assert.equal(a.gstin,'27CCCCC0000C1Z5');
  await readCompanyAddress('http://company-reader-test:9000','Final Steel');assert.equal(reads,1);
- const b=await readCompanyAddress('http://company-reader-test:9000','Other Company');assert.deepEqual(b.address,['Mumbai']);assert.equal(reads,2);
- await readCompanyAddress('http://company-reader-test:9001','Final Steel');assert.equal(reads,3);
- now+=61000;await readCompanyAddress('http://company-reader-test:9000','Final Steel');assert.equal(reads,4);
+ const b=await readCompanyAddress('http://company-reader-test:9000','Other Company');assert.deepEqual(b.address,['Mumbai']);assert.equal(reads,3);
+ await readCompanyAddress('http://company-reader-test:9001','Final Steel');assert.equal(reads,4);
+ now+=61000;await readCompanyAddress('http://company-reader-test:9000','Final Steel');assert.equal(reads,5);
+});
+
+test("company-scoped tax units supply a GSTIN only when unambiguous", async t => {
+  let numbers = ["27CCCCC0000C1Z5", "29CCCCC0000C1Z1"];
+  t.mock.method(globalThis, "fetch", async (_url, options) => {
+    const request = String(options.body);
+    assert.match(request, /<SVCURRENTCOMPANY>Scoped Steel<\/SVCURRENTCOMPANY>/);
+    const records = request.includes("Tax Unit")
+      ? numbers.map(n => "<TAXUNIT><GSTREGNUMBER>"+n+"</GSTREGNUMBER></TAXUNIT>").join("")
+      : '<COMPANY NAME="Scoped Steel"><NAME>Scoped Steel</NAME></COMPANY>';
+    return new Response("<ENVELOPE><HEADER><STATUS>1</STATUS></HEADER><BODY><DATA><COLLECTION>"+records+"</COLLECTION></DATA></BODY></ENVELOPE>");
+  });
+  const read = () => readCompanyAddress("http://tax-unit-fixture:9000", "Scoped Steel");
+  assert.equal((await read()).gstin, "");
+  numbers = numbers.slice(0, 1);
+  assert.equal((await read()).gstin, numbers[0]);
 });
